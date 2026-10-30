@@ -79,7 +79,8 @@ as Server tests. Measure again once this repository has a few weeks of runs.
   on a Go `t.Skip` whose message neither names the variable it waits for
   (`TEST_*`, `S3_*`, `IMPORT_*`, `APP_DATABASE_URL`) nor is listed in
   `ENVIRONMENT_SKIPS`. A new entry is a test that stops running somewhere, so it
-  takes the owner's word. `Quizzivy/web` carries the same rule for web tests.
+  takes the owner's word. `Quizzivy/web` takes over the
+  same rule for web tests in its bootstrap.
 - **The browser suites live in `Quizzivy/web`.** Its live E2E, the Word import
   worker spec and the slow tail (E2E 5, which waits out a real one-minute
   deadline) start this repository's API at a pinned ref. The server's half of
@@ -108,8 +109,9 @@ package (D-082 (ii)): `server/tests/isolation_world_test.go` and the media
 library test read `server/tests/testdata/unit5-listening.mp3`; the audit catalogue
 test reads `api/catalogs/audit-actions.json` and the join-code test
 `api/catalogs/join-code.json`, both copied from the pinned SDK by `make contract`.
-The web checks its locale files and its join-code parser against the same
-catalogues.
+From the web bootstrap on (repo split, phase 3), `Quizzivy/web` checks its
+locale files and its join-code parser against the same catalogues; until then
+the old repository's copies of those tests still run.
 
 A test must not treat a missing file as a reason to skip itself: in CI that
 would hide the mistake this layout exists to show.
