@@ -27,7 +27,12 @@ else
   trap 'rm -rf "$tmp"' EXIT
   printf '@quizzivy:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > "$tmp/.npmrc"
   if [[ -n ${NODE_AUTH_TOKEN:-} ]]; then export NPM_CONFIG_USERCONFIG=$tmp/.npmrc; fi
-  (cd "$tmp" && npm pack --silent "@quizzivy/sdk@$version" >/dev/null)
+  if ! (cd "$tmp" && npm pack --silent "@quizzivy/sdk@$version" >/dev/null 2>"$tmp/npm.log"); then
+    echo "could not fetch @quizzivy/sdk@$version from npm.pkg.github.com:" >&2
+    grep -E 'npm (error|ERR!)' "$tmp/npm.log" >&2 || cat "$tmp/npm.log" >&2
+    echo "A 401 or 403 means no read:packages token (NODE_AUTH_TOKEN, or ~/.npmrc as README.md says), or this repository lacks read access to the package." >&2
+    exit 1
+  fi
   tar -xzf "$tmp"/quizzivy-sdk-*.tgz -C "$tmp"
   source=$tmp/package
   echo "contract: @quizzivy/sdk@$version"

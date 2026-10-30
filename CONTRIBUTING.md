@@ -9,7 +9,7 @@ Gitflow, as before the split.
 
 | Branch | Purpose |
 |---|---|
-| `main` | Released only, tagged `vX.Y.Z`. Merging to `main` deploys the API. |
+| `main` | Released only, tagged `vX.Y.Z`. Merging to `main` deploys the API once `API_HOST` is set (until then, nothing). |
 | `develop` | Integration. Every feature PR targets this. |
 | `feature/<task>-<slug>` | One task. Branch off `develop`. |
 | `release/<version>` | Release PR into `main`, then back-merged into `develop`. |

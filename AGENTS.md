@@ -30,7 +30,9 @@ that repository's `api-ref`.
 
 ## Deploys
 
-Merging to `main` deploys the API (`.github/workflows/deploy.yml`), and a
+Merging to `main` deploys the API (`.github/workflows/deploy.yml`) once the
+repository variable `API_HOST` is set; until production switches over from
+`SekiroKenjii/Quizzivy` it is unset and nothing deploys from here. A
 successful deploy dispatches `promote-sdk` to `Quizzivy/sdk` with the version
 in `api/sdk-version`. Deploys, secrets, tags and merges to `main` are the
 owner's.

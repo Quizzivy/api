@@ -324,15 +324,15 @@ func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 	}
 }
 
-// The VPS half of deploy.yml. Fly stays the default until API_HOST is set to
-// vps, so this reads the file as text and asks the three things that would go
-// wrong without anyone noticing: a deploy that trusts any host key, one that
-// reaches the box before the image exists, and a web deploy that no longer waits
-// for the API job that ran.
+// The VPS half of deploy.yml. Nothing runs it until API_HOST is set to vps,
+// so this reads the file as text and asks the three things that would go wrong
+// without anyone noticing: a deploy that trusts any host key, one that reaches
+// the box before the image exists, and an SDK promote that no longer waits for
+// the API job that ran.
 func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	text := repoFile(t, ".github/workflows/deploy.yml")
 	start := strings.Index(text, "\n  api-vps:")
-	end := strings.Index(text, "\n  web:")
+	end := strings.Index(text, "\n  sdk:")
 	if start < 0 || end < start {
 		t.Fatal("deploy.yml has no api-vps job; this test is not reading what it thinks it is")
 	}
@@ -350,8 +350,8 @@ func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 		t.Fatal(`api-vps must run "docker push" before it asks the box to deploy "$SHA"`)
 	}
 
-	web := text[end:]
-	if !strings.Contains(web, "api-vps") {
-		t.Fatal("the web job no longer waits for api-vps: it could deploy the SPA before the API it calls")
+	sdk := text[end:]
+	if !strings.Contains(sdk, "api-vps") {
+		t.Fatal("the sdk job no longer waits for api-vps: it could promote the SDK before the API that serves it is live")
 	}
 }

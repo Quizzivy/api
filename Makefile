@@ -1,5 +1,5 @@
 # Quizzivy -- developer entry points.
-# See CONTRIBUTING.md for the branch model and docs/plan/ for the task list.
+# See CONTRIBUTING.md for the branch model; the task list is in Quizzivy/docs.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -100,7 +100,8 @@ gen-check: gen ## Fail if api/ or the generated code drifts from the pinned SDK 
 		    exit 1)
 	@untracked=$$(git ls-files --others --exclude-standard -- api server/gen); \
 		[ -z "$$untracked" ] || { echo "Generated files not committed: $$untracked"; exit 1; }
-	@echo "api/ and server/gen match @quizzivy/sdk@$$(cat api/sdk-version)"
+	@if [ -n "$(CONTRACT)" ]; then echo "api/ and server/gen match the local contract in $(CONTRACT), not the pin"; \
+		else echo "api/ and server/gen match @quizzivy/sdk@$$(cat api/sdk-version)"; fi
 
 dev: ## Run the API, plus the Word import worker when imports are configured (the web runs from Quizzivy/web)
 	$(MAKE) -j2 dev-api $(if $(IMPORT_S3_BUCKET),dev-worker IMPORT_PROCESSING_ENABLED=true IMPORT_WORKER_WAKE_URL=http://localhost:8091/wake)

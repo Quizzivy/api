@@ -26,6 +26,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Where the health checks after a rollout ask the API whether it is up.
+  API_ORIGIN: https://api.quizzivy.com
+
 jobs:
   # The commit CI validated, resolved once so every job deploys the same thing.
   #
@@ -400,6 +404,12 @@ jobs:
           SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           version=$(tr -d '[:space:]' < api/sdk-version)
+          # Only a release becomes latest (D-081). Promote in Quizzivy/sdk refuses
+          # anything else after a 204 here, which would leave this run green.
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=SDK promote::api/sdk-version on main is '$version', not a release X.Y.Z: pin the release the owner tagged in Quizzivy/sdk."
+            exit 1
+          fi
           if [ -z "$TOKEN" ]; then
             echo "::error title=SDK promote::SDK_DISPATCH_TOKEN is not set: run Actions -> Promote in Quizzivy/sdk with $version by hand."
             exit 1
