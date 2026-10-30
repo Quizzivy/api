@@ -22,22 +22,29 @@ func catalogued() map[string]domain.Action {
 	return out
 }
 
-func locale(t *testing.T, name string) map[string]string {
+type pinnedAction struct {
+	Key string `json:"key"`
+	VI  string `json:"vi"`
+	EN  string `json:"en"`
+}
+
+// pinned reads the audit catalog of the pinned contract, api/catalogs/audit-actions.json
+// (from @quizzivy/sdk, D-082). The web words its audit.action keys from the same file, so
+// the search, which matches the catalogue's sentences, finds what the screen shows.
+func pinned(t *testing.T) []pinnedAction {
 	t.Helper()
-	path := filepath.Join(serverRoot(t), "..", "web", "src", "lib", "i18n", "locales", name+".json")
+	path := filepath.Join(serverRoot(t), "..", "api", "catalogs", "audit-actions.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	var tree struct {
-		Audit struct {
-			Action map[string]string `json:"action"`
-		} `json:"audit"`
+	var catalog struct {
+		Actions []pinnedAction `json:"actions"`
 	}
-	if err := json.Unmarshal(raw, &tree); err != nil {
+	if err := json.Unmarshal(raw, &catalog); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
-	return tree.Audit.Action
+	return catalog.Actions
 }
 
 func TestEveryActionTheServerWritesIsInTheCatalogue(t *testing.T) {
@@ -45,7 +52,7 @@ func TestEveryActionTheServerWritesIsInTheCatalogue(t *testing.T) {
 	known := catalogued()
 	for _, name := range sortedNames(actions) {
 		if _, ok := known[name]; !ok {
-			t.Errorf("the server writes the action %q (%s) and modules/audit/domain/actions.go does not list it: add it with its Vietnamese and English sentence, and the same two under audit.action in web/src/lib/i18n/locales/vi.json and en.json", name, actions[name][0])
+			t.Errorf("the server writes the action %q (%s) and modules/audit/domain/actions.go does not list it: add it with its Vietnamese and English sentence, and the same entry to catalogs/audit-actions.json in Quizzivy/sdk", name, actions[name][0])
 		}
 	}
 	if len(actions) < 60 {
@@ -57,7 +64,7 @@ func TestEveryActionInTheCatalogueIsStillWritten(t *testing.T) {
 	actions, _ := scanServer(t)
 	for _, a := range domain.Actions() {
 		if _, written := actions[a.Key]; !written && !slices.Contains(computedActions, a.Key) {
-			t.Errorf("the catalogue holds %q, which no code writes any more: remove it, and its sentences from both locale files", a.Key)
+			t.Errorf("the catalogue holds %q, which no code writes any more: remove it here and from catalogs/audit-actions.json in Quizzivy/sdk", a.Key)
 		}
 	}
 }
@@ -112,26 +119,15 @@ func TestTheCatalogueIsInKeyOrderWithOneSentencePerLanguage(t *testing.T) {
 	}
 }
 
-func TestBothLocaleFilesWordEveryActionAsTheCatalogueDoes(t *testing.T) {
-	for name, want := range map[string]func(domain.Action) string{
-		"vi": func(a domain.Action) string { return a.VI },
-		"en": func(a domain.Action) string { return a.EN },
-	} {
-		words := locale(t, name)
-		for _, a := range domain.Actions() {
-			got, ok := words[a.Key]
-			switch {
-			case !ok:
-				t.Errorf("%s.json lacks audit.action.%s, which the catalogue words as %q", name, a.Key, want(a))
-			case got != want(a):
-				t.Errorf("%s.json words audit.action.%s as %q and the catalogue as %q: the search matches the catalogue's, so they must be the same", name, a.Key, got, want(a))
-			}
-		}
-		known := catalogued()
-		for key := range words {
-			if _, ok := known[key]; !ok {
-				t.Errorf("%s.json has audit.action.%s, which is not an action in the catalogue", name, key)
-			}
+func TestThePinnedCatalogIsTheCatalogue(t *testing.T) {
+	want := domain.Actions()
+	got := pinned(t)
+	if len(got) != len(want) {
+		t.Errorf("the pinned catalog lists %d actions and modules/audit/domain/actions.go %d: change the catalog in Quizzivy/sdk and bump api/sdk-version in the same release", len(got), len(want))
+	}
+	for i := range min(len(got), len(want)) {
+		if got[i] != (pinnedAction{want[i].Key, want[i].VI, want[i].EN}) {
+			t.Errorf("action %d is %+v in the pinned catalog and %+v here: they must be the same, in the same order", i, got[i], want[i])
 		}
 	}
 }

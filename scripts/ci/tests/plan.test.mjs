@@ -63,37 +63,23 @@ test('every job reads a set that exists', () => {
 });
 
 test('the longest rule decides, and the base decides where none matches', () => {
-  assert.equal(inSet(SETS.web, 'web/src/main.tsx'), true);
-  assert.equal(inSet(SETS.web, 'api/openapi.yaml'), true);
-  assert.equal(inSet(SETS.web, 'server/cmd/api/main.go'), false);
-  assert.equal(inSet(SETS.web, 'server/internal/modules/classes/domain/joincode.go'), true);
-  assert.equal(inSet(SETS.web, 'server/internal/modules/classes/domain/joincode.go.bak'), false);
-  assert.equal(inSet(SETS.web, 'migrations/00001_init.sql'), false);
-  assert.equal(inSet(SETS.web, 'sdk/schema.d.ts'), true);
-  assert.equal(inSet(SETS.web, 'sdk/package.json'), true);
-  assert.equal(inSet(SETS.code, 'sdk/openapi.json'), true);
-  assert.equal(inSet(SETS.code, 'scripts/sdk/check.mjs'), true);
-  assert.equal(inSet(SETS.server, 'sdk/schema.d.ts'), false);
-  assert.equal(inSet(SETS.server, 'scripts/sdk/gen.mjs'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/sdk-publish.yml'), false);
-  assert.equal(inSet(SETS.server, 'web/src/main.tsx'), false);
-  assert.equal(inSet(SETS.server, 'web/tests/e2e/fixtures/unit5-listening.mp3'), true);
-  assert.equal(inSet(SETS.server, 'web/src/lib/i18n/locales/vi.json'), true);
-  assert.equal(inSet(SETS.server, 'web/src/lib/i18n/index.ts'), false);
+  assert.equal(inSet(SETS.server, 'server/cmd/api/main.go'), true);
+  assert.equal(inSet(SETS.server, 'api/openapi.yaml'), true);
+  assert.equal(inSet(SETS.server, 'api/catalogs/audit-actions.json'), true);
+  assert.equal(inSet(SETS.server, 'server/tests/testdata/unit5-listening.mp3'), true);
   assert.equal(inSet(SETS.server, 'fly.toml'), true);
   assert.equal(inSet(SETS.server, 'docs/setup/operations.md'), true);
   assert.equal(inSet(SETS.server, 'docs/setup/ci.md'), false);
   assert.equal(inSet(SETS.server, '.github/workflows/deploy.yml'), true);
-  assert.equal(inSet(SETS.code, 'docs/plan/73-r3.md'), false);
+  assert.equal(inSet(SETS.code, 'api/sdk-version'), true);
+  assert.equal(inSet(SETS.code, 'scripts/contract/sync.sh'), true);
   assert.equal(inSet(SETS.code, 'AGENTS.md'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/wiki.yml'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/slow-tail.yml'), false);
-  assert.equal(inSet(SETS.server, '.github/workflows/slow-tail.yml'), false);
-  assert.equal(inSet(SETS.code, 'scripts/wiki/build.py'), false);
+  assert.equal(inSet(SETS.code, '.github/workflows/retention-sweep.yml'), false);
+  assert.equal(inSet(SETS.server, '.github/workflows/retention-sweep.yml'), false);
   assert.equal(inSet(SETS.code, 'server/README.md'), true);
-  assert.equal(inSet(SETS.deck, 'docs/design/deck/support.js'), true);
-  assert.equal(inSet(SETS.deck, 'docs/plan/73-r3.md'), false);
-  assert.equal(inSet(SETS.deck, 'web/src/main.tsx'), false);
+  assert.equal(inSet(SETS.image, 'server/go.mod'), true);
+  assert.equal(inSet(SETS.image, 'docs/setup/operations.md'), false);
+  assert.equal(inSet(SETS.image, 'api/openapi.yaml'), false);
   assert.equal(inSet(nested, 'server/go.mod'), true);
   assert.equal(inSet(nested, 'server/internal/core/core.go'), false);
   assert.equal(inSet(nested, 'server/internal/modules/classes/domain/joincode.go'), true);
@@ -108,20 +94,20 @@ test('every set reads the workflow, its actions and these scripts', () => {
   }
 });
 
-test('the live E2E job reads the import worker, its converter and the spec that drives them', () => {
-  const live = SETS[JOBS.find((job) => job.id === 'e2e-live').set];
+// The live E2E runs from Quizzivy/web against this repository at its api-ref;
+// here the server tests are the job that must see the worker and its converter.
+test('the server tests read the import worker, its converter and its image', () => {
+  const server = SETS[JOBS.find((job) => job.id === 'server-test').set];
   const needed = [
     'server/cmd/import-worker/main.go',
     'server/internal/modules/imports/application/worker/pipeline.go',
     'server/internal/platform/wordconvert/converter.go',
     'docker/word-converter/Dockerfile',
     '.github/actions/word-converter/action.yml',
-    'web/tests/e2e/import.live.spec.ts',
-    'web/tests/e2e/support/docx.ts',
   ];
   for (const path of needed) {
     assert.ok(paths.includes(path), `${path} is no longer tracked`);
-    assert.equal(inSet(live, path), true, path);
+    assert.equal(inSet(server, path), true, path);
   }
 });
 
@@ -170,15 +156,15 @@ test('git checks out exactly the paths inSet selects', () => {
 });
 
 test('a hash moves only when a file of the set changes', () => {
-  const before = [entry('server/a.go'), entry('web/src/a.ts'), entry('docs/plan/a.md'), entry('web/tests/e2e/fixtures/a.mp3')];
+  const before = [entry('server/a.go'), entry('api/openapi.yaml'), entry('docs/plan/a.md'), entry('docs/setup/operations.md')];
   const change = (path) => before.map((e) => (e.path === path ? entry(path, 'b'.repeat(40)) : e));
 
-  assert.equal(hashOf(SETS.server, change('web/src/a.ts')), hashOf(SETS.server, before));
   assert.equal(hashOf(SETS.server, change('docs/plan/a.md')), hashOf(SETS.server, before));
   assert.notEqual(hashOf(SETS.server, change('server/a.go')), hashOf(SETS.server, before));
-  assert.notEqual(hashOf(SETS.server, change('web/tests/e2e/fixtures/a.mp3')), hashOf(SETS.server, before));
-  assert.equal(hashOf(SETS.web, change('server/a.go')), hashOf(SETS.web, before));
-  assert.notEqual(hashOf(SETS.web, change('web/src/a.ts')), hashOf(SETS.web, before));
+  assert.notEqual(hashOf(SETS.server, change('api/openapi.yaml')), hashOf(SETS.server, before));
+  assert.notEqual(hashOf(SETS.server, change('docs/setup/operations.md')), hashOf(SETS.server, before));
+  assert.equal(hashOf(SETS.image, change('api/openapi.yaml')), hashOf(SETS.image, before));
+  assert.notEqual(hashOf(SETS.image, change('server/a.go')), hashOf(SETS.image, before));
   assert.equal(hashOf(SETS.code, change('docs/plan/a.md')), hashOf(SETS.code, before));
   assert.notEqual(hashOf(SETS.code, [...before, entry('server/b.go')]), hashOf(SETS.code, before));
   assert.notEqual(
@@ -193,7 +179,7 @@ test('the local scripts under scripts/dev move no hash, and no job reads them', 
   }
   const text = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.ok(!text.includes('scripts/dev'), 'ci.yml reads scripts/dev');
-  for (const action of ['db-tools', 'minio', 'record', 'web']) {
+  for (const action of ['db-tools', 'minio', 'record', 'word-converter']) {
     const body = readFileSync(new URL(`../../../.github/actions/${action}/action.yml`, import.meta.url), 'utf8');
     assert.ok(!body.includes('scripts/dev'), `${action} reads scripts/dev`);
   }
@@ -308,6 +294,9 @@ test('freshness is read from the run attempt, the event and the ref GitHub sets'
   assert.equal(freshnessOf({ ...env, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/develop' }), false);
 });
 
+// No job here is sharded today; the plan still supports it.
+const withShards = [...JOBS, { id: 'sharded', set: 'server', shards: 3 }];
+
 test('a job is skipped only when every shard has a pass', async () => {
   const all = await plan({ entries: tracked, fresh: false, lookup: passes(42) });
   for (const job of JOBS) {
@@ -321,11 +310,12 @@ test('a job is skipped only when every shard has a pass', async () => {
   const oneShard = await plan({
     entries: tracked,
     fresh: false,
+    of: withShards,
     lookup: async (name) => (name.startsWith('ci-pass-') && !name.includes('-3of3-') ? at(42, 100) : null),
   });
-  assert.equal(oneShard.jobs['web-unit'].run, true);
-  assert.equal(oneShard.jobs['web-unit'].proof, null);
-  assert.equal(oneShard.jobs['web-check'].run, false);
+  assert.equal(oneShard.jobs.sharded.run, true);
+  assert.equal(oneShard.jobs.sharded.proof, null);
+  assert.equal(oneShard.jobs['server-test'].run, false);
 });
 
 test('a failure after a pass withdraws it, and a pass after a failure restores it', async () => {
@@ -346,13 +336,14 @@ test('a failure after a pass withdraws it, and a pass after a failure restores i
   const oneShardFailed = await plan({
     entries: tracked,
     fresh: false,
+    of: withShards,
     lookup: async (name) => {
       if (name.startsWith('ci-pass-')) return at(42, 100);
       return name.includes('-1of3-') ? at(43, 200) : null;
     },
   });
-  assert.equal(oneShardFailed.jobs['web-unit'].run, true);
-  assert.equal(oneShardFailed.jobs.e2e.run, false);
+  assert.equal(oneShardFailed.jobs.sharded.run, true);
+  assert.equal(oneShardFailed.jobs['server-test'].run, false);
 });
 
 test('a lookup that fails runs the job, whichever marker it was for', async () => {
@@ -385,15 +376,15 @@ test('a fresh run looks nothing up and runs everything', async () => {
 });
 
 test('jobs on one set share a hash and a checkout, and name their own markers', async () => {
-  const result = await plan({ entries: tracked, fresh: false, lookup: passes(null) });
+  const result = await plan({ entries: tracked, fresh: false, lookup: passes(null), of: withShards });
   assert.equal(result.jobs['server-lint'].hash, result.jobs['server-test'].hash);
   assert.equal(result.jobs['server-lint'].sparse, result.jobs['server-test'].sparse);
   assert.notEqual(result.jobs['server-lint'].outcomes[0].success, result.jobs['server-test'].outcomes[0].success);
-  assert.notEqual(result.jobs['server-test'].hash, result.jobs['web-check'].hash);
-  assert.deepEqual(result.jobs['web-unit'].shards, [1, 2, 3]);
-  assert.equal(result.jobs['web-unit'].outcomes.length, 3);
-  assert.match(result.jobs.deck.sparse, /^\/docs\/design\/$/m);
-  assert.doesNotMatch(result.jobs.deck.sparse, /^\/\*$/m);
+  assert.notEqual(result.jobs['server-test'].hash, result.jobs['production-image'].hash);
+  assert.deepEqual(result.jobs.sharded.shards, [1, 2, 3]);
+  assert.equal(result.jobs.sharded.outcomes.length, 3);
+  assert.match(result.jobs['production-image'].sparse, /^\/Dockerfile$/m);
+  assert.doesNotMatch(result.jobs['production-image'].sparse, /^\/\*$/m);
   const names = Object.values(result.jobs).flatMap((job) => job.outcomes.flatMap((o) => [o.success, o.failure]));
   assert.equal(new Set(names).size, names.length);
 });

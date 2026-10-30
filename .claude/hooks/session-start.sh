@@ -100,11 +100,6 @@ install_goose() {
   GOBIN="$LOCAL_BIN" go install "github.com/pressly/goose/v3/cmd/goose@$GOOSE_VERSION"
 }
 
-install_web_dependencies() {
-  [ -f web/node_modules/.modules.yaml ] && return 0
-  (cd web && pnpm install --frozen-lockfile)
-}
-
 build_minio_image() {
   local work
   work=$(mktemp -d) || return 1
@@ -125,7 +120,7 @@ build_minio_image() {
     cat >Dockerfile <<'EOF'
 FROM golang:1.27-alpine AS certs
 FROM alpine:3.22
-LABEL org.opencontainers.image.source="https://github.com/SekiroKenjii/Quizzivy" \
+LABEL org.opencontainers.image.source="https://github.com/Quizzivy/api" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY out/minio out/mc /usr/bin/
@@ -175,7 +170,6 @@ migrate() {
 echo "$(date -u +%FT%TZ) session start hook begins in $REPO"
 step "goose $GOOSE_VERSION" install_goose
 step ".env" create_env
-step "web dependencies" install_web_dependencies
 if step "docker daemon" start_docker; then
   step "MinIO image $MINIO_IMAGE" ensure_minio_image
   step "postgres" start_postgres && step "database roles" provision_roles && step "migrations" migrate

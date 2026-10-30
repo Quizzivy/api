@@ -1,5 +1,5 @@
 # Quizzivy -- developer entry points.
-# See CONTRIBUTING.md for the branch model and docs/plan/ for the task list.
+# See CONTRIBUTING.md for the branch model; the task list is in Quizzivy/docs.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -15,14 +15,8 @@ export
 # Generator versions are PINNED. A floating version makes the CI drift check
 # meaningless: regenerated output would differ for reasons unrelated to the
 # contract. oapi-codegen is pinned by the `tool` directive in server/go.mod.
-SPECTRAL_VERSION ?= 6.16.3
-OPENAPI_TS_VERSION ?= 7.13.0
 # Same pin as .github/workflows/ci.yml's golangci-lint step.
 GOLANGCI_VERSION ?= v2.14.0
-# The SDK gate's breaking-change checker (D-080). Run with `go run` rather than
-# as a go.mod tool: it depends on kin-openapi, which the server validates
-# requests with, and sharing the module graph would let a tool bump move it.
-OASDIFF_VERSION ?= v1.33.0
 
 MIGRATE_DSN ?= postgres://quizzivy_migrate:$(or $(QUIZZIVY_MIGRATE_PASSWORD),migrate)@localhost:5432/quizzivy?sslmode=disable
 APP_DSN     ?= postgres://quizzivy_app:$(or $(QUIZZIVY_APP_PASSWORD),app)@localhost:5432/quizzivy?sslmode=disable
@@ -30,8 +24,8 @@ MAINTENANCE_DSN ?= postgres://quizzivy_maintenance:$(or $(QUIZZIVY_MAINTENANCE_P
 SUPERUSER_DSN ?= postgres://postgres:$(or $(POSTGRES_SUPERUSER_PASSWORD),postgres)@localhost:5432/postgres?sslmode=disable
 
 .PHONY: help doctor up down reset db-shell migrate migrate-down migrate-redo \
-        seed gen contract sdk-check verify-google verify-r2 verify-r2-imports dev dev-web dev-api test test-web test-api \
-        test-api-unit test-api-integration test-api-e2e test-api-all e2e lint
+        seed gen gen-check contract verify-google verify-r2 verify-r2-imports dev dev-api test test-api \
+        test-api-unit test-api-integration test-api-e2e test-api-all lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -41,7 +35,6 @@ doctor: ## Check prerequisites (T-0.2 .. T-0.4 blockers)
 	@echo "== required =="
 	@command -v docker  >/dev/null && echo "  docker   $$(docker --version | cut -d' ' -f3 | tr -d ,)" || echo "  docker   MISSING"
 	@command -v node    >/dev/null && echo "  node     $$(node --version)"  || echo "  node     MISSING"
-	@command -v pnpm    >/dev/null && echo "  pnpm     $$(pnpm --version)"  || echo "  pnpm     MISSING"
 	@command -v go      >/dev/null && echo "  go       $$(go version | cut -d' ' -f3)" || echo "  go       MISSING"
 	@command -v psql    >/dev/null && echo "  psql     $$(psql --version | cut -d' ' -f3)" || echo "  psql     MISSING  -> T-0.4 (install postgresql-client-18)"
 	@command -v goose   >/dev/null && echo "  goose    $$(goose --version 2>&1 | head -1)" || echo "  goose    MISSING  -> T-0.4"
@@ -90,38 +83,31 @@ migrate-redo: ## up -> down -> up, proving every Down works (what CI runs)
 seed: ## Load seed/ (never in a migration -- spec §13.7)
 	@for f in seed/*.sql; do echo "  $$f"; psql -v ON_ERROR_STOP=1 "$(MIGRATE_DSN)" -f "$$f"; done
 
-contract: ## Lint api/openapi.yaml and assert its invariants
-	npx --yes @stoplight/spectral-cli@$(SPECTRAL_VERSION) lint api/openapi.yaml --ruleset api/.spectral.yaml
-	# Structural assertions live in the Vitest suite (T-0.13 ported them out of
-	# the interim Python checker). Run just those, not the whole suite.
-	cd web && pnpm vitest run tests/units/contract
+contract: ## Write the pinned contract into api/ (api/sdk-version; CONTRACT=../sdk/api for a local sdk checkout)
+	scripts/contract/sync.sh
 
-gen: contract ## Regenerate Go + the SDK (sdk/, which the web links) from api/openapi.yaml
+gen: contract ## Regenerate the Go server code from the pinned contract
 	cd server && go tool oapi-codegen --config ../api/oapi-codegen.yaml ../api/openapi.yaml
 	cd server && go run ./cmd/gencontract ../api/openapi.yaml gen/contract
-	node scripts/sdk/gen.mjs api/openapi.yaml server/gen/contract/openapi.json sdk
-	npx --yes openapi-typescript@$(OPENAPI_TS_VERSION) api/openapi.yaml -o sdk/schema.d.ts
 	cd server && go build ./... && go test ./gen/...
-	@echo "generated: server/gen/openapi/openapi.gen.go, server/gen/contract/, sdk/"
+	@echo "generated: api/ (pinned contract), server/gen/openapi/openapi.gen.go, server/gen/contract/"
 
-gen-check: gen ## Fail if generated output drifts from the contract (what CI runs)
-	@git diff --exit-code -- server/gen sdk \
+gen-check: gen ## Fail if api/ or the generated code drifts from the pinned SDK (what CI runs)
+	@git diff --exit-code -- api server/gen \
 		|| (echo ""; \
-		    echo "Generated code is out of date. Run 'make gen' and commit the result."; \
+		    echo "api/ or server/gen is not what the pinned SDK generates. Run 'make gen' and commit the result;"; \
+		    echo "a contract change is made in Quizzivy/sdk, never in api/ (README.md)."; \
 		    exit 1)
-	@untracked=$$(git ls-files --others --exclude-standard -- server/gen sdk); \
+	@untracked=$$(git ls-files --others --exclude-standard -- api server/gen); \
 		[ -z "$$untracked" ] || { echo "Generated files not committed: $$untracked"; exit 1; }
-	@echo "generated code matches api/openapi.yaml"
+	@if [ -n "$(CONTRACT)" ]; then echo "api/ and server/gen match the local contract in $(CONTRACT), not the pin"; \
+		else echo "api/ and server/gen match @quizzivy/sdk@$$(cat api/sdk-version)"; fi
 
-sdk-check: ## Report breaking contract changes since the merge-base with SDK_BASE (default origin/develop)
-	node --test "scripts/sdk/tests/*.test.mjs"
-	OASDIFF="go run github.com/oasdiff/oasdiff@$(OASDIFF_VERSION)" node scripts/sdk/check.mjs
-
-dev: ## Run web and api together, plus the Word import worker when imports are configured
-	$(MAKE) -j3 dev-api dev-web $(if $(IMPORT_S3_BUCKET),dev-worker IMPORT_PROCESSING_ENABLED=true IMPORT_WORKER_WAKE_URL=http://localhost:8091/wake)
+dev: ## Run the API, plus the Word import worker when imports are configured (the web runs from Quizzivy/web)
+	$(MAKE) -j2 dev-api $(if $(IMPORT_S3_BUCKET),dev-worker IMPORT_PROCESSING_ENABLED=true IMPORT_WORKER_WAKE_URL=http://localhost:8091/wake)
 
 # Where the API and the worker write email outside production, and where the
-# live E2E (web/playwright.config.ts) reads set-password links: EMAIL_SINK_DIR,
+# web's live E2E (playwright.config.ts in Quizzivy/web) reads set-password links: EMAIL_SINK_DIR,
 # or tmp/email-sink when it is unset or empty, and a relative value, as
 # .env.example's, taken from the repository root, as Playwright takes it.
 EMAIL_SINK_PATH := $(abspath $(or $(EMAIL_SINK_DIR),tmp/email-sink))
@@ -132,13 +118,7 @@ dev-api: ## Go API on :8080
 dev-worker: ## Word import worker against the local database and bucket
 	cd server && DATABASE_URL="$(APP_DSN)" EMAIL_SINK_DIR="$(EMAIL_SINK_PATH)" GOMAXPROCS=2 go run ./cmd/import-worker
 
-dev-web: ## Vite on :5173
-	cd web && pnpm dev
-
-test: contract test-api test-web ## Run all tests
-
-test-web:
-	cd web && pnpm test
+test: test-api ## Run all tests
 
 test-api-unit: ## Go unit tests: domain rules, transports with fakes, platform helpers -- no database
 	cd server && go test ./...
@@ -171,15 +151,11 @@ test-api-all: migrate ## The old single run, kept for the habit
 	# hide a test that would fail against the database as it is now.
 	cd server && TEST_DATABASE_URL="$(MIGRATE_DSN)" go test ./... -count=1
 
-e2e: ## Playwright, against a real production build
-	cd web && pnpm e2e
-
-lint: ## Lint both sides
-	cd web && pnpm lint
+lint: ## Lint the server
 	cd server && go vet ./...
 	# staticcheck's SA1019 is what enforces "never use a deprecated identifier".
 	cd server && go tool staticcheck ./...
 	# server/.golangci.yml carries the Sonar-shaped rules (cognitive complexity,
 	# nesting, duplication, unused parameters), so a finding fails here before
-	# it reaches SonarLint or SonarCloud. Web gets the same from eslint-plugin-sonarjs.
+	# it reaches SonarLint or SonarCloud.
 	cd server && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run --build-tags integration,e2e

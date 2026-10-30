@@ -12,15 +12,10 @@ const NOT_CODE = [
   'AGENTS.md',
   'CONTRIBUTING.md',
   'README.md',
-  'skills-lock.json',
   'sonar-project.properties',
   '.github/pull_request_template.md',
   '.github/workflows/production-monitor.yml',
   '.github/workflows/retention-sweep.yml',
-  '.github/workflows/sdk-publish.yml',
-  '.github/workflows/slow-tail.yml',
-  '.github/workflows/wiki.yml',
-  'scripts/wiki/',
 ];
 
 /**
@@ -31,28 +26,13 @@ const NOT_CODE = [
  * skipped on a change to that file.
  */
 export const SETS = {
-  deck: { base: 'none', include: ['docs/design/', 'scripts/check-design-deck.mjs'], exclude: [] },
   image: {
     base: 'none',
     include: ['Dockerfile', '.dockerignore', 'fly.toml', 'server/', 'migrations/', 'scripts/provision-db.sh'],
     exclude: [],
   },
-  server: {
-    base: 'all',
-    include: [
-      'web/tests/e2e/fixtures/',
-      'web/src/lib/i18n/locales/',
-      'api/testdata/pasted-text-counts.json',
-      'docs/setup/operations.md',
-    ],
-    // The server reads api/openapi.yaml itself; the SDK package is the web's.
-    exclude: [...NOT_CODE, 'web/', 'sdk/', 'scripts/sdk/'],
-  },
-  web: {
-    base: 'all',
-    include: ['server/internal/modules/classes/domain/joincode.go', 'api/testdata/pasted-text-counts.json'],
-    exclude: [...NOT_CODE, 'server/', 'migrations/', 'seed/', 'docker/'],
-  },
+  // The server reads the pinned contract in api/ (D-082) and operations.md.
+  server: { base: 'all', include: ['docs/setup/operations.md'], exclude: NOT_CODE },
   code: { base: 'all', include: [], exclude: NOT_CODE },
 };
 
@@ -62,15 +42,10 @@ export const SETS = {
  * matrix legs, each proven separately.
  */
 export const JOBS = [
-  { id: 'deck', set: 'deck' },
   { id: 'contract', set: 'code' },
   { id: 'server-lint', set: 'server' },
   { id: 'server-test', set: 'server' },
   { id: 'production-image', set: 'image' },
-  { id: 'web-check', set: 'web' },
-  { id: 'web-unit', set: 'web', shards: 3 },
-  { id: 'e2e', set: 'web' },
-  { id: 'e2e-live', set: 'code' },
 ];
 
 const RELEASE_REF = 'refs/heads/main';
@@ -198,11 +173,11 @@ export function freshnessOf(env) {
  * shard has a pass that is newer than any failure recorded for the same hash,
  * so the latest outcome on a set of files is the one that counts. `lookup`
  * answers a marker name with the newest trusted artifact of that name, or
- * null; a lookup that fails counts as no proof.
+ * null; a lookup that fails counts as no proof. `of` is JOBS but for tests.
  */
-export async function plan({ entries, fresh, lookup }) {
+export async function plan({ entries, fresh, lookup, of = JOBS }) {
   const jobs = {};
-  for (const job of JOBS) {
+  for (const job of of) {
     const set = SETS[job.set];
     const hash = hashOf(set, entries);
     const outcomes = outcomesOf(job, hash);

@@ -1,6 +1,7 @@
 name: Deploy
 
-# Merging release/* into main is what ships. This runs AFTER CI concludes on
+# Merging release/* into main is what ships the API. The web deploys from
+# Quizzivy/web, after this (D-082). This runs AFTER CI concludes on
 # main rather than on the push itself, so a merge that breaks something is not
 # deployed while its own test run is still red.
 #
@@ -14,12 +15,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-    inputs:
-      target:
-        description: What to deploy
-        type: choice
-        default: all
-        options: [all, api, web]
 
 # Never cancel a deploy in flight. A cancelled `flyctl deploy` can leave the app
 # mid-rollout, and a cancelled release_command can leave migrations half applied
@@ -32,20 +27,11 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "24"
-  # 11.12.0 is a release pnpm itself refuses to install
-  # (ERR_PNPM_BROKEN_PNPM_RELEASE): its @pnpm/exe build shipped without a
-  # binary -- 16KB unpacked against 18MB for a real one.
-  PNPM_VERSION: "11.25.0"
-  # Where the SPA is told to find the API. Baked into the bundle at build time,
-  # so it is a build input rather than runtime configuration.
+  # Where the health checks after a rollout ask the API whether it is up.
   API_ORIGIN: https://api.quizzivy.com
-  PAGES_PROJECT: quizzivy-web
-  # The version that has deployed this project; bump deliberately.
-  WRANGLER_VERSION: 3.90.0
 
 jobs:
-  # The commit CI validated, resolved once so both jobs deploy the same thing.
+  # The commit CI validated, resolved once so every job deploys the same thing.
   #
   # workflow_run does NOT check out the triggering commit by default -- it
   # checks out the default branch's tip. On a quiet repo those are the same
@@ -61,7 +47,6 @@ jobs:
     outputs:
       sha: ${{ steps.pick.outputs.sha }}
       api: ${{ steps.pick.outputs.api }}
-      web: ${{ steps.pick.outputs.web }}
       host: ${{ steps.pick.outputs.host }}
     steps:
       # A CI run that is no longer the tip of main deploys nothing. Re-running
@@ -73,30 +58,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           API_HOST: ${{ vars.API_HOST }}
         run: |
-          # Where the API runs: the repository variable API_HOST, `fly` until
-          # someone sets it to `vps`. Anything else stops here rather than
-          # deploying nowhere, or to the wrong place.
-          host="${API_HOST:-fly}"
+          # Where the API runs: the repository variable API_HOST, `fly` or
+          # `vps`. Unset deploys nothing: this repository took over production
+          # only when the owner set it (repo split, GĐ 6). Anything else stops
+          # here rather than deploying nowhere, or to the wrong place.
+          host="${API_HOST:-}"
+          api=true
           case "$host" in
             fly|vps) ;;
+            "") echo "::notice::API_HOST is not set, so nothing is deployed"; api=false ;;
             *) echo "::error::API_HOST must be fly or vps, not '$host'"; exit 1 ;;
           esac
           sha="${{ github.event.workflow_run.head_sha || github.sha }}"
-          target="${{ inputs.target || 'all' }}"
-          api="${{ inputs.target == 'web' && 'false' || 'true' }}"
-          web="${{ inputs.target == 'api' && 'false' || 'true' }}"
-          if [ "$TRIGGER" = workflow_run ]; then
+          if [ "$TRIGGER" = workflow_run ] && [ "$api" = true ]; then
             tip="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
             if [ "$sha" != "$tip" ]; then
               echo "::notice::$sha is not the tip of main ($tip); nothing is deployed"
-              api=false; web=false
+              api=false
             fi
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "api=$api" >> "$GITHUB_OUTPUT"
-          echo "web=$web" >> "$GITHUB_OUTPUT"
           echo "host=$host" >> "$GITHUB_OUTPUT"
-          echo "Deploying $target at $sha (api=$api on $host, web=$web)"
+          echo "Deploying the API at $sha (api=$api on ${host:-nowhere})"
 
   # ------------------------------------------------------------------- api
   api:
@@ -393,114 +377,50 @@ jobs:
             echo "::error::/healthz did not report database:ok"; exit 1; }
 
   # ------------------------------------------------------------------- sdk
-  # @quizzivy/sdk at this release's version, once the API that serves its
-  # contract is live and never before, so no client adopts a contract
-  # production lacks (D-081), and only from main: a dispatch from another ref
-  # deploys it but does not publish it. The workflow skips a version already published
-  # or a contract unchanged since the last one, and runs only in the Quizzivy
-  # org, which owns the package scope.
+  # Once the API is live, @quizzivy/sdk moves `latest` to the exact version
+  # this commit pins (api/sdk-version), so no client adopts a contract
+  # production lacks (D-081, D-082 (iv)). Only from main: a dispatch from
+  # another ref deploys but promotes nothing. Promote in Quizzivy/sdk is
+  # idempotent and refuses a -dev version. A failed dispatch fails this job,
+  # so the run shows it; the owner can then run Promote there by hand.
   sdk:
-    name: SDK → GitHub Packages
+    name: Promote the SDK
     needs: [resolve, api, api-vps]
-    if: ${{ !cancelled() && github.repository_owner == 'Quizzivy' && (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && needs.resolve.outputs.api == 'true' && contains(fromJSON('["success","skipped"]'), needs.api.result) && contains(fromJSON('["success","skipped"]'), needs.api-vps.result) && (needs.api.result == 'success' || needs.api-vps.result == 'success') }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/sdk-publish.yml
-    with:
-      ref: ${{ needs.resolve.outputs.sha }}
-
-  # ------------------------------------------------------------------- web
-  # After the API, deliberately. The SPA is the half that calls the other, so
-  # the window between the two deploys is old-SPA-against-new-API rather than
-  # the reverse. That is safe while a release only adds to the contract. A
-  # release that tightens a request or adds a refusal (v0.7.0 did both) needs
-  # a server message an older tab can show as it is, and a line in the release
-  # notes for tabs loaded before the deploy.
-  web:
-    name: Web → Cloudflare Pages
-    needs: [resolve, api, api-vps]
-    if: ${{ !cancelled() && needs.resolve.outputs.web == 'true' && contains(fromJSON('["success","skipped"]'), needs.api.result) && contains(fromJSON('["success","skipped"]'), needs.api-vps.result) }}
+    if: ${{ !cancelled() && (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && needs.resolve.outputs.api == 'true' && contains(fromJSON('["success","skipped"]'), needs.api.result) && contains(fromJSON('["success","skipped"]'), needs.api-vps.result) && (needs.api.result == 'success' || needs.api-vps.result == 'success') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.sha }}
+          sparse-checkout: api/sdk-version
+          persist-credentials: false
 
-      - name: Check the credentials are present
+      - name: Ask Quizzivy/sdk to promote the pinned version
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          # A GitHub App installation token or a fine-grained token with
+          # contents:write on Quizzivy/sdk (repository_dispatch needs it).
+          TOKEN: ${{ secrets.SDK_DISPATCH_TOKEN }}
+          SHA: ${{ needs.resolve.outputs.sha }}
         run: |
-          missing=
-          [ -n "$CLOUDFLARE_API_TOKEN" ]  || missing="$missing CLOUDFLARE_API_TOKEN(secret)"
-          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID(secret)"
-          # Not a secret -- it travels in the authorization URL the browser
-          # follows -- but it IS environment-specific, and a build without it
-          # simply hides the Google button rather than failing, which is the
-          # kind of breakage nobody reports.
-          [ -n "$VITE_GOOGLE_CLIENT_ID" ] || missing="$missing VITE_GOOGLE_CLIENT_ID(variable)"
-          if [ -n "$missing" ]; then
-            echo "::error::not configured:$missing"
-            echo "::error::see docs/setup/deploy.md"
+          version=$(tr -d '[:space:]' < api/sdk-version)
+          # Only a release becomes latest (D-081). Promote in Quizzivy/sdk refuses
+          # anything else after a 204 here, which would leave this run green.
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=SDK promote::api/sdk-version on main is '$version', not a release X.Y.Z: pin the release the owner tagged in Quizzivy/sdk."
             exit 1
           fi
-
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install
-        working-directory: web
-        run: pnpm install --frozen-lockfile
-
-      # VITE_ values are inlined at build time, so this is the step that decides
-      # which API the deployed SPA talks to. There is no runtime override.
-      - name: Build
-        working-directory: web
-        env:
-          VITE_API_BASE_URL: ${{ env.API_ORIGIN }}
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
-          VITE_DEFAULT_LOCALE: vi
-          VITE_ORG_NAME: ${{ vars.VITE_ORG_NAME }}
-          VITE_ORG_FRONT_DESK_PHONE: ${{ vars.VITE_ORG_FRONT_DESK_PHONE }}
-          VITE_ORG_FRONT_DESK_HOURS: ${{ vars.VITE_ORG_FRONT_DESK_HOURS }}
-          QUIZZIVY_BUILD: ${{ needs.resolve.outputs.sha }}
-        run: pnpm build
-
-      # The check that stops the whole point of the deploy going wrong quietly.
-      # client.ts falls back to http://localhost:8080 when VITE_API_BASE_URL is
-      # unset, so a mis-scoped variable produces a bundle that builds, uploads,
-      # serves, and cannot reach anything.
-      - name: Assert the bundle points at production
-        working-directory: web
-        run: |
-          grep -rq "$API_ORIGIN" dist/assets/*.js || {
-            echo "::error::$API_ORIGIN is not in the bundle -- VITE_API_BASE_URL did not reach the build"
-            exit 1; }
-          echo "bundle targets $API_ORIGIN"
-
-      - name: Assert security headers are included
-        run: cmp web/public/_headers web/dist/_headers
-
-      # A pinned direct call, with no installer between us and the deploy tool.
-      # wrangler-action installed wrangler into web/ at deploy time with
-      # whatever package manager it found there -- an unpinned `pnpm add` into
-      # the checkout after the build had already succeeded, whose version came
-      # from the action's default and whose postinstall needed an approval in
-      # web/pnpm-workspace.yaml for a package this project does not depend on
-      # (#47). npx has no build-script gating, the version is pinned here, and
-      # nothing is written into web/.
-      - name: Deploy
-        working-directory: web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@${{ env.WRANGLER_VERSION }} pages deploy dist --project-name=${{ env.PAGES_PROJECT }} --branch=main
+          if [ -z "$TOKEN" ]; then
+            echo "::error title=SDK promote::SDK_DISPATCH_TOKEN is not set: run Actions -> Promote in Quizzivy/sdk with $version by hand."
+            exit 1
+          fi
+          payload=$(jq -nc --arg v "$version" --arg s "Quizzivy/api@$SHA" '{event_type: "promote-sdk", client_payload: {version: $v, source: $s}}')
+          status=$(curl -sS -o response.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Quizzivy/sdk/dispatches -d "$payload")
+          if [ "$status" != 204 ]; then
+            echo "::error title=SDK promote::the dispatch answered $status: run Actions -> Promote in Quizzivy/sdk with $version by hand."
+            cat response.txt
+            exit 1
+          fi
+          echo "Asked Quizzivy/sdk to promote @quizzivy/sdk@$version to latest." | tee -a "$GITHUB_STEP_SUMMARY"
