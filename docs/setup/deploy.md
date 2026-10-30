@@ -1,5 +1,14 @@
 # Deploying
 
+> **After the repository split.** This repository deploys the API only; the web
+> deploys from `Quizzivy/web`. Until the owner switches production over, the
+> repository variable `API_HOST` is unset here and the Deploy workflow deploys
+> nothing; production still deploys from `SekiroKenjii/Quizzivy`. After the
+> API job, the `sdk` job asks `Quizzivy/sdk` to make the pinned release
+> `latest` (D-081, D-082 (iv)); it needs the secret `SDK_DISPATCH_TOKEN`. What
+> follows still describes the web job, which now lives in `Quizzivy/web`, and
+> is rewritten when production switches.
+
 Merging `release/*` into `main` ships. Nothing else does, and nothing deploys
 from `develop`.
 
