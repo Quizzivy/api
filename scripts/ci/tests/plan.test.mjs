@@ -74,8 +74,8 @@ test('the longest rule decides, and the base decides where none matches', () => 
   assert.equal(inSet(SETS.code, 'api/sdk-version'), true);
   assert.equal(inSet(SETS.code, 'scripts/contract/sync.sh'), true);
   assert.equal(inSet(SETS.code, 'AGENTS.md'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/slow-tail.yml'), false);
-  assert.equal(inSet(SETS.server, '.github/workflows/slow-tail.yml'), false);
+  assert.equal(inSet(SETS.code, '.github/workflows/retention-sweep.yml'), false);
+  assert.equal(inSet(SETS.server, '.github/workflows/retention-sweep.yml'), false);
   assert.equal(inSet(SETS.code, 'server/README.md'), true);
   assert.equal(inSet(SETS.image, 'server/go.mod'), true);
   assert.equal(inSet(SETS.image, 'docs/setup/operations.md'), false);
@@ -179,7 +179,7 @@ test('the local scripts under scripts/dev move no hash, and no job reads them', 
   }
   const text = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.ok(!text.includes('scripts/dev'), 'ci.yml reads scripts/dev');
-  for (const action of ['db-tools', 'minio', 'record', 'web']) {
+  for (const action of ['db-tools', 'minio', 'record', 'word-converter']) {
     const body = readFileSync(new URL(`../../../.github/actions/${action}/action.yml`, import.meta.url), 'utf8');
     assert.ok(!body.includes('scripts/dev'), `${action} reads scripts/dev`);
   }
