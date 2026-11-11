@@ -1,5 +1,14 @@
 # Deploying
 
+> **After the repository split.** This repository deploys the API only; the web
+> deploys from `Quizzivy/web`. Until the owner switches production over, the
+> repository variable `API_HOST` is unset here and the Deploy workflow deploys
+> nothing; production still deploys from `SekiroKenjii/Quizzivy`. After the
+> API job, the `sdk` job asks `Quizzivy/sdk` to make the pinned release
+> `latest` (D-081, D-082 (iv)); it needs the secret `SDK_DISPATCH_TOKEN`. What
+> follows still describes the web job, which now lives in `Quizzivy/web`, and
+> is rewritten when production switches.
+
 Merging `release/*` into `main` ships. Nothing else does, and nothing deploys
 from `develop`.
 
@@ -156,6 +165,14 @@ git push -u origin release/0.9.0 && gh pr create --base main   # merging it push
 git fetch origin && git tag v0.9.0 origin/main && git push origin v0.9.0
 gh pr create --base develop --head main                        # back-merge; its CI run does not deploy
 ```
+
+The release PR sets the version in two places, to the same value: `web/package.json`
+and `info.version` in `api/openapi.yaml`, then `make gen` (which writes it into
+`sdk/`). The Contract job checks they agree on a PR into `main`, and that a
+release breaking the contract bumps the minor (D-080); the checks warn rather
+than fail until #832. Its deploy then publishes `@quizzivy/sdk` at that version:
+the `sdk` job runs only after the API deploy succeeds (D-081). Contract changes
+on develop publish `-dev` versions under `next` (`sdk/README.md`).
 
 Merge back into `develop` too, or fixes made on the release branch are lost from
 the next one. `main` and `develop` take changes only by pull request

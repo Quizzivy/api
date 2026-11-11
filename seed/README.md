@@ -95,7 +95,7 @@ small fixture over their keys:
 
 ```
 keys=$(psql "$MIGRATE_DSN" -Atc "select storage_key from app.media_assets where kind = 'audio' and id::text like '01935000-0000-7000-8000-00000080%'")
-docker compose run --rm --no-deps -v "$PWD/web/tests/e2e/fixtures:/fx:ro" --entrypoint /bin/sh minio-init -c \
+docker compose run --rm --no-deps -v "$PWD/server/tests/testdata:/fx:ro" --entrypoint /bin/sh minio-init -c \
   'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null &&
    for key in "$@"; do mc cp /fx/unit5-listening.mp3 "local/$S3_BUCKET/$key"; done' sh $keys
 ```

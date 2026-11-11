@@ -2,6 +2,8 @@
 # Usage: scripts/dev/live-stack.sh up|down|status <name>
 # A private stack for a live check: database qa_<name> (migrated and seeded), the API
 # and `vite preview` on ports derived from <name>, state under /tmp/quizzivy-live/<name>/.
+# The web half needs a Quizzivy/web checkout with its dependencies installed, named by
+# LIVE_WEB_DIR; without it only the API starts.
 # It needs Postgres and MinIO already running (docker compose up -d --wait db minio) and
 # never takes the heavy lock. `down` stops both servers, drops the database and removes
 # the state directory; objects the API stored in the compose buckets stay.
@@ -14,6 +16,7 @@ readonly PG_PORT=${LIVE_PG_PORT:-5432}
 readonly PG_ADMIN_URL=${LIVE_PG_ADMIN_URL:-postgres://postgres:${POSTGRES_SUPERUSER_PASSWORD:-postgres}@${PG_HOST}:${PG_PORT}/postgres}
 readonly MIGRATE_PASSWORD=${QUIZZIVY_MIGRATE_PASSWORD:-migrate}
 readonly APP_PASSWORD=${QUIZZIVY_APP_PASSWORD:-app}
+readonly WEB_DIR=${LIVE_WEB_DIR:-}
 
 fail() {
   echo "live-stack: $*" >&2
@@ -115,7 +118,7 @@ up() {
   fi
 
   (cd "$ROOT/server" && go build -o "$DIR/api" ./cmd/api) || fail "go build failed (GOTOOLCHAIN=go1.27.0 may be needed)"
-  (cd "$ROOT/web" && VITE_API_BASE_URL="http://localhost:$API_PORT" VITE_RICH_OPTION_EDITOR=true pnpm exec vite build --outDir "$DIR/dist" --emptyOutDir >"$DIR/build.log" 2>&1) || fail "vite build failed; see $DIR/build.log"
+  [ -z "$WEB_DIR" ] || (cd "$WEB_DIR" && VITE_API_BASE_URL="http://localhost:$API_PORT" VITE_RICH_OPTION_EDITOR=true pnpm exec vite build --outDir "$DIR/dist" --emptyOutDir >"$DIR/build.log" 2>&1) || fail "vite build failed; see $DIR/build.log"
 
   start_detached "$DIR/api.pid" "$DIR/api.log" env \
     DATABASE_URL="postgres://quizzivy_app:${APP_PASSWORD}@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable" \
@@ -128,9 +131,11 @@ up() {
     "$DIR/api"
   wait_for "http://localhost:$API_PORT/livez" "the API"
 
-  start_detached "$DIR/web.pid" "$DIR/web.log" \
-    "$ROOT/web/node_modules/.bin/vite" preview "$ROOT/web" --outDir "$DIR/dist" --port "$WEB_PORT" --strictPort
-  wait_for "http://localhost:$WEB_PORT/" "vite preview"
+  if [ -n "$WEB_DIR" ]; then
+    start_detached "$DIR/web.pid" "$DIR/web.log" \
+      "$WEB_DIR/node_modules/.bin/vite" preview "$WEB_DIR" --outDir "$DIR/dist" --port "$WEB_PORT" --strictPort
+    wait_for "http://localhost:$WEB_PORT/" "vite preview"
+  fi
   status
 }
 

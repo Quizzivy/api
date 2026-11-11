@@ -1,0 +1,529 @@
+{
+  "actions": [
+    {
+      "key": "ai.allowance.updated",
+      "vi": "Đã cập nhật hạn mức AI của giáo viên",
+      "en": "Updated a teacher's AI allowance"
+    },
+    {
+      "key": "ai.credit_request.approved",
+      "vi": "Đã duyệt yêu cầu thêm tín dụng AI",
+      "en": "Approved an AI credit request"
+    },
+    {
+      "key": "ai.credit_request.declined",
+      "vi": "Đã từ chối yêu cầu thêm tín dụng AI",
+      "en": "Declined an AI credit request"
+    },
+    {
+      "key": "ai.credits.added",
+      "vi": "Đã thêm tín dụng AI",
+      "en": "Added AI credits"
+    },
+    {
+      "key": "ai.rules.updated",
+      "vi": "Đã cập nhật quy tắc AI",
+      "en": "Updated the AI rules"
+    },
+    {
+      "key": "assignment.closed",
+      "vi": "Đã đóng bài giao",
+      "en": "Closed an assignment"
+    },
+    {
+      "key": "assignment.created",
+      "vi": "Đã tạo bài giao",
+      "en": "Created an assignment"
+    },
+    {
+      "key": "assignment.deleted",
+      "vi": "Đã xoá bài giao",
+      "en": "Deleted an assignment"
+    },
+    {
+      "key": "assignment.duplicated",
+      "vi": "Đã nhân bản bài giao",
+      "en": "Duplicated an assignment"
+    },
+    {
+      "key": "assignment.extended",
+      "vi": "Đã gia hạn bài giao vì bảo trì",
+      "en": "Extended an assignment for maintenance"
+    },
+    {
+      "key": "assignment.override_extended",
+      "vi": "Đã gia hạn ngoại lệ của học viên vì bảo trì",
+      "en": "Extended a student's exception for maintenance"
+    },
+    {
+      "key": "assignment.override_removed",
+      "vi": "Đã gỡ ngoại lệ của học viên",
+      "en": "Removed a student's exception"
+    },
+    {
+      "key": "assignment.override_set",
+      "vi": "Đã đặt ngoại lệ cho học viên",
+      "en": "Set an exception for a student"
+    },
+    {
+      "key": "assignment.published",
+      "vi": "Đã phát hành bài giao",
+      "en": "Published an assignment"
+    },
+    {
+      "key": "assignment.reopened",
+      "vi": "Đã mở lại bài giao",
+      "en": "Reopened an assignment"
+    },
+    {
+      "key": "assignment.updated",
+      "vi": "Đã cập nhật bài giao",
+      "en": "Updated an assignment"
+    },
+    {
+      "key": "attempt.extended",
+      "vi": "Đã gia hạn lượt làm bài vì bảo trì",
+      "en": "Extended an attempt for maintenance"
+    },
+    {
+      "key": "attempt.flagged",
+      "vi": "Đã gắn cờ lượt làm bài",
+      "en": "Flagged an attempt"
+    },
+    {
+      "key": "attempt.graded",
+      "vi": "Đã chấm điểm lượt làm bài",
+      "en": "Graded an attempt"
+    },
+    {
+      "key": "attempt.reset",
+      "vi": "Đã đặt lại lượt làm bài",
+      "en": "Reset an attempt"
+    },
+    {
+      "key": "attempt.unflagged",
+      "vi": "Đã bỏ cờ lượt làm bài",
+      "en": "Cleared the flag on an attempt"
+    },
+    {
+      "key": "attempt.voided",
+      "vi": "Đã huỷ lượt làm bài",
+      "en": "Voided an attempt"
+    },
+    {
+      "key": "audit.exported",
+      "vi": "Đã xuất nhật ký hoạt động",
+      "en": "Exported the audit log"
+    },
+    {
+      "key": "class.archived",
+      "vi": "Đã lưu trữ lớp",
+      "en": "Archived a class"
+    },
+    {
+      "key": "class.created",
+      "vi": "Đã tạo lớp",
+      "en": "Created a class"
+    },
+    {
+      "key": "class.deleted",
+      "vi": "Đã xoá lớp",
+      "en": "Deleted a class"
+    },
+    {
+      "key": "class.join_code_issued",
+      "vi": "Đã cấp mã tham gia lớp",
+      "en": "Issued a class join code"
+    },
+    {
+      "key": "class.join_code_revoked",
+      "vi": "Đã thu hồi mã tham gia lớp",
+      "en": "Revoked a class join code"
+    },
+    {
+      "key": "class.join_code_rotated",
+      "vi": "Đã đổi mã tham gia lớp",
+      "en": "Rotated a class join code"
+    },
+    {
+      "key": "class.member_added",
+      "vi": "Đã thêm học viên vào lớp",
+      "en": "Added a student to a class"
+    },
+    {
+      "key": "class.member_enrolled",
+      "vi": "Học viên đã vào lớp bằng mã tham gia",
+      "en": "A student joined a class with a code"
+    },
+    {
+      "key": "class.member_removed",
+      "vi": "Đã xoá học viên khỏi lớp",
+      "en": "Removed a student from a class"
+    },
+    {
+      "key": "class.restored",
+      "vi": "Đã khôi phục lớp",
+      "en": "Restored a class"
+    },
+    {
+      "key": "class.teacher_changed",
+      "vi": "Đã đổi giáo viên của lớp",
+      "en": "Changed a class's teacher"
+    },
+    {
+      "key": "data_export.downloaded",
+      "vi": "Đã tải bản xuất dữ liệu",
+      "en": "Downloaded a data export"
+    },
+    {
+      "key": "data_export.requested",
+      "vi": "Đã yêu cầu bản xuất dữ liệu",
+      "en": "Requested a data export"
+    },
+    {
+      "key": "import.cancelled",
+      "vi": "Đã huỷ lần nhập Word",
+      "en": "Cancelled a Word import"
+    },
+    {
+      "key": "import.closed_idle",
+      "vi": "Đã tự đóng lần nhập Word không hoạt động",
+      "en": "Closed an idle Word import"
+    },
+    {
+      "key": "import.committed",
+      "vi": "Đã lưu câu hỏi từ lần nhập Word",
+      "en": "Saved the questions of a Word import"
+    },
+    {
+      "key": "import.created",
+      "vi": "Đã tạo lần nhập Word",
+      "en": "Created a Word import"
+    },
+    {
+      "key": "import.files_removed",
+      "vi": "Đã xoá tệp của lần nhập Word",
+      "en": "Removed the files of a Word import"
+    },
+    {
+      "key": "import.queued",
+      "vi": "Đã đưa lần nhập Word vào hàng chờ",
+      "en": "Queued a Word import"
+    },
+    {
+      "key": "import.reprocess_cancelled",
+      "vi": "Đã huỷ xử lý lại lần nhập Word",
+      "en": "Cancelled reprocessing a Word import"
+    },
+    {
+      "key": "import.reprocessed_adopted",
+      "vi": "Đã dùng kết quả xử lý lại của lần nhập Word",
+      "en": "Adopted the reprocessed result of a Word import"
+    },
+    {
+      "key": "import.source_completed",
+      "vi": "Đã tải xong tệp nguồn của lần nhập Word",
+      "en": "Finished uploading a Word import's source"
+    },
+    {
+      "key": "import.source_reserved",
+      "vi": "Đã giữ chỗ tệp nguồn cho lần nhập Word",
+      "en": "Reserved a Word import's source"
+    },
+    {
+      "key": "integrity.retained",
+      "vi": "Đã xoá nhật ký chống gian lận quá hạn lưu",
+      "en": "Deleted integrity events past their retention"
+    },
+    {
+      "key": "maintenance.cancelled",
+      "vi": "Đã huỷ lịch bảo trì",
+      "en": "Cancelled a maintenance window"
+    },
+    {
+      "key": "maintenance.ended",
+      "vi": "Đã kết thúc bảo trì",
+      "en": "Ended a maintenance window"
+    },
+    {
+      "key": "maintenance.scheduled",
+      "vi": "Đã lên lịch bảo trì",
+      "en": "Scheduled a maintenance window"
+    },
+    {
+      "key": "media.deleted",
+      "vi": "Đã xoá tệp phương tiện",
+      "en": "Deleted a media file"
+    },
+    {
+      "key": "media.purged",
+      "vi": "Đã xoá hẳn tệp phương tiện",
+      "en": "Permanently removed a media file"
+    },
+    {
+      "key": "media.replaced",
+      "vi": "Đã thay tệp phương tiện",
+      "en": "Replaced a media file"
+    },
+    {
+      "key": "media.updated",
+      "vi": "Đã cập nhật tệp phương tiện",
+      "en": "Updated a media file"
+    },
+    {
+      "key": "media.uploaded",
+      "vi": "Đã tải lên tệp phương tiện",
+      "en": "Uploaded a media file"
+    },
+    {
+      "key": "organization.updated",
+      "vi": "Đã cập nhật thông tin trung tâm",
+      "en": "Updated the centre's settings"
+    },
+    {
+      "key": "question.created",
+      "vi": "Đã tạo câu hỏi",
+      "en": "Created a question"
+    },
+    {
+      "key": "question.deleted",
+      "vi": "Đã xoá câu hỏi",
+      "en": "Deleted a question"
+    },
+    {
+      "key": "question.updated",
+      "vi": "Đã cập nhật câu hỏi",
+      "en": "Updated a question"
+    },
+    {
+      "key": "question_group.archived",
+      "vi": "Đã lưu trữ nhóm câu hỏi",
+      "en": "Archived a question group"
+    },
+    {
+      "key": "question_group.created",
+      "vi": "Đã tạo nhóm câu hỏi",
+      "en": "Created a question group"
+    },
+    {
+      "key": "question_group.deleted",
+      "vi": "Đã xoá nhóm câu hỏi",
+      "en": "Deleted a question group"
+    },
+    {
+      "key": "question_group.removed",
+      "vi": "Đã gỡ nhóm câu hỏi khỏi bài kiểm tra",
+      "en": "Removed a question group from a test"
+    },
+    {
+      "key": "question_group.restored",
+      "vi": "Đã khôi phục nhóm câu hỏi",
+      "en": "Restored a question group"
+    },
+    {
+      "key": "question_group.updated",
+      "vi": "Đã cập nhật nhóm câu hỏi",
+      "en": "Updated a question group"
+    },
+    {
+      "key": "refresh_token.reuse_detected",
+      "vi": "Phát hiện một phiên đăng nhập bị dùng lại",
+      "en": "Detected a reused sign-in session"
+    },
+    {
+      "key": "retention.answers_removed",
+      "vi": "Đã xoá câu trả lời quá hạn lưu",
+      "en": "Removed answers past their retention"
+    },
+    {
+      "key": "role.created",
+      "vi": "Đã tạo vai trò",
+      "en": "Created a role"
+    },
+    {
+      "key": "role.permissions_changed",
+      "vi": "Đã thay đổi quyền của vai trò",
+      "en": "Changed a role's permissions"
+    },
+    {
+      "key": "role.updated",
+      "vi": "Đã cập nhật vai trò",
+      "en": "Updated a role"
+    },
+    {
+      "key": "session.revoked",
+      "vi": "Đã thu hồi một phiên đăng nhập",
+      "en": "Revoked a sign-in session"
+    },
+    {
+      "key": "session.revoked_others",
+      "vi": "Đã thu hồi các phiên đăng nhập khác",
+      "en": "Revoked the other sign-in sessions"
+    },
+    {
+      "key": "student.created",
+      "vi": "Đã tạo tài khoản học viên",
+      "en": "Created a student account"
+    },
+    {
+      "key": "student.deleted",
+      "vi": "Đã xoá tài khoản học viên",
+      "en": "Deleted a student account"
+    },
+    {
+      "key": "student.password_reset",
+      "vi": "Đã đặt lại mật khẩu của học viên",
+      "en": "Reset a student's password"
+    },
+    {
+      "key": "student.updated",
+      "vi": "Đã cập nhật tài khoản học viên",
+      "en": "Updated a student account"
+    },
+    {
+      "key": "test.created",
+      "vi": "Đã tạo bài kiểm tra",
+      "en": "Created a test"
+    },
+    {
+      "key": "test.current_version_changed",
+      "vi": "Đã đổi phiên bản hiện hành của bài kiểm tra",
+      "en": "Changed a test's current version"
+    },
+    {
+      "key": "test.deleted",
+      "vi": "Đã xoá bài kiểm tra",
+      "en": "Deleted a test"
+    },
+    {
+      "key": "test.draft_restored",
+      "vi": "Đã khôi phục bản nháp từ một phiên bản",
+      "en": "Restored the draft from a version"
+    },
+    {
+      "key": "test.duplicated",
+      "vi": "Đã nhân bản bài kiểm tra",
+      "en": "Duplicated a test"
+    },
+    {
+      "key": "test.published",
+      "vi": "Đã phát hành bài kiểm tra",
+      "en": "Published a test"
+    },
+    {
+      "key": "test.question_moved",
+      "vi": "Đã chuyển câu hỏi giữa các phần",
+      "en": "Moved a question between sections"
+    },
+    {
+      "key": "test.updated",
+      "vi": "Đã cập nhật bài kiểm tra",
+      "en": "Updated a test"
+    },
+    {
+      "key": "test.version_deleted",
+      "vi": "Đã xoá một phiên bản của bài kiểm tra",
+      "en": "Deleted a version of a test"
+    },
+    {
+      "key": "user.anonymized",
+      "vi": "Đã ẩn danh tài khoản",
+      "en": "Anonymized an account"
+    },
+    {
+      "key": "user.avatar_removed",
+      "vi": "Đã gỡ ảnh đại diện",
+      "en": "Removed a profile photo"
+    },
+    {
+      "key": "user.avatar_set",
+      "vi": "Đã đặt ảnh đại diện",
+      "en": "Set a profile photo"
+    },
+    {
+      "key": "user.content_transferred",
+      "vi": "Đã chuyển nội dung của tài khoản cho giáo viên khác",
+      "en": "Transferred an account's content to another teacher"
+    },
+    {
+      "key": "user.created",
+      "vi": "Đã tạo tài khoản",
+      "en": "Created an account"
+    },
+    {
+      "key": "user.disabled",
+      "vi": "Đã vô hiệu hoá tài khoản",
+      "en": "Disabled an account"
+    },
+    {
+      "key": "user.enabled",
+      "vi": "Đã kích hoạt lại tài khoản",
+      "en": "Enabled an account again"
+    },
+    {
+      "key": "user.google_linked",
+      "vi": "Đã liên kết tài khoản Google",
+      "en": "Linked a Google account"
+    },
+    {
+      "key": "user.google_unlinked",
+      "vi": "Đã huỷ liên kết tài khoản Google",
+      "en": "Unlinked a Google account"
+    },
+    {
+      "key": "user.password_changed",
+      "vi": "Đã đổi mật khẩu",
+      "en": "Changed a password"
+    },
+    {
+      "key": "user.password_link_requested",
+      "vi": "Đã yêu cầu liên kết đặt mật khẩu",
+      "en": "Asked for a set-password link"
+    },
+    {
+      "key": "user.password_reset",
+      "vi": "Đã đặt lại mật khẩu của tài khoản",
+      "en": "Reset an account's password"
+    },
+    {
+      "key": "user.password_set",
+      "vi": "Đã đặt mật khẩu bằng liên kết",
+      "en": "Set a password from a link"
+    },
+    {
+      "key": "user.preferences_updated",
+      "vi": "Đã cập nhật tuỳ chọn cá nhân",
+      "en": "Updated personal preferences"
+    },
+    {
+      "key": "user.profile_updated",
+      "vi": "Đã cập nhật hồ sơ",
+      "en": "Updated a profile"
+    },
+    {
+      "key": "user.renamed",
+      "vi": "Đã đổi tên tài khoản",
+      "en": "Renamed an account"
+    },
+    {
+      "key": "user.role_changed",
+      "vi": "Đã đổi vai trò của tài khoản",
+      "en": "Changed an account's role"
+    },
+    {
+      "key": "user.signed_out_everywhere",
+      "vi": "Đã đăng xuất tài khoản khỏi mọi thiết bị",
+      "en": "Signed an account out everywhere"
+    },
+    {
+      "key": "user_import.requested",
+      "vi": "Đã yêu cầu nhập người dùng từ tệp",
+      "en": "Requested an import of users from a file"
+    },
+    {
+      "key": "user_import.sheet_downloaded",
+      "vi": "Đã tải bảng mật khẩu tạm của lần nhập người dùng",
+      "en": "Downloaded the temporary-password sheet of a user import"
+    }
+  ]
+}

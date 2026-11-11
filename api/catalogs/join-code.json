@@ -1,0 +1,7 @@
+{
+  "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
+  "length": 8,
+  "hintLength": 4,
+  "groupSize": 4,
+  "separator": "-"
+}

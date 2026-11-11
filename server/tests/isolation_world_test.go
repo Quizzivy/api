@@ -227,7 +227,7 @@ func (w *world) teacherWorld(name string) *party {
 		w.t.Fatalf("%s's image upload: %d %s", name, upload.status, upload.body)
 	}
 	p.ids["media"] = upload.json["id"].(string)
-	listening, err := os.ReadFile("../../web/tests/e2e/fixtures/unit5-listening.mp3")
+	listening, err := os.ReadFile("testdata/unit5-listening.mp3")
 	if err != nil {
 		w.t.Fatal(err)
 	}

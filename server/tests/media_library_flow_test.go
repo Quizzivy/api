@@ -27,7 +27,7 @@ func TestTheMediaLibraryNamesMeasuresAndBoundsWhatATeacherUploads(t *testing.T) 
 	})
 	email, password := w.createStaff("teacher")
 	teacher := w.signedIn(email, password)
-	listening, err := os.ReadFile("../../web/tests/e2e/fixtures/unit5-listening.mp3")
+	listening, err := os.ReadFile("testdata/unit5-listening.mp3")
 	if err != nil {
 		t.Fatal(err)
 	}
