@@ -331,6 +331,13 @@ jobs:
 
       # Tagged with the commit, so a deploy names exactly one build. A re-run
       # of the same commit finds the image already pushed and builds nothing.
+      #
+      # push-image.sh builds in a BuildKit builder of its own and pushes from
+      # there. Do not turn it back into `docker build` and `docker push`: from
+      # the runner's own store the push mounts the distroless layers out of an
+      # image the runner ships with, and ghcr.io then refuses the manifest
+      # with "denied". That is how the first deploy to the VPS failed; the
+      # script's header has the whole account.
       - name: Build and push the image
         env:
           TOKEN: ${{ github.token }}
@@ -342,8 +349,7 @@ jobs:
           if docker manifest inspect "$image" >/dev/null 2>&1; then
             echo "$image is already published"
           else
-            docker build --tag "$image" .
-            docker push "$image"
+            scripts/ci/push-image.sh "$image" .
           fi
           echo "image: $image" >> "$GITHUB_STEP_SUMMARY"
 
