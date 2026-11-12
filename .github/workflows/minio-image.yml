@@ -11,13 +11,13 @@ on:
     paths:
       - docker/minio/**
       - scripts/ci/minio-image.sh
-      - scripts/ci/mirror-images.sh
+      - scripts/ci/push-image.sh
       - .github/workflows/minio-image.yml
   pull_request:
     paths:
       - docker/minio/**
       - scripts/ci/minio-image.sh
-      - scripts/ci/mirror-images.sh
+      - scripts/ci/push-image.sh
       - .github/workflows/minio-image.yml
 
 concurrency:
@@ -43,6 +43,12 @@ jobs:
             docker/minio
             scripts/ci
 
+      # push-image.sh, not `docker build` and `docker push`: a push from the
+      # runner's own store can mount layers out of another image the runner
+      # ships with, and ghcr.io then refuses the manifest (the script's header,
+      # and the api-vps job in deploy.yml, where it happened). Its builder
+      # takes the Docker Hub bases from the mirror itself, so there is no
+      # mirror-images.sh call here.
       - name: Build and push unless this version is published
         env:
           TOKEN: ${{ github.token }}
@@ -53,7 +59,5 @@ jobs:
             echo "$image is already published"
             exit 0
           fi
-          scripts/ci/mirror-images.sh golang:1.27-alpine alpine:3.22
-          docker build --tag "$image" docker/minio
-          docker push "$image"
+          scripts/ci/push-image.sh "$image" docker/minio
           echo "published $image" >> "$GITHUB_STEP_SUMMARY"

@@ -67,6 +67,7 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 	"POST /teacher/ai/tests/{id}/variant":                                         aiSuggestion,
 	"POST /teacher/ai/questions/{id}/explanation":                                 aiSuggestion,
 	"POST /teacher/ai/questions/{id}/distractors":                                 aiSuggestion,
+	"POST /teacher/ai/gaps/distractors":                                           aiSuggestion,
 	"POST /teacher/ai/attempts/{attemptId}/answers/{questionId}/score-suggestion": aiSuggestion,
 	"POST /teacher/ai/assignments/{id}/insights":                                  aiSuggestion,
 	"POST /teacher/ai/bank/cleanup":                                               {{Burst: 3, Window: time.Hour}},

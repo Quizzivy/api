@@ -254,6 +254,20 @@ the source commits are listed. `.github/actions/minio` pulls that tag and
 falls back to building from source when it is not published, which is what a
 pull request that changes `docker/minio` does on its first run.
 
+## Pushing an image
+
+The two images this repository publishes, MinIO and the API image of the
+deploy's `api-vps` job, are built and pushed by `scripts/ci/push-image.sh`, in
+a BuildKit builder that runs in its own container. Not by `docker build` and
+`docker push`: a hosted runner's Docker pushes from containerd's store, which
+mounts a layer it knows from another `ghcr.io` repository instead of uploading
+it. The runner ships with an image that shares the API's distroless base, and
+on the first deploy to the VPS (2026-11-12) `ghcr.io` refused the manifest that
+named those mounted layers, with `denied`, although the job had
+`packages: write`. The container builder has only what its own build pulled,
+so it uploads every layer. `scripts/ci/tests/push-image.test.mjs` fails when a
+workflow goes back to `docker push`.
+
 ## Where CI pulls images from
 
 Docker Hub limits anonymous pulls per address, and a hosted runner shares its
@@ -270,10 +284,15 @@ no test runs. CI therefore pulls every Docker Hub image from Google's mirror,
 - `scripts/ci/mirror-images.sh` pulls a base from the mirror and tags it under
   its Docker Hub name, so the build that follows finds it in the local store.
   `.github/actions/word-converter`, which Server tests uses, runs it for
-  `debian:trixie-slim` before building the Word converter; `.github/actions/minio` and `minio-image.yml` run it for
+  `debian:trixie-slim` before building the Word converter; `.github/actions/minio` runs it for
   `golang:1.27-alpine` and `alpine:3.22` before building MinIO. A base the
   mirror cannot serve prints a warning and is pulled from Docker Hub as before.
   A new `FROM` on a Docker Hub image adds its name to the call beside the build.
+- `scripts/ci/push-image.sh` builds where the local store cannot be seen, so
+  it names the mirror to BuildKit instead: `docker.io` is mirrored by
+  `mirror.gcr.io` in the builder's configuration, whatever the `FROM` lines
+  are, and BuildKit's own image comes from the mirror too. What the mirror
+  cannot serve is pulled from Docker Hub.
 - MinIO itself comes from `ghcr.io`, and nothing else in the workflows pulls from
   Docker Hub.
 

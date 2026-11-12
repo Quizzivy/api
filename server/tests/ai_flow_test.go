@@ -141,6 +141,9 @@ func TestEveryAssistantOperationRunsThroughTheWholeStackMetersWhatItSpendsAndSen
 		{"score", http.MethodPost, "/teacher/ai/attempts/" + s.attempt + "/answers/" + s.short + "/score-suggestion", nil, "score"},
 		{"insights", http.MethodPost, "/teacher/ai/assignments/" + s.assignment + "/insights", nil, "items"},
 		{"cleanup", http.MethodPost, "/teacher/ai/bank/cleanup", map[string]any{"checks": []string{"duplicates", "tags"}}, "duplicates"},
+		{"gap distractors", http.MethodPost, "/teacher/ai/gaps/distractors", map[string]any{
+			"before": "Parks give a town room to ", "after": ", to play and to meet.", "answers": []string{"breathe"}, "options": []string{"sleep"},
+		}, "items"},
 	}
 
 	before := teacher.must(http.StatusOK, http.MethodGet, "/teacher/ai/usage", nil)
@@ -368,13 +371,14 @@ func TestEveryAssistantOperationAnswersNotImplementedWhileNoProviderIsConfigured
 		method, path string
 		body         any
 	}{
-		"usage":        {teacher, http.MethodGet, "/teacher/ai/usage", nil},
-		"cleanup":      {teacher, http.MethodPost, "/teacher/ai/bank/cleanup", cleanupBody},
-		"request":      {teacher, http.MethodPost, "/teacher/ai/credit-requests", map[string]any{"amount": 5000, "reason": "Cần thêm"}},
-		"console":      {admin, http.MethodGet, "/admin/ai/credits", nil},
-		"allowance":    {admin, http.MethodPut, "/admin/ai/teachers/" + teacherID + "/allowance", map[string]any{"paused": true}},
-		"rules":        {admin, http.MethodPatch, "/admin/ai/rules", map[string]any{"warnPercent": 70}},
-		"addedCredits": {admin, http.MethodPost, "/admin/ai/credits/additions", map[string]any{"credits": 5000}},
+		"usage":          {teacher, http.MethodGet, "/teacher/ai/usage", nil},
+		"cleanup":        {teacher, http.MethodPost, "/teacher/ai/bank/cleanup", cleanupBody},
+		"gapDistractors": {teacher, http.MethodPost, "/teacher/ai/gaps/distractors", map[string]any{"before": "Parks give a town room to ", "after": ".", "answers": []string{"breathe"}}},
+		"request":        {teacher, http.MethodPost, "/teacher/ai/credit-requests", map[string]any{"amount": 5000, "reason": "Cần thêm"}},
+		"console":        {admin, http.MethodGet, "/admin/ai/credits", nil},
+		"allowance":      {admin, http.MethodPut, "/admin/ai/teachers/" + teacherID + "/allowance", map[string]any{"paused": true}},
+		"rules":          {admin, http.MethodPatch, "/admin/ai/rules", map[string]any{"warnPercent": 70}},
+		"addedCredits":   {admin, http.MethodPost, "/admin/ai/credits/additions", map[string]any{"credits": 5000}},
 	} {
 		status, body := call.as.call(call.method, call.path, call.body)
 		if status != http.StatusNotImplemented || call.as.errorCode(body) != "AI_OFF" {

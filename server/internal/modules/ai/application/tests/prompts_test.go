@@ -149,7 +149,9 @@ func allPrompts() map[string]prompts.Prompt {
 	bank := []domain.BankQuestion{{ID: "b", Type: "short_answer", Prompt: "p"}, {ID: "c", Type: "short_answer", Prompt: "p again"}}
 	tagging, _ := prompts.Tagging(prompts.TaggingInput{Bank: bank, Asked: []int{0}})
 	duplicates, _ := prompts.Duplicates(prompts.DuplicatesInput{Bank: bank, Pairs: []domain.SimilarPair{{A: 0, B: 1, Score: 0.5}}, Language: domain.English})
+	gap, _ := prompts.GapDistractors(prompts.GapDistractorsInput{Before: "a ", After: " b", Answers: []string{"x"}})
 	return map[string]prompts.Prompt{
+		gapOperation:  gap,
 		"generate":    prompts.Generate(prompts.GenerateInput{Source: sourceText, Types: []string{prompts.SingleChoice}, Count: 3, Level: "b1"}),
 		"check":       check,
 		"variant":     variant,

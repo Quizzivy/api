@@ -99,7 +99,8 @@ gh secret set VPS_KNOWN_HOSTS   # ssh-keyscan -t ed25519 <host>, checked against
 
 The public half of the key goes to the box as `QUIZZIVY_DEPLOY_PUBKEY` when
 `bootstrap.sh` runs; the box then forces that key's command to `deploy.sh`, so
-the key can deploy a commit and do nothing else. The job tags the image
+the key can deploy a commit and do nothing else. The job builds and pushes
+with `scripts/ci/push-image.sh` (`ci.md`, "Pushing an image") and tags the image
 `ghcr.io/<owner>/quizzivy-api:<sha>`; the box's `compose.env` must name that
 repository in `API_IMAGE_REPO`, and `docker login ghcr.io` there needs a token
 with `read:packages` only. Everything on the box side (PostgreSQL, Caddy,
