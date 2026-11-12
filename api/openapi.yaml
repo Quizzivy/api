@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Quizzivy API
-  version: 0.13.2
+  version: 0.13.4
   contact:
     name: Thuong
     url: https://github.com/SekiroKenjii/Quizzivy
