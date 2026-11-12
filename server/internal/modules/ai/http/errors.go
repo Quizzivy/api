@@ -38,7 +38,10 @@ func (f *failure) VisitCheckTestWithAiResponse(w http.ResponseWriter) error     
 func (f *failure) VisitMakeTestVariantResponse(w http.ResponseWriter) error      { return f.write(w) }
 func (f *failure) VisitWriteAiExplanationResponse(w http.ResponseWriter) error   { return f.write(w) }
 func (f *failure) VisitSuggestAiDistractorsResponse(w http.ResponseWriter) error { return f.write(w) }
-func (f *failure) VisitSuggestAiScoreResponse(w http.ResponseWriter) error       { return f.write(w) }
+func (f *failure) VisitSuggestAiGapDistractorsResponse(w http.ResponseWriter) error {
+	return f.write(w)
+}
+func (f *failure) VisitSuggestAiScoreResponse(w http.ResponseWriter) error { return f.write(w) }
 func (f *failure) VisitExplainAssignmentResultsResponse(w http.ResponseWriter) error {
 	return f.write(w)
 }

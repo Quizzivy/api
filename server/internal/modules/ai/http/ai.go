@@ -242,6 +242,30 @@ func (h AI) SuggestAiDistractors(ctx context.Context, request openapi.SuggestAiD
 	return out, nil
 }
 
+// SuggestAiGapDistractors implements POST /teacher/ai/gaps/distractors.
+func (h AI) SuggestAiGapDistractors(ctx context.Context, request openapi.SuggestAiGapDistractorsRequestObject) (openapi.SuggestAiGapDistractorsResponseObject, error) {
+	who, _, ok := h.caller(ctx)
+	if !h.enabled {
+		return h.off(ctx), nil
+	}
+	if !ok || request.Body == nil {
+		return nil, httpx.ErrNotImplemented
+	}
+	q := query.GapDistractors{Actor: who, Before: request.Body.Before, After: request.Body.After, Answers: request.Body.Answers}
+	if request.Body.Options != nil {
+		q.Options = *request.Body.Options
+	}
+	got, err := h.app.Queries.GapDistractors.Handle(ctx, q)
+	if err != nil {
+		return failed[openapi.SuggestAiGapDistractorsResponseObject](ctx, err)
+	}
+	out := openapi.SuggestAiGapDistractors200JSONResponse{Items: make([]openapi.AiDistractor, len(got.Items)), Usage: usageOf(got.Usage)}
+	for i, d := range got.Items {
+		out.Items[i] = openapi.AiDistractor{Text: d.Text, Why: d.Why}
+	}
+	return out, nil
+}
+
 // SuggestAiScore implements POST /teacher/ai/attempts/{attemptId}/answers/{questionId}/score-suggestion.
 func (h AI) SuggestAiScore(ctx context.Context, request openapi.SuggestAiScoreRequestObject) (openapi.SuggestAiScoreResponseObject, error) {
 	who, grants, ok := h.caller(ctx)

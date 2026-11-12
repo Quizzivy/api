@@ -6685,6 +6685,30 @@ components:
           items: { $ref: '#/components/schemas/AiDistractor' }
         usage: { $ref: '#/components/schemas/AiUsage' }
 
+    AiGapDistractorsRequest:
+      type: object
+      description: |
+        A gap in a text, as the builder holds it. `before` and `after` are the
+        plain text of the gap's sentence on either side of the gap; either is
+        empty when the gap opens or closes its sentence. Nothing about a
+        student is ever sent.
+      required: [before, after, answers]
+      additionalProperties: false
+      properties:
+        before: { type: string, maxLength: 1000 }
+        after: { type: string, maxLength: 1000 }
+        answers:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 200 }
+          description: Every answer the gap accepts, the word the gap replaced first. No suggestion is one of them.
+        options:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 500 }
+          description: The wrong options the gap already has, which no suggestion repeats. Absent or empty for a gap the student types.
+
     AiScoreSuggestion:
       type: object
       description: |
@@ -14541,6 +14565,48 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
           description: The question is not a single or multiple choice question, or has no key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '501': { $ref: '#/components/responses/AiOff' }
+        '503': { $ref: '#/components/responses/AiUnavailable' }
+
+  /teacher/ai/gaps/distractors:
+    post:
+      operationId: suggestAiGapDistractors
+      x-permission: ai.use
+      tags: [teacher-ai]
+      summary: Suggest wrong options for a gap in a text
+      description: |
+        For a gap in the text of a question group's material, as the builder
+        holds it, saved or not: a gap the student types has no stored choice
+        question, and `suggestAiDistractors` reads none of a group's members.
+        Takes the gap's sentence on either side of the gap, the answers the
+        gap accepts and the wrong options it already has, and suggests up to
+        four wrong options that are none of them. Reads nothing stored and
+        saves nothing: the teacher keeps a suggestion through
+        `updateQuestionGroup`. Only the texts of the request are sent to the
+        provider.
+
+        Reserves the call's ceiling before it reaches the provider and settles
+        what the provider billed after, as `suggestAiDistractors` does, and is
+        counted with it in the caller's usage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AiGapDistractorsRequest' }
+      responses:
+        '200':
+          description: One to four suggestions, none of them an answer or an option the request names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiDistractorsResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/AiCreditsExhausted' }
+        '403': { $ref: '#/components/responses/AiNotAllowed' }
+        '422':
+          description: The first of `answers` holds no word.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

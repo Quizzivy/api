@@ -49,6 +49,14 @@ func Distractors(in DistractorsInput) (Prompt, error) {
 
 // DecodeDistractors reads the provider's answer. A suggestion that repeats an existing option or an earlier suggestion is dropped, and no more than MaxDistractors are kept; if none is left the answer is ErrUnusable.
 func DecodeDistractors(raw json.RawMessage, in DistractorsInput) ([]Distractor, error) {
+	taken := make([]string, 0, len(in.Question.Options)+MaxDistractors)
+	for _, o := range in.Question.Options {
+		taken = append(taken, o.Text)
+	}
+	return newDistractors(raw, taken)
+}
+
+func newDistractors(raw json.RawMessage, taken []string) ([]Distractor, error) {
 	var answer struct {
 		Distractors []struct {
 			Text string `json:"text"`
@@ -57,10 +65,6 @@ func DecodeDistractors(raw json.RawMessage, in DistractorsInput) ([]Distractor, 
 	}
 	if err := decode(raw, &answer); err != nil {
 		return nil, err
-	}
-	taken := make([]string, 0, len(in.Question.Options)+MaxDistractors)
-	for _, o := range in.Question.Options {
-		taken = append(taken, o.Text)
 	}
 	var out []Distractor
 	for _, d := range answer.Distractors {

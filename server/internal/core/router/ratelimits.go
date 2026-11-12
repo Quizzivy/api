@@ -56,6 +56,7 @@ var aiSuggestions = []string{
 	"POST /teacher/ai/tests/{id}/variant",
 	"POST /teacher/ai/questions/{id}/explanation",
 	"POST /teacher/ai/questions/{id}/distractors",
+	"POST /teacher/ai/gaps/distractors",
 	"POST /teacher/ai/attempts/{attemptId}/answers/{questionId}/score-suggestion",
 	"POST /teacher/ai/assignments/{id}/insights",
 }
