@@ -181,7 +181,7 @@ func TestEveryAIOperationIsLimitedPerUserAndNotPerAddress(t *testing.T) {
 			t.Errorf("%s (%s) spends credits or moves them and has no per-user limit", op.OperationID, pattern)
 		}
 	})
-	if len(found) != 16 {
-		t.Errorf("%d AI operations found, want 16: ten for the teacher and six for the console", len(found))
+	if len(found) != 17 {
+		t.Errorf("%d AI operations found, want 17: eleven for the teacher and six for the console", len(found))
 	}
 }

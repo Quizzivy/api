@@ -259,6 +259,10 @@ func operations() []operation {
 			})
 			return got.Usage, err
 		}},
+		{gapOperation, domain.FeatureDistractors, ports.TierCapable, func(o ops) (domain.Usage, error) {
+			got, err := o.app.Queries.GapDistractors.Handle(context.Background(), parksGap())
+			return got.Usage, err
+		}},
 	}
 }
 
@@ -499,7 +503,7 @@ func TestEveryReadIsMadeUnderTheCallersScoreAndTheCleanupUnderTheirOwnRows(t *te
 
 func TestAnotherTeachersIdAnswersAsMissingAndCostsNothing(t *testing.T) {
 	for _, op := range operations() {
-		if op.name == "cleanup" {
+		if op.name == "cleanup" || op.name == gapOperation {
 			continue
 		}
 		t.Run(op.name, func(t *testing.T) {
@@ -666,6 +670,7 @@ func TestNoIdentifierOfAPersonOrARecordReachesAPromptButTheContentDoes(t *testin
 	content := map[string]string{
 		"generate": "Cities around the world", "generate_section": "Choose the past form of go.", "check": "What did planners see parks as?", "variant": "What did planners see parks as?",
 		"explanation": "She ___ in Hanoi", "distractors": "has lived", "score": "green space", "insights": "parks", "cleanup": "Name one park",
+		gapOperation: "Parks give people a place to ____.",
 	}
 	for _, op := range operations() {
 		o := newOps(t, true)

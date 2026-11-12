@@ -38,16 +38,17 @@ type Commands struct {
 }
 
 type Queries struct {
-	Usage        cqrs.QueryHandler[query.Usage, domain.MonthUsage]
-	AdminCredits cqrs.QueryHandler[query.AdminCredits, domain.AdminCredits]
-	Generate     cqrs.QueryHandler[query.Generate, query.Generated]
-	Check        cqrs.QueryHandler[query.Check, query.Checked]
-	Variant      cqrs.QueryHandler[query.Variant, query.Varied]
-	Explanation  cqrs.QueryHandler[query.Explanation, query.Explained]
-	Distractors  cqrs.QueryHandler[query.Distractors, query.Suggested]
-	Score        cqrs.QueryHandler[query.Score, query.Scored]
-	Insights     cqrs.QueryHandler[query.Insights, query.Interpreted]
-	Cleanup      cqrs.QueryHandler[query.Cleanup, query.Cleaned]
+	Usage          cqrs.QueryHandler[query.Usage, domain.MonthUsage]
+	AdminCredits   cqrs.QueryHandler[query.AdminCredits, domain.AdminCredits]
+	Generate       cqrs.QueryHandler[query.Generate, query.Generated]
+	Check          cqrs.QueryHandler[query.Check, query.Checked]
+	Variant        cqrs.QueryHandler[query.Variant, query.Varied]
+	Explanation    cqrs.QueryHandler[query.Explanation, query.Explained]
+	Distractors    cqrs.QueryHandler[query.Distractors, query.Suggested]
+	GapDistractors cqrs.QueryHandler[query.GapDistractors, query.Suggested]
+	Score          cqrs.QueryHandler[query.Score, query.Scored]
+	Insights       cqrs.QueryHandler[query.Insights, query.Interpreted]
+	Cleanup        cqrs.QueryHandler[query.Cleanup, query.Cleaned]
 }
 
 // Options is what the application takes from outside its module: the price of each tier, the calendar zone months are counted in, the way to tell a user (nil tells no one), the logger and the time one bank clean-up or one variant may spend with the provider (zero is support.DefaultCleanupBudget). Completer is the provider and nil when none is configured, so every suggestion answers domain.ErrOff; Tests, Questions, Grading, Analysis and People are what the suggestions read.
@@ -95,16 +96,17 @@ func New(repo domain.Repository, opts Options) *Application {
 			SetRules:       command.SetRulesHandler{Service: service},
 		},
 		Queries: Queries{
-			Usage:        query.UsageHandler{Service: service},
-			AdminCredits: query.AdminCreditsHandler{Service: service},
-			Generate:     query.GenerateHandler{Service: service},
-			Check:        query.CheckHandler{Service: service},
-			Variant:      query.VariantHandler{Service: service},
-			Explanation:  query.ExplanationHandler{Service: service},
-			Distractors:  query.DistractorsHandler{Service: service},
-			Score:        query.ScoreHandler{Service: service},
-			Insights:     query.InsightsHandler{Service: service},
-			Cleanup:      query.CleanupHandler{Service: service},
+			Usage:          query.UsageHandler{Service: service},
+			AdminCredits:   query.AdminCreditsHandler{Service: service},
+			Generate:       query.GenerateHandler{Service: service},
+			Check:          query.CheckHandler{Service: service},
+			Variant:        query.VariantHandler{Service: service},
+			Explanation:    query.ExplanationHandler{Service: service},
+			Distractors:    query.DistractorsHandler{Service: service},
+			GapDistractors: query.GapDistractorsHandler{Service: service},
+			Score:          query.ScoreHandler{Service: service},
+			Insights:       query.InsightsHandler{Service: service},
+			Cleanup:        query.CleanupHandler{Service: service},
 		},
 		service: service,
 	}
