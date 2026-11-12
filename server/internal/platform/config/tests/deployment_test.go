@@ -325,10 +325,10 @@ func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 }
 
 // The VPS half of deploy.yml. Nothing runs it until API_HOST is set to vps,
-// so this reads the file as text and asks the three things that would go wrong
+// so this reads the file as text and asks the things that would go wrong
 // without anyone noticing: a deploy that trusts any host key, one that reaches
-// the box before the image exists, and an SDK promote that no longer waits for
-// the API job that ran.
+// the box before the image exists, a push from the runner's own image store,
+// and an SDK promote that no longer waits for the API job that ran.
 func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	text := repoFile(t, ".github/workflows/deploy.yml")
 	start := strings.Index(text, "\n  api-vps:")
@@ -344,10 +344,19 @@ func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	if !strings.Contains(job, "StrictHostKeyChecking=yes") {
 		t.Fatal("api-vps does not require a known host key")
 	}
-	push := strings.Index(job, "docker push")
+	push := strings.Index(job, `scripts/ci/push-image.sh "$image"`)
 	ssh := strings.Index(job, `deploy "$SHA"`)
 	if push < 0 || ssh < 0 || push > ssh {
-		t.Fatal(`api-vps must run "docker push" before it asks the box to deploy "$SHA"`)
+		t.Fatal(`api-vps must run scripts/ci/push-image.sh before it asks the box to deploy "$SHA"`)
+	}
+	// The first deploy to the VPS pushed with `docker push`, which mounted the
+	// distroless layers out of an image the runner ships with, and ghcr.io
+	// refused the manifest. The job's comment may name the command; no step may
+	// run it.
+	for _, line := range strings.Split(job, "\n") {
+		if code := strings.TrimSpace(line); !strings.HasPrefix(code, "#") && strings.Contains(code, "docker push") {
+			t.Fatalf("api-vps runs %q: push with scripts/ci/push-image.sh, whose header says why", code)
+		}
 	}
 
 	sdk := text[end:]
