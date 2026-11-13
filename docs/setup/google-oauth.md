@@ -75,22 +75,27 @@ Name it `quizzivy-web`.
 
 ```
 http://localhost:5173
-https://app.quizzivy.com
+https://my.quizzivy.com
+https://portal.quizzivy.com
 ```
 
 **Authorized redirect URIs** — full URLs:
 
 ```
 http://localhost:5173/auth/google/callback
-https://app.quizzivy.com/auth/google/callback
+https://my.quizzivy.com/auth/google/callback
+https://portal.quizzivy.com/auth/google/callback
 ```
 
 The redirect URIs are what matter (see O-13 above). The JavaScript origins are
 registered anyway — they cost nothing and keep the door open.
 
-Replace `app.quizzivy.com` with the real host once O-01 is settled. Both must sit
-under one registrable domain as the API — that is what makes the `SameSite=Lax`
-refresh cookie work (`docs/plan/00-overview.md` §4.1).
+Each web host has its own callback, because the web builds it from the origin it
+is opened at (spec §5.8): one line per host here, and the same list, comma
+separated, in the server's `GOOGLE_REDIRECT_URI`. A callback that is missing
+from either place fails that host's Google sign-in and no other's. Every host
+must sit under one registrable domain with the API — that is what makes the
+`SameSite=Lax` refresh cookie work (`docs/plan/00-overview.md` §4.1).
 
 ### 5. Put the values in `.env`
 

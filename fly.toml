@@ -31,7 +31,14 @@ primary_region = "sin"
   # it, so a client could prepend a value and pick its own rate-limit bucket
   # (§6.5). docs/setup/dns.md has the table.
   CLIENT_IP_HEADER = "Fly-Client-IP"
-  CORS_ALLOWED_ORIGINS = "https://app.quizzivy.com"
+  CORS_ALLOWED_ORIGINS = "https://my.quizzivy.com,https://portal.quizzivy.com"
+
+  # The two web hosts (spec §5.8). A request's Origin is read against them:
+  # each host has its own refresh cookie and admits only the accounts that
+  # belong at it, and an email's link points into its recipient's host. Both
+  # are listed in CORS_ALLOWED_ORIGINS above, or the app refuses to start.
+  STUDENT_APP_URL = "https://my.quizzivy.com"
+  STAFF_APP_URL = "https://portal.quizzivy.com"
 
   # Where Google returns the browser (§5.3). Matched EXACTLY at exchange time;
   # prefix matching on redirect URIs is the classic OAuth mistake. Not a secret:
@@ -52,7 +59,7 @@ primary_region = "sin"
   # with the one the frontend bundles, and the failure then is every Google
   # sign-in rejected for a bad audience.
   GOOGLE_CLIENT_ID = "825841392899-8aaqpsf9nt94usmovva6pifsqopk3dab.apps.googleusercontent.com"
-  GOOGLE_REDIRECT_URI = "https://app.quizzivy.com/auth/google/callback"
+  GOOGLE_REDIRECT_URI = "https://my.quizzivy.com/auth/google/callback,https://portal.quizzivy.com/auth/google/callback"
 
   # Argon2id holds a 64 MiB arena for the duration of every hash and this
   # machine has 512 MB, so eight simultaneous logins would exceed it -- see
@@ -79,13 +86,13 @@ primary_region = "sin"
   IMPORT_WORKER_IDLE_POLL = "6h"
 
   # Outgoing mail (T-R5.2). Resend sends from the verified quizzivy.com domain;
-  # RESEND_API_KEY and SECRETS_KEY are Fly secrets, and the three names form
-  # one group the app refuses to start without (config.Load). The outbox holds
+  # RESEND_API_KEY and SECRETS_KEY are Fly secrets, and RESEND_API_KEY and
+  # EMAIL_FROM form one group the app refuses to start without (config.Load).
+  # A link in a message points into STUDENT_APP_URL or STAFF_APP_URL above. The outbox holds
   # what passes the day's and the month's limits, Resend's free plan unless an
   # Admin changes them. Both process groups read these: the worker sends the
   # notices it enqueues.
   EMAIL_FROM = "Quizzivy <no-reply@quizzivy.com>"
-  APP_URL = "https://app.quizzivy.com"
   EMAIL_SEND_RATE = "2"
   APP_TIMEZONE = "Asia/Ho_Chi_Minh"
 
