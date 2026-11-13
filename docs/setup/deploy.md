@@ -122,9 +122,10 @@ accepts. It reports missing names in seconds instead of after a build, a
 migration, a rollout and a health check.
 
 It exists because `config.Load` has all-or-nothing groups — Google sign-in,
-object storage and, from v0.12.0, email (`RESEND_API_KEY`, `EMAIL_FROM`,
-`APP_URL`, all required in production, with `SECRETS_KEY`) — and each exits 1
-on a partial set. Both shipped partial,
+object storage, from v0.12.0 email (`RESEND_API_KEY` and `EMAIL_FROM`, both
+required in production, with `SECRETS_KEY`), and the two web hosts
+(`STUDENT_APP_URL` and `STAFF_APP_URL`, which took the place of `APP_URL` with
+spec §5.8) — and each exits 1 on a partial set. Both shipped partial,
 one after the other, and the cause was legible only in the app's own stderr:
 Fly reports it as "the app appears to be crashing" and prints an empty log tail,
 because the machine is gone before it attaches.
@@ -187,8 +188,9 @@ database (see `operations.md`). The rest is by hand:
 
 ```bash
 curl -s https://api.quizzivy.com/healthz
-curl -o /dev/null -w '%{http_code}\n' https://app.quizzivy.com/join/K7M3-P9QR   # 200, the SPA shell
-GOOGLE_REDIRECT_URI=https://app.quizzivy.com/auth/google/callback make verify-google
+curl -o /dev/null -w '%{http_code}\n' https://my.quizzivy.com/join/K7M3-P9QR   # 200, the SPA shell
+GOOGLE_REDIRECT_URI=https://my.quizzivy.com/auth/google/callback make verify-google
+GOOGLE_REDIRECT_URI=https://portal.quizzivy.com/auth/google/callback make verify-google
 ```
 
 The deep-link check is not decoration: `web/public/_redirects` is what makes a
@@ -201,8 +203,9 @@ Both need dashboard access the project's tokens do not have. See `dns.md`:
 
 1. `api` — add the A/AAAA records **DNS only**, wait for
    `fly certs check api.quizzivy.com`, then switch to proxied.
-2. `app` — Pages project → Custom domains → add `app.quizzivy.com`. Cloudflare
-   creates the record itself; making it by hand returns 522.
+2. `my` and `portal` — Pages project → Custom domains → add `my.quizzivy.com`
+   and `portal.quizzivy.com`. Cloudflare creates each record itself; making one
+   by hand returns 522.
 
 ## Word and PDF import
 

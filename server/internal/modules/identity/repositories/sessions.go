@@ -5,14 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/audit"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// ListSessions returns the user's live sessions, the one the presented cookie
-// names first, then the most recently used, at most q.Limit of them. A
+// ListSessions returns the user's live sessions of q.Audience, the one the
+// presented cookie names first, then the most recently used, at most q.Limit
+// of them. A
 // session is a refresh-token family with an unrevoked, unexpired token; a
 // rotation consumes the predecessor in the transaction that issues its
 // successor, so the family has one such token and its row is the latest
@@ -27,7 +29,7 @@ func (s *Users) ListSessions(ctx context.Context, q domain.SessionsQuery) ([]dom
 		), live AS (
 		  SELECT DISTINCT ON (family_id) family_id, issued_at, user_agent, geo_label
 		    FROM app.refresh_tokens
-		   WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > $3
+		   WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > $3 AND audience = $5
 		   ORDER BY family_id, issued_at DESC, id DESC
 		)
 		SELECT l.family_id::text, l.user_agent, l.geo_label, l.issued_at,
@@ -35,7 +37,7 @@ func (s *Users) ListSessions(ctx context.Context, q domain.SessionsQuery) ([]dom
 		  FROM live l
 		 ORDER BY is_current DESC, l.issued_at DESC, l.family_id
 		 LIMIT $4`
-	rows, err := s.Query(ctx, list, q.UserID, q.CurrentTokenHash, q.Now, q.Limit)
+	rows, err := s.Query(ctx, list, q.UserID, q.CurrentTokenHash, q.Now, q.Limit, audienceName(q.Audience))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -54,8 +56,8 @@ func (s *Users) ListSessions(ctx context.Context, q domain.SessionsQuery) ([]dom
 	return sessions, nil
 }
 
-// RevokeSession ends one live session of the user, moves the user's session
-// epoch and audits it, in one transaction that first takes the lock a rotation
+// RevokeSession ends one live session of the user of in.Audience, moves the
+// user's session epoch and audits it, in one transaction that first takes the lock a rotation
 // takes, so a rotation of that family either commits first and its successor
 // is revoked here, or waits and finds the family revoked. It answers
 // ErrNoCurrentSession when the cookie names no live session of the user, then
@@ -76,7 +78,7 @@ func (s *Users) RevokeSession(ctx context.Context, in domain.RevokeSessionRecord
 	if err != nil {
 		return err
 	}
-	live, err := liveFamily(ctx, tx, in.UserID, in.FamilyID, in.Now)
+	live, err := liveFamily(ctx, tx, in.UserID, in.FamilyID, audienceName(in.Audience), in.Now)
 	if err != nil {
 		return err
 	}
@@ -114,8 +116,8 @@ func (s *Users) RevokeSession(ctx context.Context, in domain.RevokeSessionRecord
 	return nil
 }
 
-// RevokeOtherSessions ends every live session of the user except the one the
-// cookie names, and returns how many it ended. Only when it ended one does it
+// RevokeOtherSessions ends every live session of the user of in.Audience
+// except the one the cookie names, and returns how many it ended. Only when it ended one does it
 // move the user's session epoch and audit, in the same transaction; with none
 // to end it writes nothing. The caller forgets the cached principal after a
 // non-zero count. It answers ErrNoCurrentSession when the cookie names no live
@@ -141,10 +143,11 @@ func (s *Users) RevokeOtherSessions(ctx context.Context, in domain.RevokeOtherSe
 		  UPDATE app.refresh_tokens
 		     SET revoked_at = $3
 		   WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > $3 AND family_id <> $2::uuid
+		     AND audience = $4
 		  RETURNING family_id
 		)
 		SELECT count(DISTINCT family_id) FROM ended`,
-		in.UserID, current, in.Now).Scan(&revoked); err != nil {
+		in.UserID, current, in.Now, audienceName(in.Audience)).Scan(&revoked); err != nil {
 		return 0, fmt.Errorf("revoke other sessions: %w", err)
 	}
 	if revoked == 0 {
@@ -207,14 +210,14 @@ func currentFamily(ctx context.Context, tx pgx.Tx, userID string, tokenHash []by
 	return family, nil
 }
 
-func liveFamily(ctx context.Context, tx pgx.Tx, userID, familyID string, now time.Time) (bool, error) {
+func liveFamily(ctx context.Context, tx pgx.Tx, userID, familyID, audience string, now time.Time) (bool, error) {
 	var live bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1
 		                 FROM app.refresh_tokens
-		                WHERE family_id = $1::uuid AND user_id = $2::uuid
+		                WHERE family_id = $1::uuid AND user_id = $2::uuid AND audience = $4
 		                  AND revoked_at IS NULL AND expires_at > $3)`,
-		familyID, userID, now).Scan(&live); err != nil {
+		familyID, userID, now, audience).Scan(&live); err != nil {
 		return false, fmt.Errorf("look up session %s: %w", familyID, err)
 	}
 	return live, nil
@@ -226,4 +229,11 @@ func bumpSessionEpoch(ctx context.Context, tx pgx.Tx, userID string) error {
 		return fmt.Errorf("move session epoch of %s: %w", userID, err)
 	}
 	return nil
+}
+
+func audienceName(a access.Audience) string {
+	if a.Valid() {
+		return string(a)
+	}
+	return string(access.AudienceAny)
 }

@@ -167,10 +167,13 @@ jobs:
           group "object storage" S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
           group "Word import storage" IMPORT_S3_BUCKET IMPORT_WORK_DIR
           # Production sends through Resend or does not start: loadEmail
-          # refuses the sink there, so all three are required, not optional.
+          # refuses the sink there, so both are required, not optional.
           need RESEND_API_KEY
           need EMAIL_FROM
-          need APP_URL
+          # The two web hosts: whose session a request opens, and where an
+          # email's link points. Production does not start without both.
+          need STUDENT_APP_URL
+          need STAFF_APP_URL
           if has EMAIL_SINK_DIR; then
             echo "::error::EMAIL_SINK_DIR is set. The app refuses it in production: it writes every message, links included, to disk instead of sending it"
             fail=1

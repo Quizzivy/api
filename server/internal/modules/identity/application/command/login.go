@@ -7,12 +7,14 @@ import (
 	"quizzivy/internal/modules/identity/application/internal/support"
 	"quizzivy/internal/modules/identity/application/model"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 )
 
 // Login verifies a password and mints a session.
 type Login struct {
 	Email     string
 	Password  string
+	Audience  access.Audience
 	UserAgent string
 	IP        string
 	GeoLabel  string
@@ -22,7 +24,7 @@ type LoginHandler struct {
 	*support.Service
 }
 
-// Handle fails with domain.ErrPasswordSignInDisabled, before looking at the email or the password, while the centre has turned password sign-in off.
+// Handle fails with domain.ErrPasswordSignInDisabled, before looking at the email or the password, while the centre has turned password sign-in off, and with domain.ErrWrongHost, once the password has been verified, for an account that does not belong at cmd.Audience.
 func (s LoginHandler) Handle(ctx context.Context, cmd Login) (model.Session, error) {
 	policy, err := s.SignInPolicy(ctx)
 	if err != nil {
@@ -57,7 +59,7 @@ func (s LoginHandler) Handle(ctx context.Context, cmd Login) (model.Session, err
 		return model.Session{}, domain.ErrInvalidCredentials
 	}
 
-	session, err := s.IssueSession(ctx, user, support.Origin{UserAgent: cmd.UserAgent, IP: cmd.IP, GeoLabel: cmd.GeoLabel}, domain.SignInPassword)
+	session, err := s.IssueSession(ctx, user, support.Origin{Audience: cmd.Audience, UserAgent: cmd.UserAgent, IP: cmd.IP, GeoLabel: cmd.GeoLabel}, domain.SignInPassword)
 	if errors.Is(err, domain.ErrAccountChanged) {
 		return model.Session{}, domain.ErrInvalidCredentials
 	}

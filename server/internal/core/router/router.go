@@ -91,7 +91,7 @@ func New(deps Deps, logger *slog.Logger, allowedOrigins []string, clientIPHeader
 		Middlewares: inExecutionOrder(
 			httpx.RateLimit(limits, ratelimit.ClientIP(clientIPHeader), deps.Modules.Identity.ClearSessionOnRefusedLogout),
 			httpx.WithRequestMeta(ratelimit.ClientIP(clientIPHeader)),
-			identityhttp.WithRefreshCookie,
+			deps.Modules.Identity.WithRefreshCookie,
 			identityhttp.WithGeoLabel(clientIPHeader),
 			httpx.RequireAuth(openRoutes, deps.verifyAccessToken),
 			httpx.RequirePermission(requirements, deps.Principals),

@@ -25,6 +25,7 @@ func (h Identity) GoogleAuth(ctx context.Context, request openapi.GoogleAuthRequ
 		Code:         request.Body.Code,
 		CodeVerifier: request.Body.CodeVerifier,
 		RedirectURI:  request.Body.RedirectUri,
+		Audience:     audienceFromContext(ctx),
 		UserAgent:    meta.UserAgent,
 		IP:           meta.IP,
 		GeoLabel:     GeoLabelFromContext(ctx),
@@ -62,6 +63,8 @@ func (h Identity) GoogleAuth(ctx context.Context, request openapi.GoogleAuthRequ
 		return openapi.GoogleAuth403JSONResponse(googleDisabled(ctx)), nil
 	case errors.Is(err, domain.ErrGoogleDomainNotAllowed):
 		return openapi.GoogleAuth403JSONResponse(googleDomain(ctx)), nil
+	case errors.Is(err, domain.ErrWrongHost):
+		return openapi.GoogleAuth403JSONResponse(h.wrongHost(ctx)), nil
 
 	case errors.Is(err, domain.ErrAccountDisabled):
 		return openapi.GoogleAuth403JSONResponse(httpapi.Error(ctx, openapi.ACCOUNTDISABLED,
@@ -86,7 +89,7 @@ func (h Identity) GoogleAuth(ctx context.Context, request openapi.GoogleAuthRequ
 	response.Body.ExpiresIn = result.Session.ExpiresIn
 	response.Body.User = h.currentUser(ctx, result.Session.User, result.Session.Permissions)
 
-	response.Headers.SetCookie = httpapi.Ptr(refreshCookie(
+	response.Headers.SetCookie = httpapi.Ptr(refreshCookie(audienceFromContext(ctx),
 		result.Session.RefreshToken, h.refreshTTL, h.cookieSecure).String())
 
 	if c := result.EnrolledClass; c != nil {

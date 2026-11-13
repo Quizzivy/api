@@ -51,9 +51,15 @@ var (
 )
 
 // ErrRefreshRejected covers every ordinary refresh failure: no cookie, an
-// unknown token, an expired one, or a suspended account. A suspended account is
-// not called out, for the same reason Login does not call it out.
+// unknown token, an expired one, one of another audience's session, a
+// suspended account, or an account that no longer belongs at the session's
+// host. A suspended account is not called out, for the same reason Login does
+// not call it out.
 var ErrRefreshRejected = errors.New("refresh rejected")
+
+// ErrWrongHost refuses a sign-in whose account does not belong at the host the
+// request came from: no session is opened and nothing else is changed.
+var ErrWrongHost = errors.New("account does not belong at this host")
 
 // ErrRefreshReused is §5.2 reuse detection firing: the presented token had
 // already been rotated, and the whole family has now been revoked.

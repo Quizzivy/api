@@ -11,7 +11,7 @@ import (
 )
 
 var emailVariables = []string{
-	"RESEND_API_KEY", "EMAIL_FROM", "APP_URL", "EMAIL_REPLY_TO", "EMAIL_DAILY_LIMIT", "EMAIL_SEND_RATE",
+	"RESEND_API_KEY", "EMAIL_FROM", "EMAIL_REPLY_TO", "EMAIL_DAILY_LIMIT", "EMAIL_SEND_RATE",
 	"EMAIL_SINK_DIR", "SECRETS_KEY", "APP_TIMEZONE",
 }
 
@@ -20,7 +20,7 @@ var secretsKey = base64.StdEncoding.EncodeToString([]byte("0123456789abcdef01234
 func fullEmail() map[string]string {
 	return map[string]string{
 		"RESEND_API_KEY": "re_secret_value", "EMAIL_FROM": "Quizzivy <no-reply@quizzivy.com>",
-		"APP_URL": "https://app.quizzivy.com", "SECRETS_KEY": secretsKey,
+		"SECRETS_KEY": secretsKey,
 	}
 }
 
@@ -41,13 +41,13 @@ func TestWithoutTheEmailGroupOutsideProductionTheSinkTakesTheMail(t *testing.T) 
 func TestTheEmailGroupLoadsAndKeepsTheKeyOutOfEveryPrintedForm(t *testing.T) {
 	cfg, err := loadWith(t, merge(fullEmail(), map[string]string{
 		"EMAIL_REPLY_TO": "frontdesk@quizzivy.com", "EMAIL_DAILY_LIMIT": "500", "EMAIL_SEND_RATE": "5",
-		"APP_URL": "https://app.quizzivy.com/", "APP_TIMEZONE": "Asia/Bangkok",
+		"APP_TIMEZONE": "Asia/Bangkok",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := cfg.Email
-	if !e.Enabled() || e.From != "Quizzivy <no-reply@quizzivy.com>" || e.AppURL != "https://app.quizzivy.com" || e.ReplyTo != "frontdesk@quizzivy.com" ||
+	if !e.Enabled() || e.From != "Quizzivy <no-reply@quizzivy.com>" || e.ReplyTo != "frontdesk@quizzivy.com" ||
 		e.DailyLimit != 500 || e.SendRate != 5 || e.SendInterval() != 200*time.Millisecond || len(cfg.SecretsKey) != 32 || cfg.AppLocation.String() != "Asia/Bangkok" {
 		t.Fatalf("loaded: %+v", e)
 	}
@@ -60,26 +60,23 @@ func TestTheEmailGroupLoadsAndKeepsTheKeyOutOfEveryPrintedForm(t *testing.T) {
 }
 
 func TestAPartOfTheEmailGroupIsRefusedByName(t *testing.T) {
-	for _, drop := range []string{"RESEND_API_KEY", "EMAIL_FROM", "APP_URL"} {
+	for _, drop := range []string{"RESEND_API_KEY", "EMAIL_FROM"} {
 		env := fullEmail()
 		env[drop] = ""
 		_, err := loadWith(t, env)
-		if err == nil || !strings.Contains(err.Error(), "RESEND_API_KEY, EMAIL_FROM and APP_URL together") {
+		if err == nil || !strings.Contains(err.Error(), "RESEND_API_KEY and EMAIL_FROM together") {
 			t.Errorf("without %s: %v", drop, err)
 		}
 	}
 }
 
 func TestProductionRefusesTheSinkAndAPartialOrMissingGroup(t *testing.T) {
-	production := map[string]string{"APP_ENV": "production", "SECRETS_KEY": secretsKey}
-	if _, err := loadWith(t, production); err == nil || !strings.Contains(err.Error(), "required in production") {
+	production := merge(productionHosts(), map[string]string{"SECRETS_KEY": secretsKey})
+	if _, err := loadWith(t, production); err == nil || !strings.Contains(err.Error(), "RESEND_API_KEY and EMAIL_FROM are required in production") {
 		t.Errorf("production without the group: %v", err)
 	}
 	if _, err := loadWith(t, merge(merge(fullEmail(), production), map[string]string{"EMAIL_SINK_DIR": "/tmp/sink"})); err == nil || !strings.Contains(err.Error(), "EMAIL_SINK_DIR") {
 		t.Errorf("production with the sink: %v", err)
-	}
-	if _, err := loadWith(t, merge(merge(fullEmail(), production), map[string]string{"APP_URL": "http://app.quizzivy.com", "S3_ENDPOINT": ""})); err == nil || !strings.Contains(err.Error(), "https") {
-		t.Errorf("production over http: %v", err)
 	}
 	noKey := merge(fullEmail(), production)
 	noKey["SECRETS_KEY"] = ""
@@ -93,13 +90,6 @@ func TestProductionRefusesTheSinkAndAPartialOrMissingGroup(t *testing.T) {
 
 func TestBadEmailValuesAreRefusedWithoutRepeatingTheKey(t *testing.T) {
 	for name, override := range map[string]map[string]string{
-		"an app url with a path":     {"APP_URL": "https://app.quizzivy.com/app"},
-		"an app url that is no url":  {"APP_URL": "app.quizzivy.com"},
-		"an app url ending in ?":     {"APP_URL": "https://app.quizzivy.com?"},
-		"an app url ending in #":     {"APP_URL": "https://app.quizzivy.com#"},
-		"an app url with a query":    {"APP_URL": "https://app.quizzivy.com?a=1"},
-		"an app url with a line":     {"APP_URL": "https://app.quizzivy.com\r\nBcc: x@y.com"},
-		"an app url with a space":    {"APP_URL": "https://app.quizzivy .com"},
 		"a sender that is no mail":   {"EMAIL_FROM": "garbage"},
 		"a sender with a line break": {"EMAIL_FROM": "Q <a@b.com>\r\nBcc: x@y.com"},
 		"two senders":                {"EMAIL_FROM": "a@b.com, c@d.com"},
@@ -125,16 +115,6 @@ func TestBadEmailValuesAreRefusedWithoutRepeatingTheKey(t *testing.T) {
 				t.Errorf("%s: the error repeats a secret: %v", name, err)
 			}
 		}
-	}
-}
-
-func TestAnOriginIsKeptWithoutItsTrailingSlashAndWithALowerCaseHost(t *testing.T) {
-	cfg, err := loadWith(t, merge(fullEmail(), map[string]string{"APP_URL": "HTTPS://APP.Quizzivy.com:8443/"}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Email.AppURL != "https://app.quizzivy.com:8443" {
-		t.Fatalf("origin: %q", cfg.Email.AppURL)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"quizzivy/internal/platform/email"
 )
 
-const appURL = "https://app.quizzivy.com"
+const appURL = "https://portal.quizzivy.com"
 
 func letterFor(t *testing.T, tmpl email.Template, locale, name string) email.Letter {
 	t.Helper()

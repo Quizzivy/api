@@ -15,7 +15,8 @@ import (
 // locks the token's owner before the token, in the mode an update of the user
 // takes, so the rotations, reuse detections and logouts of one user run one at
 // a time, and none overlaps a password reset, a disable or a password change:
-// whichever comes second sees what the first committed.
+// whichever comes second sees what the first committed. A token whose family
+// is not of next.Audience answers RotateUnknown and is left as it was.
 func (s *Users) Rotate(ctx context.Context, tokenHash []byte, next domain.RefreshTokenRecord, now time.Time) (domain.RotateResult, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -40,6 +41,9 @@ func (s *Users) Rotate(ctx context.Context, tokenHash []byte, next domain.Refres
 	}
 	if claimed.userID != owner {
 		return domain.RotateResult{}, errors.New("refresh token owner changed during rotation")
+	}
+	if claimed.audience != audienceName(next.Audience) {
+		return domain.RotateResult{Outcome: domain.RotateUnknown}, nil
 	}
 
 	switch {
@@ -92,18 +96,19 @@ type claimedToken struct {
 	revokedAt  *time.Time
 	replacedBy *string
 	geoLabel   *string
+	audience   string
 }
 
 func claimToken(ctx context.Context, tx pgx.Tx, tokenHash []byte) (claimedToken, error) {
 	const claim = `
-		SELECT id::text, user_id::text, family_id::text, expires_at, revoked_at, replaced_by, geo_label
+		SELECT id::text, user_id::text, family_id::text, expires_at, revoked_at, replaced_by, geo_label, audience
 		  FROM app.refresh_tokens
 		 WHERE token_hash = $1
 		   FOR UPDATE`
 
 	var c claimedToken
 	err := tx.QueryRow(ctx, claim, tokenHash).Scan(
-		&c.id, &c.userID, &c.familyID, &c.expiresAt, &c.revokedAt, &c.replacedBy, &c.geoLabel)
+		&c.id, &c.userID, &c.familyID, &c.expiresAt, &c.revokedAt, &c.replacedBy, &c.geoLabel, &c.audience)
 	return c, err
 }
 
@@ -141,8 +146,8 @@ func revokeDisabledFamily(ctx context.Context, tx pgx.Tx, claimed claimedToken, 
 func issueSuccessor(ctx context.Context, tx pgx.Tx, claimed claimedToken, next domain.RefreshTokenRecord, now time.Time) error {
 	const issue = `
 		INSERT INTO app.refresh_tokens
-		       (user_id, family_id, token_hash, issued_at, expires_at, user_agent, ip, geo_label)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		       (user_id, family_id, token_hash, issued_at, expires_at, user_agent, ip, geo_label, audience)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id`
 	geoLabel := next.GeoLabel
 	if geoLabel == nil {
@@ -151,7 +156,7 @@ func issueSuccessor(ctx context.Context, tx pgx.Tx, claimed claimedToken, next d
 	var successorID string
 	if err := tx.QueryRow(ctx, issue,
 		claimed.userID, claimed.familyID, next.TokenHash, next.IssuedAt, next.ExpiresAt,
-		next.UserAgent, next.IP, geoLabel,
+		next.UserAgent, next.IP, geoLabel, claimed.audience,
 	).Scan(&successorID); err != nil {
 		return fmt.Errorf("issue successor token: %w", err)
 	}
@@ -201,6 +206,30 @@ func (s *Users) RevokeFamilyByToken(ctx context.Context, tokenHash []byte, now t
 		return "", fmt.Errorf("commit family revocation: %w", err)
 	}
 	return familyID, nil
+}
+
+// RevokeFamily ends the session familyID of userID, under the lock a rotation
+// takes. Revoking a family that is already revoked changes nothing.
+func (s *Users) RevokeFamily(ctx context.Context, userID, familyID string, now time.Time) error {
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin family revocation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockUser(ctx, tx, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE app.refresh_tokens
+		   SET revoked_at = $3
+		 WHERE family_id = $1::uuid AND user_id = $2::uuid AND revoked_at IS NULL`,
+		familyID, userID, now); err != nil {
+		return fmt.Errorf("revoke token family %s: %w", familyID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit family revocation: %w", err)
+	}
+	return nil
 }
 
 func revokeFamily(ctx context.Context, tx pgx.Tx, familyID string, now time.Time) error {

@@ -7,6 +7,7 @@ import (
 	"quizzivy/internal/modules/identity/application/internal/support"
 	"quizzivy/internal/modules/identity/application/model"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 )
 
 // GoogleSignIn implements §5.3 in full.
@@ -15,6 +16,7 @@ type GoogleSignIn struct {
 	CodeVerifier string
 	RedirectURI  string
 	JoinCode     string
+	Audience     access.Audience
 	UserAgent    string
 	IP           string
 	GeoLabel     string
@@ -24,9 +26,15 @@ type GoogleSignInHandler struct {
 	*support.Service
 }
 
+// Handle fails with domain.ErrWrongHost for an account that does not belong at
+// cmd.Audience, and, before Google is asked anything, for a join code at the
+// staff host: a code makes a student.
 func (s GoogleSignInHandler) Handle(ctx context.Context, cmd GoogleSignIn) (model.GoogleSignInResult, error) {
 	if s.Google == nil {
 		return model.GoogleSignInResult{}, domain.ErrGoogleUnavailable
+	}
+	if cmd.JoinCode != "" && cmd.Audience == access.AudienceStaff {
+		return model.GoogleSignInResult{}, domain.ErrWrongHost
 	}
 	identity, err := s.VerifiedIdentity(ctx, cmd.Code, cmd.CodeVerifier, cmd.RedirectURI)
 	if err != nil {

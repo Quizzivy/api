@@ -58,7 +58,8 @@ SPA ever moves to `quizzivy.com` itself.
 
 | Host | Serves |
 |---|---|
-| `app.quizzivy.com` | the SPA |
+| `my.quizzivy.com` | the SPA, as the student host |
+| `portal.quizzivy.com` | the same SPA build, as the staff host |
 | `api.quizzivy.com` | the Go API |
 | `quizzivy.com` | nothing yet — kept free for a landing page |
 
@@ -81,14 +82,22 @@ wrong.
 | `app` | CNAME | `<project>.pages.dev` | **Cloudflare, automatically** |
 | `api` | A + AAAA | the IPs `fly certs add` prints | you, by hand |
 
-### `app` — Cloudflare Pages
+Until 2026-11 the SPA was one host, `app.quizzivy.com`; the dated observations
+below name it as it was then. Since spec §5.8 it is two custom domains of the
+one Pages project, and the API is told their origins in `STUDENT_APP_URL` and
+`STAFF_APP_URL`, lists both in `CORS_ALLOWED_ORIGINS` and both callbacks in
+`GOOGLE_REDIRECT_URI`. All three hosts share the registrable domain, which is
+what lets the API's `SameSite=Lax` refresh cookies reach it from either.
 
-**You do not create this record.** That is the part worth being explicit about:
+### `my` and `portal` — Cloudflare Pages
+
+**You do not create these records.** That is the part worth being explicit about:
 Pages owns both the DNS record and the certificate. The flow is
 
 1. Create the Pages project.
-2. In the project → **Custom domains** → add `app.quizzivy.com`.
-3. Cloudflare creates a CNAME to `<project>.pages.dev` and issues the cert.
+2. In the project → **Custom domains** → add `my.quizzivy.com`, then
+   `portal.quizzivy.com`.
+3. Cloudflare creates a CNAME to `<project>.pages.dev` for each and issues the certs.
 
 There is no value for you to type into a Target field.
 
@@ -322,6 +331,7 @@ mid-exam with no second one is a bad afternoon.
 
 ```bash
 curl -s https://api.quizzivy.com/healthz            # {"database":"ok","status":"ok"}
-GOOGLE_REDIRECT_URI=https://app.quizzivy.com/auth/google/callback make verify-google
+GOOGLE_REDIRECT_URI=https://my.quizzivy.com/auth/google/callback make verify-google
+GOOGLE_REDIRECT_URI=https://portal.quizzivy.com/auth/google/callback make verify-google
 make verify-r2
 ```

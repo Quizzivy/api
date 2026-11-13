@@ -24,6 +24,7 @@ func (h Identity) ListSessions(ctx context.Context, _ openapi.ListSessionsReques
 	}
 	sessions, err := h.app.Queries.ListSessions.Handle(ctx, query.ListSessions{
 		UserID:       principal.UserID,
+		Audience:     audienceFromContext(ctx),
 		RefreshToken: refreshTokenFromContext(ctx),
 	})
 	if err != nil {
@@ -49,6 +50,7 @@ func (h Identity) RevokeSession(ctx context.Context, request openapi.RevokeSessi
 	_, err := h.app.Commands.RevokeSession.Handle(ctx, command.RevokeSession{
 		UserID:       principal.UserID,
 		FamilyID:     request.FamilyId.String(),
+		Audience:     audienceFromContext(ctx),
 		RefreshToken: refreshTokenFromContext(ctx),
 		IP:           meta.IP,
 		UserAgent:    meta.UserAgent,
@@ -82,6 +84,7 @@ func (h Identity) RevokeOtherSessions(ctx context.Context, _ openapi.RevokeOther
 	meta := httpx.RequestMetaFromContext(ctx)
 	revoked, err := h.app.Commands.RevokeOtherSessions.Handle(ctx, command.RevokeOtherSessions{
 		UserID:       principal.UserID,
+		Audience:     audienceFromContext(ctx),
 		RefreshToken: refreshTokenFromContext(ctx),
 		IP:           meta.IP,
 		UserAgent:    meta.UserAgent,

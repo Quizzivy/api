@@ -7,7 +7,8 @@ alerts are not yet verified**. Never substitute a local test for that evidence.
 ## Deployment verification and alerts
 
 Run `node scripts/verify-deployment.mjs --headers` after deploying both halves.
-It checks `/healthz` (including the database), the SPA login document, and browser
+It checks `/healthz` (including the database), the SPA login document on each
+web host (`WEB_ORIGINS`, by default the student and the staff host), and browser
 security headers. The same script without `--headers` is the availability probe.
 The deploy workflow checks that the built `_headers` matches the source file.
 The CSP allows the actual PKCE flow and private R2 media, including blob previews;
@@ -444,6 +445,60 @@ replaced. One that neither the light nor the dark logo names is removed by the d
 housekeeping once it is 24 hours old ("Daily housekeeping"). Without object
 storage the settings still save and the front door still reads them, and an upload answers `501`.
 
+## The two web hosts
+
+The web is one build on two hosts (spec §5.8): `STUDENT_APP_URL`, where
+students are, and `STAFF_APP_URL`, where teachers and admins are. Both settings
+are origins (scheme and host, no path), are set together, must each be listed
+in `CORS_ALLOWED_ORIGINS`, and are required in production over `https`; the API
+and the worker both read them. The API refuses to start on any other
+combination and names the setting. `APP_URL` is no longer read, and a value
+left in place is ignored.
+
+What they decide, from the `Origin` header of each request:
+
+| `Origin` | Session | Refresh cookie |
+|---|---|---|
+| the student host | `student`: only an account with the student app is admitted, and its token is refused under `/teacher` and `/admin` | `quizzivy_refresh_student` |
+| the staff host | `staff`: only an account with the teacher workspace or the Admin console is admitted, and its token is refused under `/app` | `quizzivy_refresh_staff` |
+| any other origin, or none | `any`: every account, no limit | `quizzivy_refresh` |
+
+So one browser holds a session at each host, and signing out of one leaves the
+other. An account at the wrong host is answered `403 FORBIDDEN` with a message
+that names the right one, after its password or its Google identity has been
+verified. A session whose account stops belonging at its host (a role changed)
+ends at its next refresh. A password change, a set-password link, an Admin's
+reset or sign-out and disabling an account end its sessions at both hosts.
+
+`app.refresh_tokens.audience` (migration 00155) records which of the three a
+session is. To see who is signed in where:
+
+```sql
+SELECT audience, count(DISTINCT family_id)
+  FROM app.refresh_tokens
+ WHERE revoked_at IS NULL AND expires_at > now()
+ GROUP BY audience;
+```
+
+**Changing or adding a host** is one change in four places, or Google sign-in
+or the session breaks at that host only: the two settings here,
+`CORS_ALLOWED_ORIGINS`, `GOOGLE_REDIRECT_URI` (one
+`<origin>/auth/google/callback` per host, each also registered on the OAuth
+client, `google-oauth.md`), and the web's build inputs and Pages domains
+(`Quizzivy/web`, `docs/deploy.md`). After an origin changes, the sessions opened
+at the old one cannot be presented from the new one: their cookie is never read
+for it. They lapse within `REFRESH_TOKEN_TTL`; to end them at once, as
+`quizzivy_migrate`:
+
+```sql
+UPDATE app.refresh_tokens SET revoked_at = now()
+ WHERE revoked_at IS NULL AND audience = 'any';
+```
+
+Outside production the two settings default to `http://localhost:5173`, one
+origin for both, where every session is `any`: one host for every account, as
+before the hosts were split.
+
 ## Maintenance windows
 
 A maintenance window is a period during which the API answers every request to a
@@ -626,11 +681,13 @@ hash.
 ## Outgoing email
 
 Mail is sent from `email_outbox` by a dispatcher in the API and one in the
-worker, through Resend's HTTP API with `RESEND_API_KEY`. `EMAIL_FROM`,
-`APP_URL` and the key are set together, and production refuses to start
-without all three. Start-up refuses a malformed `EMAIL_FROM` or
-`EMAIL_REPLY_TO` (one address, no line break) and an `APP_URL` that is not a
-bare origin (no path, `?`, `#` or whitespace). The emails-per-day and emails-per-month limits ("The centre's usage limits",
+worker, through Resend's HTTP API with `RESEND_API_KEY`. `EMAIL_FROM` and the
+key are set together, and production refuses to start without both. A message's
+link points into one of the two web hosts ("The two web hosts", above): the
+staff host when the recipient's role, as the message is sent, opens the teacher
+workspace or the Admin console, and for the data-export message whoever
+receives it; the student host otherwise. Start-up refuses a malformed
+`EMAIL_FROM` or `EMAIL_REPLY_TO` (one address, no line break). The emails-per-day and emails-per-month limits ("The centre's usage limits",
 below) count sends per local day and month in `APP_TIMEZONE`; the excess moves to
 the next local midnight or the 1st, and a held message whose link has expired is
 failed with code `expired` instead of sent.

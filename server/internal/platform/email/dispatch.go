@@ -10,6 +10,7 @@ import (
 
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/platform/secrets"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/limits"
 )
 
@@ -26,7 +27,10 @@ const commitBudget = 10 * time.Second
 // time, so the daily budget and the provider's request rate hold across both.
 //
 // Sealer opens the rows' secrets; a nil one fails every row with a secret.
-// Org answers the organization's short name for the header. DailyLimit and
+// Org answers the organization's short name for the header. Hosts are the two
+// web hosts: a link points into the staff host when its template is StaffOnly
+// or when the recipient's role, as the row is sent, opens the teacher
+// workspace or the Admin console, and into the student host otherwise. DailyLimit and
 // MonthlyLimit are the most messages sent in one local day and one local month
 // of Location; one that is zero is read, in each batch, from the usage limits
 // resolved under Limits. Interval is the pause between two sends. Now is the
@@ -37,7 +41,7 @@ type Dispatcher struct {
 	Sender       Sender
 	Renderer     *Renderer
 	Org          func(context.Context) (string, error)
-	AppURL       string
+	Hosts        access.Hosts
 	ReplyTo      string
 	DailyLimit   int
 	MonthlyLimit int
@@ -73,6 +77,7 @@ type pending struct {
 	params   []byte
 	secret   []byte
 	attempts int
+	staff    bool
 }
 
 type outcome struct {
@@ -195,14 +200,15 @@ func release(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
 
 func (d *Dispatcher) sendDue(ctx context.Context, tx pgx.Tx, now time.Time, limit int, org string, batch *Batch) error {
 	rows, err := db.QueryMany(ctx, tx, `
-		SELECT id::text, to_address, template, locale, params, secret_ciphertext, attempts
-		  FROM app.email_outbox
-		 WHERE sent_at IS NULL AND failed_at IS NULL AND deliver_after <= $1 AND template = ANY($3::text[])
-		 ORDER BY deliver_after, id
+		SELECT o.id::text, o.to_address, o.template, o.locale, o.params, o.secret_ciphertext, o.attempts,
+		       EXISTS (SELECT 1 FROM app.users u WHERE u.id = o.to_user_id AND `+limits.StaffRole("u.role_id")+`)
+		  FROM app.email_outbox o
+		 WHERE o.sent_at IS NULL AND o.failed_at IS NULL AND o.deliver_after <= $1 AND o.template = ANY($3::text[])
+		 ORDER BY o.deliver_after, o.id
 		 LIMIT $2
-		   FOR UPDATE SKIP LOCKED`, []any{now, limit, templateNames()}, func(r pgx.Rows) (pending, error) {
+		   FOR UPDATE OF o SKIP LOCKED`, []any{now, limit, templateNames()}, func(r pgx.Rows) (pending, error) {
 		var p pending
-		err := r.Scan(&p.id, &p.to, &p.template, &p.locale, &p.params, &p.secret, &p.attempts)
+		err := r.Scan(&p.id, &p.to, &p.template, &p.locale, &p.params, &p.secret, &p.attempts, &p.staff)
 		return p, err
 	})
 	if err != nil {
@@ -241,7 +247,11 @@ func (d *Dispatcher) deliver(ctx context.Context, row pending, org string) outco
 		}
 		secret = string(opened)
 	}
-	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.AppURL, Params: params, Secret: secret})
+	home := access.AudienceStudent
+	if row.staff || StaffOnly(Template(row.template)) {
+		home = access.AudienceStaff
+	}
+	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.Hosts.URL(home), Params: params, Secret: secret})
 	if err != nil {
 		return outcome{kind: ErrPermanent, code: "render_failed"}
 	}
