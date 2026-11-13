@@ -20,7 +20,11 @@ const PermissionExtension = "x-permission"
 // in. Only an operation that declares the pseudo-key self may carry it.
 const TemporaryPasswordExtension = "x-allows-temporary-password"
 
-const adminTree = "/admin/"
+const (
+	adminTree   = "/admin/"
+	teacherTree = "/teacher/"
+	studentTree = "/app/"
+)
 
 // PermissionRequirements reads every operation's x-permission into a map keyed
 // by route pattern ("POST /teacher/tests"), the form r.Pattern takes. An
@@ -142,14 +146,14 @@ type pathTree struct {
 }
 
 var pathTrees = []pathTree{
-	{"/teacher/", func(k access.Key) bool {
+	{teacherTree, func(k access.Key) bool {
 		return k == access.WorkspaceTeacher || k == access.AIUse || hasAnyPrefix(string(k), "content.", "teaching.", "people.students.")
 	}},
 	{adminTree, func(k access.Key) bool {
 		return k == access.WorkspaceAdmin || k == access.PeopleUsersManage || k == access.PeopleRolesManage ||
 			k == access.ScopeAll || k == access.AICreditsManage || strings.HasPrefix(string(k), "system.")
 	}},
-	{"/app/", func(k access.Key) bool { return k == access.LearningTakeTests }},
+	{studentTree, func(k access.Key) bool { return k == access.LearningTakeTests }},
 	{"/auth/", func(k access.Key) bool { return k == access.Self }},
 	{"/me/", func(k access.Key) bool { return k == access.Self }},
 	{"/public/", func(access.Key) bool { return false }},

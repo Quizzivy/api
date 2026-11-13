@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 )
 
 type ChangePasswordInput struct {
@@ -23,13 +24,16 @@ type GoogleSignInInput struct {
 	CodeVerifier string
 	RedirectURI  string
 	JoinCode     string
+	Audience     access.Audience
 	UserAgent    string
 	IP           string
 	GeoLabel     string
 }
 
 // Origin is where a sign-in came from, as the request told the server.
+// Audience is the web host it came from, which the session belongs to.
 type Origin struct {
+	Audience  access.Audience
 	UserAgent string
 	IP        string
 	GeoLabel  string
@@ -37,7 +41,7 @@ type Origin struct {
 
 // Origin is where the Google sign-in came from.
 func (in GoogleSignInInput) Origin() Origin {
-	return Origin{UserAgent: in.UserAgent, IP: in.IP, GeoLabel: in.GeoLabel}
+	return Origin{Audience: in.Audience, UserAgent: in.UserAgent, IP: in.IP, GeoLabel: in.GeoLabel}
 }
 
 // TokenHash is the SHA-256 of a refresh token, which is what the database

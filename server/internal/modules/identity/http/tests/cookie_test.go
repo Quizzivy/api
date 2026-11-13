@@ -101,7 +101,7 @@ func TestLogoutClearsTheCookieItReplaces(t *testing.T) {
 
 	var resp openapi.LogoutResponseObject
 	var err error
-	identityhttp.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		resp, err = h.Logout(r.Context(), openapi.LogoutRequestObject{})
 	})).ServeHTTP(httptest.NewRecorder(), req)
 	if err != nil {
@@ -142,7 +142,7 @@ func TestAFailedLogoutRendersItsErrorAfterTheClears(t *testing.T) {
 
 	var resp openapi.LogoutResponseObject
 	var err error
-	identityhttp.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		resp, err = h.Logout(r.Context(), openapi.LogoutRequestObject{})
 	})).ServeHTTP(httptest.NewRecorder(), req)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestMiddlewareLiftsTheCookieAndToleratesItsAbsence(t *testing.T) {
 		if cookie != nil {
 			req.AddCookie(cookie)
 		}
-		identityhttp.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		h.WithRefreshCookie(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			_, _ = h.RefreshSession(r.Context(), openapi.RefreshSessionRequestObject{})
 		})).ServeHTTP(httptest.NewRecorder(), req)
 		return fake.presented

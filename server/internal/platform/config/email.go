@@ -12,14 +12,13 @@ import (
 	"quizzivy/internal/platform/secrets"
 )
 
-// Email is the outgoing mail's configuration. RESEND_API_KEY, EMAIL_FROM and
-// APP_URL are one all-or-nothing group, required in production. Without the
-// group outside production the messages go to the sink directory SinkDir
-// names instead.
+// Email is the outgoing mail's configuration. RESEND_API_KEY and EMAIL_FROM
+// are one all-or-nothing group, required in production. Without the group
+// outside production the messages go to the sink directory SinkDir names
+// instead. A link in a message points into Config.Hosts.
 type Email struct {
 	APIKey     Secret
 	From       string
-	AppURL     string
 	ReplyTo    string
 	DailyLimit int
 	SendRate   int
@@ -56,12 +55,11 @@ func loadResend(cfg *Config) error {
 	e := &cfg.Email
 	key := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
 	from := strings.TrimSpace(os.Getenv("EMAIL_FROM"))
-	appURL := strings.TrimSpace(os.Getenv("APP_URL"))
 	e.ReplyTo = strings.TrimSpace(os.Getenv("EMAIL_REPLY_TO"))
 	e.SinkDir = strings.TrimSpace(os.Getenv("EMAIL_SINK_DIR"))
 	production := cfg.Env == productionEnv
 	set := 0
-	for _, v := range []string{key, from, appURL} {
+	for _, v := range []string{key, from} {
 		if v != "" {
 			set++
 		}
@@ -86,20 +84,16 @@ func loadResend(cfg *Config) error {
 	if err := checkMailbox("EMAIL_FROM", from); err != nil {
 		return err
 	}
-	origin, err := parseAppOrigin(appURL, production)
-	if err != nil {
-		return err
-	}
-	e.APIKey, e.From, e.AppURL = Secret(key), from, origin
+	e.APIKey, e.From = Secret(key), from
 	return nil
 }
 
 func checkEmailGroup(set int, production bool, sinkDir string) error {
 	switch {
-	case set != 0 && set != 3:
-		return fmt.Errorf("email needs RESEND_API_KEY, EMAIL_FROM and APP_URL together, or none of them")
+	case set != 0 && set != 2:
+		return fmt.Errorf("email needs RESEND_API_KEY and EMAIL_FROM together, or neither")
 	case set == 0 && production:
-		return fmt.Errorf("RESEND_API_KEY, EMAIL_FROM and APP_URL are required in production: without them the sink would take every message")
+		return fmt.Errorf("RESEND_API_KEY and EMAIL_FROM are required in production: without them the sink would take every message")
 	case sinkDir != "" && production:
 		return fmt.Errorf("EMAIL_SINK_DIR must not be set in production: it writes every message, links included, to disk instead of sending it")
 	}
@@ -116,18 +110,18 @@ func checkMailbox(name, raw string) error {
 	return nil
 }
 
-func parseAppOrigin(raw string, production bool) (string, error) {
+func parseAppOrigin(name, raw string, production bool) (string, error) {
 	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) {
-		return "", fmt.Errorf("APP_URL must not contain whitespace or a control character")
+		return "", fmt.Errorf("%s must not contain whitespace or a control character", name)
 	}
 	u, err := url.Parse(raw)
 	switch {
 	case err != nil || (u.Scheme != schemeHTTPS && u.Scheme != "http") || u.Host == "" || u.User != nil:
-		return "", fmt.Errorf("APP_URL must be an origin such as https://app.quizzivy.com")
+		return "", fmt.Errorf("%s must be an origin such as https://my.quizzivy.com", name)
 	case (u.Path != "" && u.Path != "/") || strings.ContainsAny(raw, "?#"):
-		return "", fmt.Errorf("APP_URL must be an origin such as https://app.quizzivy.com, with no path, query or fragment")
+		return "", fmt.Errorf("%s must be an origin such as https://my.quizzivy.com, with no path, query or fragment", name)
 	case production && u.Scheme != schemeHTTPS:
-		return "", fmt.Errorf("APP_URL must be https in production: a set-password link travels in it")
+		return "", fmt.Errorf("%s must be https in production: a set-password link travels in it", name)
 	}
 	return u.Scheme + "://" + strings.ToLower(u.Host), nil
 }

@@ -3,12 +3,14 @@ package http
 import (
 	"context"
 	"errors"
+	"fmt"
 	"quizzivy/gen/openapi"
 	"quizzivy/internal/modules/identity/application/command"
 	"quizzivy/internal/modules/identity/domain"
 	"quizzivy/internal/platform/httpapi"
 	"quizzivy/internal/platform/httpx"
 	"quizzivy/internal/shared/access"
+	"strings"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
@@ -25,6 +27,7 @@ func (h Identity) Login(ctx context.Context, request openapi.LoginRequestObject)
 	meta := httpx.RequestMetaFromContext(ctx)
 	session, err := h.app.Commands.Login.Handle(ctx, command.Login{Email: string(request.Body.Email),
 		Password:  request.Body.Password,
+		Audience:  audienceFromContext(ctx),
 		UserAgent: meta.UserAgent,
 		IP:        meta.IP,
 		GeoLabel:  GeoLabelFromContext(ctx),
@@ -36,6 +39,9 @@ func (h Identity) Login(ctx context.Context, request openapi.LoginRequestObject)
 		if errors.Is(err, domain.ErrPasswordSignInDisabled) {
 			return openapi.Login403JSONResponse(passwordSignInOff(ctx)), nil
 		}
+		if errors.Is(err, domain.ErrWrongHost) {
+			return openapi.Login403JSONResponse(h.wrongHost(ctx)), nil
+		}
 		return nil, err
 	}
 
@@ -46,9 +52,29 @@ func (h Identity) Login(ctx context.Context, request openapi.LoginRequestObject)
 			User:        h.currentUser(ctx, session.User, session.Permissions),
 		},
 		Headers: openapi.Login200ResponseHeaders{
-			SetCookie: httpapi.Ptr(refreshCookie(session.RefreshToken, h.refreshTTL, h.cookieSecure).String()),
+			SetCookie: httpapi.Ptr(refreshCookie(audienceFromContext(ctx), session.RefreshToken, h.refreshTTL, h.cookieSecure).String()),
 		},
 	}, nil
+}
+
+func (h Identity) wrongHost(ctx context.Context) openapi.ErrorResponse {
+	other := audienceFromContext(ctx).Other()
+	host := hostName(h.hosts.URL(other))
+	if other == access.AudienceStudent {
+		return httpapi.Error(ctx, openapi.FORBIDDEN, fmt.Sprintf(httpx.Text(ctx,
+			"Đây là tài khoản học viên. Hãy đăng nhập tại %s.",
+			"This is a student account. Sign in at %s."), host))
+	}
+	return httpapi.Error(ctx, openapi.FORBIDDEN, fmt.Sprintf(httpx.Text(ctx,
+		"Tài khoản này dành cho giáo viên và quản trị viên. Hãy đăng nhập tại %s.",
+		"This account is for teachers and admins. Sign in at %s."), host))
+}
+
+func hostName(origin string) string {
+	if _, host, found := strings.Cut(origin, "://"); found {
+		return host
+	}
+	return origin
 }
 
 func invalidCredentials(ctx context.Context) openapi.ErrorResponse {
@@ -74,6 +100,7 @@ func (h Identity) RefreshSession(ctx context.Context, _ openapi.RefreshSessionRe
 
 	meta := httpx.RequestMetaFromContext(ctx)
 	res, err := h.app.Commands.Refresh.Handle(ctx, command.Refresh{Token: refreshTokenFromContext(ctx),
+		Audience:  audienceFromContext(ctx),
 		UserAgent: meta.UserAgent,
 		IP:        meta.IP,
 		GeoLabel:  GeoLabelFromContext(ctx),
@@ -94,12 +121,14 @@ func (h Identity) RefreshSession(ctx context.Context, _ openapi.RefreshSessionRe
 	var body openapi.RefreshSession200JSONResponse
 	body.Body.AccessToken = res.AccessToken
 	body.Body.ExpiresIn = res.ExpiresIn
-	body.Headers.SetCookie = httpapi.Ptr(refreshCookie(res.RefreshToken, h.refreshTTL, h.cookieSecure).String())
+	body.Headers.SetCookie = httpapi.Ptr(refreshCookie(audienceFromContext(ctx), res.RefreshToken, h.refreshTTL, h.cookieSecure).String())
 	return body, nil
 }
 
-// Logout implements POST /auth/logout (§5.4). When the revoke fails the answer
-// is the router's 500 and still clears both cookies.
+// Logout implements POST /auth/logout (§5.4): it ends the session of the host
+// the request came from and clears that host's cookie, and the docs cookie
+// except at the student host. When the revoke fails the answer is the
+// router's 500 and still clears them.
 func (h Identity) Logout(ctx context.Context, _ openapi.LogoutRequestObject) (openapi.LogoutResponseObject, error) {
 	if h.app == nil {
 		return nil, httpx.ErrNotImplemented
@@ -111,10 +140,10 @@ func (h Identity) Logout(ctx context.Context, _ openapi.LogoutRequestObject) (op
 			httpx.Text(ctx, "Không có phiên đăng nhập.", "There is no sign-in session."))), nil
 	}
 	if _, err := h.app.Commands.Logout.Handle(ctx, command.Logout{Token: token}); err != nil {
-		return failedLogout{cleared: clearedSession{clearRefreshCookie(h.cookieSecure), clearDocsCookie()}, err: err}, nil
+		return failedLogout{cleared: h.signedOut(audienceFromContext(ctx)), err: err}, nil
 	}
 
-	return clearedSession{clearRefreshCookie(h.cookieSecure), clearDocsCookie()}, nil
+	return h.signedOut(audienceFromContext(ctx)), nil
 }
 
 func toCurrentUser(u domain.User, permissions access.Set) openapi.CurrentUser {

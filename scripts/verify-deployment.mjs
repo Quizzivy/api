@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 const api = process.env.API_ORIGIN ?? 'https://api.quizzivy.com';
-const web = process.env.WEB_ORIGIN ?? 'https://app.quizzivy.com';
+const webs = (process.env.WEB_ORIGINS ?? 'https://my.quizzivy.com,https://portal.quizzivy.com').split(',').map((origin) => origin.trim()).filter(Boolean);
 const headers = process.argv.includes('--headers');
 
 async function response(url) {
@@ -18,13 +18,15 @@ async function response(url) {
 }
 
 try {
-  const [health, page] = await Promise.all([response(`${api}/healthz`), response(`${web}/login`)]);
+  const [health, ...pages] = await Promise.all([response(`${api}/healthz`), ...webs.map((web) => response(`${web}/login`))]);
   const body = await health.json();
   assert.equal(body.status, 'ok', 'API reports degraded health');
   assert.equal(body.database, 'ok', 'Database probe failed');
-  assert.match(page.headers.get('content-type') ?? '', /text\/html/);
-  assert.match(await page.text(), /id="root"/, 'SPA root is missing');
-  console.log(`PASS ${new Date().toISOString()} API, database and SPA${headers ? ', including security headers' : ''}`);
+  for (const [index, page] of pages.entries()) {
+    assert.match(page.headers.get('content-type') ?? '', /text\/html/, `${webs[index]} does not serve HTML`);
+    assert.match(await page.text(), /id="root"/, `${webs[index]}: SPA root is missing`);
+  }
+  console.log(`PASS ${new Date().toISOString()} API, database and SPA on ${webs.length} hosts${headers ? ', including security headers' : ''}`);
 } catch (error) {
   console.error(`FAIL ${new Date().toISOString()} ${error.message}`);
   process.exitCode = 1;

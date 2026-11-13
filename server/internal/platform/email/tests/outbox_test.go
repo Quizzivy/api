@@ -74,7 +74,7 @@ func TestACommittedMessageIsRenderedWithItsSecretSentOnceAndLosesTheSecret(t *te
 		t.Fatalf("sent %d times, want once", len(sent))
 	}
 	m := sent[0]
-	if m.IdempotencyKey != id || !strings.Contains(m.Text, "https://app.quizzivy.com/set-password#token=tok-"+to) || !strings.Contains(m.Subject, "Trung tâm Ánh Dương") {
+	if m.IdempotencyKey != id || !strings.Contains(m.Text, studentHost+"/set-password#token=tok-"+to) || !strings.Contains(m.Subject, "Trung tâm Ánh Dương") {
 		t.Errorf("message: %+v", m)
 	}
 	got := read(t, w.pool, id)

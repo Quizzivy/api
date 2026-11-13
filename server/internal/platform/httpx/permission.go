@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"quizzivy/internal/shared/access"
 )
@@ -28,7 +29,10 @@ type PrincipalResolver interface {
 // permissions do not meet the requirement it answers 403 FORBIDDEN. An account
 // that must still change its temporary password gets 403
 // PASSWORD_CHANGE_REQUIRED from every operation whose requirement does not
-// allow a temporary password, before its permissions are weighed. A resolve
+// allow a temporary password, before its permissions are weighed. A session
+// of the student host gets 403 FORBIDDEN from every operation under /teacher
+// and /admin, and one of the staff host from every operation under /app,
+// whatever the user's permissions. A resolve
 // that fails because the client cancelled the request answers
 // StatusClientClosedRequest, and any other failure 500. On success the
 // resolved principal joins the context.
@@ -63,13 +67,24 @@ func RequirePermission(requirements map[string]access.Requirement, resolver Prin
 			case resolved.MustChangePassword && !requirement.AllowsTemporaryPassword():
 				writePasswordChangeRequired(w, r)
 				return
-			case !requirement.SatisfiedBy(resolved.Permissions):
+			case !audienceReaches(caller.Audience, r.URL.Path), !requirement.SatisfiedBy(resolved.Permissions):
 				writeForbidden(w, r)
 				return
 			}
 			caller.Access = resolved
 			next.ServeHTTP(w, withPrincipal(r, caller))
 		})
+	}
+}
+
+func audienceReaches(audience access.Audience, path string) bool {
+	switch audience {
+	case access.AudienceStudent:
+		return !strings.HasPrefix(path, teacherTree) && !strings.HasPrefix(path, adminTree)
+	case access.AudienceStaff:
+		return !strings.HasPrefix(path, studentTree)
+	default:
+		return true
 	}
 }
 

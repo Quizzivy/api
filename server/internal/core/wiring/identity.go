@@ -72,7 +72,7 @@ func attachAvatars(ctx context.Context, cfg config.Config, logger *slog.Logger, 
 }
 
 func identityTransport(cfg config.Config, app *identityapp.Application, docs *identitytoken.Issuer) identityhttp.Identity {
-	return identityhttp.NewIdentity(app, cfg.RefreshTokenTTL, cfg.RefreshCookieSecure, docs)
+	return identityhttp.NewIdentity(app, cfg.RefreshTokenTTL, cfg.RefreshCookieSecure, docs).WithHosts(cfg.Hosts)
 }
 
 func boundPasswordHashing(cfg config.Config, logger *slog.Logger) {

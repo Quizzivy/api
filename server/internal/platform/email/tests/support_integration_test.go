@@ -18,6 +18,12 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/platform/email"
 	"quizzivy/internal/platform/secrets"
+	"quizzivy/internal/shared/access"
+)
+
+const (
+	studentHost = "https://my.quizzivy.com"
+	staffHost   = "https://portal.quizzivy.com"
 )
 
 func newPool(t *testing.T) *pgxpool.Pool {
@@ -150,8 +156,8 @@ func newWorld(t *testing.T, now time.Time) *world {
 	w := &world{pool: pool, outbox: email.NewOutbox(sealer), sender: &fakeSender{failWith: map[string]error{}}}
 	w.disp = &email.Dispatcher{
 		DB: db.NewContext(pool), Sealer: sealer, Sender: w.sender, Renderer: renderer,
-		Org:    func(context.Context) (string, error) { return "Trung tâm Ánh Dương", nil },
-		AppURL: "https://app.quizzivy.com", DailyLimit: 100, Location: time.FixedZone("ICT", 7*3600),
+		Org:   func(context.Context) (string, error) { return "Trung tâm Ánh Dương", nil },
+		Hosts: access.Hosts{Student: studentHost, Staff: staffHost}, DailyLimit: 100, Location: time.FixedZone("ICT", 7*3600),
 		Now: func() time.Time { return now }, Logger: slog.New(slog.DiscardHandler),
 	}
 	t.Cleanup(func() {
