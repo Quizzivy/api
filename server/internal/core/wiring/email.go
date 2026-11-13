@@ -19,7 +19,6 @@ import (
 
 const (
 	fallbackOrganizationName = "Quizzivy"
-	devAppURL                = "http://localhost:5173"
 	resendTimeout            = 15 * time.Second
 	emailRetry               = time.Minute
 	emailBusy                = 10 * time.Second
@@ -48,7 +47,8 @@ type Branding = cqrs.QueryHandler[organizationquery.Branding, organizationmodel.
 
 // BuildMail wires the email platform over cfg: Resend when its group is
 // configured and the sink directory otherwise, which the configuration refuses
-// in production. Every header names the centre by branding's short name, else
+// in production. A message's link points into the web host of cfg.Hosts its
+// recipient belongs at. Every header names the centre by branding's short name, else
 // its name, else Quizzivy; until the settings have been read once, a batch
 // fails and logs ORGANIZATION_SETTINGS_UNAVAILABLE. A missing SECRETS_KEY leaves the outbox unable to
 // seal a secret and every sealed row failing closed.
@@ -65,18 +65,16 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 		return Mail{}, err
 	}
 	var sender email.Sender = email.Sink{Dir: cfg.Email.SinkDir, Logger: logger}
-	appURL := cfg.Email.AppURL
 	if cfg.Email.Enabled() {
 		sender = email.Resend{APIKey: cfg.Email.APIKey.Reveal(), From: cfg.Email.From, Client: &http.Client{Timeout: resendTimeout}}
 	} else {
 		logger.Warn("email goes to the sink directory, not to a provider", "dir", cfg.Email.SinkDir)
-		appURL = devAppURL
 	}
 	return Mail{
 		Outbox: email.NewOutbox(sealer),
 		Dispatcher: &email.Dispatcher{
 			DB: dbx, Sealer: sealer, Sender: sender, Renderer: renderer,
-			Org: organizationName(branding, logger), AppURL: appURL, ReplyTo: cfg.Email.ReplyTo,
+			Org: organizationName(branding, logger), Hosts: cfg.Hosts, ReplyTo: cfg.Email.ReplyTo,
 			Limits: cfg.Limits, Interval: cfg.Email.SendInterval(),
 			Location: cfg.AppLocation, Logger: logger,
 		},

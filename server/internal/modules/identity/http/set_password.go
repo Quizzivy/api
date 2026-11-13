@@ -48,6 +48,7 @@ func (h Identity) SetPasswordWithLink(ctx context.Context, request openapi.SetPa
 	session, err := h.app.Commands.SetPasswordWithLink.Handle(ctx, command.SetPasswordWithLink{
 		Token:       request.Body.Token,
 		NewPassword: request.Body.NewPassword,
+		Audience:    audienceFromContext(ctx),
 		UserAgent:   meta.UserAgent,
 		IP:          meta.IP,
 		GeoLabel:    GeoLabelFromContext(ctx),
@@ -61,11 +62,13 @@ func (h Identity) SetPasswordWithLink(ctx context.Context, request openapi.SetPa
 				User:        h.currentUser(ctx, session.User, session.Permissions),
 			},
 			Headers: openapi.SetPasswordWithLink200ResponseHeaders{
-				SetCookie: httpapi.Ptr(refreshCookie(session.RefreshToken, h.refreshTTL, h.cookieSecure).String()),
+				SetCookie: httpapi.Ptr(refreshCookie(audienceFromContext(ctx), session.RefreshToken, h.refreshTTL, h.cookieSecure).String()),
 			},
 		}, nil
 	case errors.Is(err, domain.ErrSetPasswordLinkInvalid):
 		return openapi.SetPasswordWithLink410JSONResponse(setPasswordLinkInvalid(ctx)), nil
+	case errors.Is(err, domain.ErrWrongHost):
+		return openapi.SetPasswordWithLink403JSONResponse(h.wrongHost(ctx)), nil
 	case errors.Is(err, domain.ErrPasswordSignInDisabled):
 		return openapi.SetPasswordWithLink422JSONResponse(passwordSignInOff(ctx)), nil
 	case errors.Is(err, domain.ErrPasswordTooShort):

@@ -93,7 +93,7 @@ func signed(t *testing.T, key []byte, audience ...string) string {
 	return raw
 }
 
-func TestAnAccessTokenIssuerRefusesAnyTokenThatNamesAnAudience(t *testing.T) {
+func TestAnAccessTokenIssuerRefusesATokenForTheDocs(t *testing.T) {
 	access, _ := docsIssuers(t)
 	key := []byte(strings.Repeat("k", 32))
 	if _, err := access.Verify(signed(t, key)); err != nil {

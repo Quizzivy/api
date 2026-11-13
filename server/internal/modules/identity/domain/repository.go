@@ -18,6 +18,7 @@ type Users interface {
 	UnlinkIdentity(ctx context.Context, userID, provider string) (bool, error)
 	WriteAudit(ctx context.Context, e audit.Entry) error
 	Rotate(ctx context.Context, tokenHash []byte, next RefreshTokenRecord, now time.Time) (RotateResult, error)
+	RevokeFamily(ctx context.Context, userID, familyID string, now time.Time) error
 	RevokeFamilyByToken(ctx context.Context, tokenHash []byte, now time.Time) (string, error)
 	ListSessions(ctx context.Context, q SessionsQuery) ([]Session, error)
 	RevokeSession(ctx context.Context, in RevokeSessionRecord) error

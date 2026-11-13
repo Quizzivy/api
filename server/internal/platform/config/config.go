@@ -5,18 +5,24 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/limits"
 )
 
 type Config struct {
-	Port                        string
-	Env                         string
-	DatabaseURL                 string
-	AllowedOrigins              []string
+	Port           string
+	Env            string
+	DatabaseURL    string
+	AllowedOrigins []string
+	// Hosts are the origins of the student and the staff web host
+	// (STUDENT_APP_URL and STAFF_APP_URL): what a request's Origin is read
+	// against to decide whose session it is, and where an email's link points.
+	Hosts                       access.Hosts
 	ClientIPHeader              string
 	GoogleClientID              string
 	GoogleClientSecret          string
@@ -129,6 +135,9 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	cfg.AllowedOrigins = origins
+	if err := loadHosts(&cfg); err != nil {
+		return cfg, err
+	}
 
 	if _, err := strconv.Atoi(cfg.Port); err != nil {
 		return cfg, fmt.Errorf("API_PORT must be numeric, got %q", cfg.Port)
@@ -235,6 +244,39 @@ func parseOrigins(raw string) ([]string, error) {
 		}
 	}
 	return origins, nil
+}
+
+// DevAppURL is the origin of both web hosts outside production when
+// STUDENT_APP_URL and STAFF_APP_URL are unset: the web's dev server, which
+// serves the student and the staff pages from one origin.
+const DevAppURL = "http://localhost:5173"
+
+func loadHosts(cfg *Config) error {
+	student := strings.TrimSpace(os.Getenv("STUDENT_APP_URL"))
+	staff := strings.TrimSpace(os.Getenv("STAFF_APP_URL"))
+	production := cfg.Env == productionEnv
+	switch {
+	case (student == "") != (staff == ""):
+		return fmt.Errorf("STUDENT_APP_URL and STAFF_APP_URL are set together, or neither is")
+	case student == "" && production:
+		return fmt.Errorf("STUDENT_APP_URL and STAFF_APP_URL are required in production: the origins of the student and the staff web host")
+	case student == "":
+		cfg.Hosts = access.Hosts{Student: DevAppURL, Staff: DevAppURL}
+		return nil
+	}
+	var err error
+	if cfg.Hosts.Student, err = parseAppOrigin("STUDENT_APP_URL", student, production); err != nil {
+		return err
+	}
+	if cfg.Hosts.Staff, err = parseAppOrigin("STAFF_APP_URL", staff, production); err != nil {
+		return err
+	}
+	for name, origin := range map[string]string{"STUDENT_APP_URL": cfg.Hosts.Student, "STAFF_APP_URL": cfg.Hosts.Staff} {
+		if !slices.Contains(cfg.AllowedOrigins, origin) {
+			return fmt.Errorf("%s must be listed in CORS_ALLOWED_ORIGINS, or its pages cannot call the API", name)
+		}
+	}
+	return nil
 }
 
 func loadGoogle(cfg *Config) error {

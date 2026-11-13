@@ -4,15 +4,18 @@ import (
 	"context"
 	"quizzivy/internal/modules/identity/application/internal/support"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/cqrs"
 	"quizzivy/internal/shared/opt"
 )
 
-// RevokeSession ends one live session of the caller. RefreshToken is the
-// refresh cookie of the request, which names the caller's own session.
+// RevokeSession ends one live session of the caller at the host the request
+// came from. RefreshToken is the refresh cookie of the request, which names
+// the caller's own session.
 type RevokeSession struct {
 	UserID       string
 	FamilyID     string
+	Audience     access.Audience
 	RefreshToken string
 	IP           string
 	UserAgent    string
@@ -28,6 +31,7 @@ func (s RevokeSessionHandler) Handle(ctx context.Context, cmd RevokeSession) (cq
 	err := s.Users.RevokeSession(ctx, domain.RevokeSessionRecord{
 		UserID:           cmd.UserID,
 		FamilyID:         cmd.FamilyID,
+		Audience:         cmd.Audience,
 		CurrentTokenHash: support.TokenHash(cmd.RefreshToken),
 		Now:              s.Now(),
 		IP:               opt.String(cmd.IP),
@@ -40,10 +44,12 @@ func (s RevokeSessionHandler) Handle(ctx context.Context, cmd RevokeSession) (cq
 	return cqrs.Nothing{}, nil
 }
 
-// RevokeOtherSessions ends every live session of the caller except their own.
-// RefreshToken is the refresh cookie of the request.
+// RevokeOtherSessions ends every live session of the caller at the host the
+// request came from except their own. RefreshToken is the refresh cookie of
+// the request.
 type RevokeOtherSessions struct {
 	UserID       string
+	Audience     access.Audience
 	RefreshToken string
 	IP           string
 	UserAgent    string
@@ -59,6 +65,7 @@ type RevokeOtherSessionsHandler struct {
 func (s RevokeOtherSessionsHandler) Handle(ctx context.Context, cmd RevokeOtherSessions) (int, error) {
 	revoked, err := s.Users.RevokeOtherSessions(ctx, domain.RevokeOtherSessionsRecord{
 		UserID:           cmd.UserID,
+		Audience:         cmd.Audience,
 		CurrentTokenHash: support.TokenHash(cmd.RefreshToken),
 		Now:              s.Now(),
 		IP:               opt.String(cmd.IP),

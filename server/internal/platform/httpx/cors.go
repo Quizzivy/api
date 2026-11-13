@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// CORS for the SPA at app.quizzivy.com calling the API at api.quizzivy.com.
+// CORS admits the web hosts in allowedOrigins, exactly as they are written,
+// to the API on another host of the same site.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make([]string, 0, len(allowedOrigins))
 	for _, o := range allowedOrigins {

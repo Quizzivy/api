@@ -172,12 +172,18 @@ func NewService(users domain.Users, tokens *token.Issuer, refreshTTL time.Durati
 // SetClock replaces the time source. Tests only.
 func (s *Service) SetClock(now func() time.Time) { s.Now = now }
 
+// IssueSession opens a session of origin.Audience for user. It fails with
+// domain.ErrWrongHost, storing nothing, when the account does not belong at
+// that host.
 func (s *Service) IssueSession(ctx context.Context, user domain.User, origin Origin, method domain.SignInMethod) (model.Session, error) {
 	principal, err := s.Principals.Resolve(ctx, user.ID)
 	if err != nil {
 		return model.Session{}, fmt.Errorf("resolve permissions: %w", err)
 	}
-	access, err := s.Tokens.Issue(user.ID, user.SessionEpoch)
+	if !origin.Audience.Admits(principal.Permissions) {
+		return model.Session{}, domain.ErrWrongHost
+	}
+	access, err := s.Tokens.IssueFor(user.ID, user.SessionEpoch, origin.Audience)
 	if err != nil {
 		return model.Session{}, fmt.Errorf("issue access token: %w", err)
 	}
@@ -191,6 +197,7 @@ func (s *Service) IssueSession(ctx context.Context, user domain.User, origin Ori
 	rec := domain.RefreshTokenRecord{
 		UserID:    user.ID,
 		FamilyID:  uuid.NewString(),
+		Audience:  origin.Audience,
 		TokenHash: hash,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(s.RefreshTTL),

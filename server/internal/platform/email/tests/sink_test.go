@@ -17,7 +17,7 @@ func TestTheSinkWritesOneReadableFilePerMessageAndLogsOnlyTheRecipientsDomain(t 
 	var logs strings.Builder
 	sink := email.Sink{Dir: dir, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
 	m := sampleMessage()
-	m.Text = "https://app.quizzivy.com/set-password#token=abc"
+	m.Text = "https://my.quizzivy.com/set-password#token=abc"
 	id, err := sink.Send(context.Background(), m)
 	if err != nil || !strings.HasPrefix(id, "sink:") {
 		t.Fatalf("send: %q %v", id, err)

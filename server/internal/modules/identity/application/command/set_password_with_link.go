@@ -7,6 +7,7 @@ import (
 	"quizzivy/internal/modules/identity/application/internal/support"
 	"quizzivy/internal/modules/identity/application/model"
 	"quizzivy/internal/modules/identity/domain"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
 	"unicode/utf8"
 )
@@ -16,6 +17,7 @@ import (
 type SetPasswordWithLink struct {
 	Token       string
 	NewPassword string
+	Audience    access.Audience
 	UserAgent   string
 	IP          string
 	GeoLabel    string
@@ -28,7 +30,9 @@ type SetPasswordWithLinkHandler struct {
 // Handle fails with domain.ErrPasswordSignInDisabled, before it looks at the
 // token, while the centre has password sign-in off, and with
 // domain.ErrSetPasswordLinkInvalid for a link that cannot be used. An invalid
-// link is refused before any password is hashed. The password is set, the
+// link is refused before any password is hashed, and so is, with
+// domain.ErrWrongHost, a valid link whose account does not belong at
+// cmd.Audience, which leaves the link usable. The password is set, the
 // account's other links and sessions are ended and its cached permissions are
 // dropped before the new session is issued.
 func (s SetPasswordWithLinkHandler) Handle(ctx context.Context, cmd SetPasswordWithLink) (model.Session, error) {
@@ -51,7 +55,7 @@ func (s SetPasswordWithLinkHandler) Handle(ctx context.Context, cmd SetPasswordW
 		return model.Session{}, err
 	}
 	s.Principals.Forget(claimed.UserID)
-	return s.signIn(ctx, claimed.UserID, support.Origin{UserAgent: cmd.UserAgent, IP: cmd.IP, GeoLabel: cmd.GeoLabel})
+	return s.signIn(ctx, claimed.UserID, support.Origin{Audience: cmd.Audience, UserAgent: cmd.UserAgent, IP: cmd.IP, GeoLabel: cmd.GeoLabel})
 }
 
 func (s SetPasswordWithLinkHandler) usableLink(ctx context.Context, cmd SetPasswordWithLink) ([]byte, error) {
@@ -78,6 +82,13 @@ func (s SetPasswordWithLinkHandler) usableLink(ctx context.Context, cmd SetPassw
 	}
 	if !link.Usable(s.Now()) {
 		return nil, domain.ErrSetPasswordLinkInvalid
+	}
+	principal, err := s.Principals.Resolve(ctx, link.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve permissions: %w", err)
+	}
+	if !cmd.Audience.Admits(principal.Permissions) {
+		return nil, domain.ErrWrongHost
 	}
 	return hash, nil
 }

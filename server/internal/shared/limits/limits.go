@@ -371,6 +371,20 @@ func TeacherRole(role string) string {
 		` OR EXISTS (SELECT 1 FROM app.role_permissions rp WHERE rp.role_id = ` + role + ` AND (` + strings.Join(likes, " OR ") + `)))`
 }
 
+// StaffRole is the condition that a role id, the SQL expression role, opens
+// the teacher workspace or the Admin console, as access.HomeAudience decides it
+// from the role's keys: an account of such a role belongs at the staff host.
+func StaffRole(role string) string {
+	keys := access.AdminKeys()
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = "'" + string(k) + "'"
+	}
+	return `(` + TeacherRole(role) +
+		` OR EXISTS (SELECT 1 FROM app.role_permissions rk WHERE rk.role_id = ` + role +
+		` AND rk.permission_key IN (` + strings.Join(quoted, ", ") + `)))`
+}
+
 // TeacherRoles returns the ids of the roles that take a teacher place.
 func TeacherRoles(ctx context.Context, q Querier) (map[string]struct{}, error) {
 	var ids []string

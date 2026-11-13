@@ -2,6 +2,8 @@ package domain
 
 import (
 	"time"
+
+	"quizzivy/internal/shared/access"
 )
 
 // SignInMethod is how a user proved who they are when a session began.
@@ -13,9 +15,12 @@ const (
 	SignInSetPasswordLink SignInMethod = "set_password_link"
 )
 
+// RefreshTokenRecord is one refresh token as it is stored. Audience is the
+// audience of its family, which a successor takes from its predecessor.
 type RefreshTokenRecord struct {
 	UserID    string
 	FamilyID  string
+	Audience  access.Audience
 	TokenHash []byte
 	IssuedAt  time.Time
 	ExpiresAt time.Time
@@ -40,7 +45,8 @@ type RotateOutcome int
 const (
 	// RotateOK: the token was live and has been consumed; its successor exists.
 	RotateOK RotateOutcome = iota
-	// RotateUnknown: no such token. Never issued, or already pruned.
+	// RotateUnknown: no such token of this audience. Never issued, already
+	// pruned, or of a session opened at another host.
 	RotateUnknown
 	// RotateExpired: issued by us, but aged out. Not an attack.
 	RotateExpired
@@ -93,30 +99,35 @@ type Session struct {
 	Current    bool
 }
 
-// SessionsQuery asks for a user's live sessions at Now. CurrentTokenHash is the
-// hash of the refresh cookie the request carried, nil when it carried none.
+// SessionsQuery asks for a user's live sessions of Audience at Now.
+// CurrentTokenHash is the hash of the refresh cookie the request carried, nil
+// when it carried none.
 type SessionsQuery struct {
 	UserID           string
+	Audience         access.Audience
 	CurrentTokenHash []byte
 	Now              time.Time
 	Limit            int
 }
 
-// RevokeSessionRecord is a user ending one of their own live sessions.
-// CurrentTokenHash is the hash of the refresh cookie the request carried.
+// RevokeSessionRecord is a user ending one of their own live sessions of
+// Audience. CurrentTokenHash is the hash of the refresh cookie the request
+// carried.
 type RevokeSessionRecord struct {
 	UserID           string
 	FamilyID         string
+	Audience         access.Audience
 	CurrentTokenHash []byte
 	Now              time.Time
 	IP               *string
 	UserAgent        *string
 }
 
-// RevokeOtherSessionsRecord is a user ending every live session of theirs but
-// the one the request's refresh cookie names.
+// RevokeOtherSessionsRecord is a user ending every live session of theirs of
+// Audience but the one the request's refresh cookie names.
 type RevokeOtherSessionsRecord struct {
 	UserID           string
+	Audience         access.Audience
 	CurrentTokenHash []byte
 	Now              time.Time
 	IP               *string

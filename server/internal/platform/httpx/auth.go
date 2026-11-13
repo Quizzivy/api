@@ -12,13 +12,15 @@ import (
 
 const principalKey ctxKey = 2
 
-// Principal is the authenticated caller: the user a verified access token names
-// and the session epoch it carries, and, once RequirePermission has resolved
-// the user, what the user may do.
+// Principal is the authenticated caller: the user a verified access token names,
+// the session epoch it carries and the audience of its session, and, once
+// RequirePermission has resolved the user, what the user may do. An empty
+// Audience is access.AudienceAny.
 type Principal struct {
-	UserID string
-	Epoch  int
-	Access access.Principal
+	UserID   string
+	Epoch    int
+	Audience access.Audience
+	Access   access.Principal
 }
 
 // RequireAuth enforces bearer authentication on every generated route that the

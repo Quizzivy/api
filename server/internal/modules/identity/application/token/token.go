@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"quizzivy/internal/shared/access"
 )
 
 var ErrTokenInvalid = errors.New("access token is invalid")
@@ -18,10 +20,21 @@ var ErrTokenExpired = errors.New("access token has expired")
 // holding the token and cannot be revoked before it expires, so it carries
 // identity and the session epoch -- never email, name, a role, or anything
 // that changes. A token without sep reads as epoch 0. A token minted before
-// v0.10.0 also carries a role claim, which is ignored.
+// v0.10.0 also carries a role claim, which is ignored. An access token of a
+// session opened at the student or the staff host names that host as its
+// audience; one of any other session names none.
 type Claims struct {
 	Epoch int `json:"sep,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// Host returns the audience of the session an access token belongs to:
+// access.AudienceAny for a token that names none.
+func (c *Claims) Host() access.Audience {
+	if len(c.Audience) == 1 {
+		return access.Audience(c.Audience[0])
+	}
+	return access.AudienceAny
 }
 
 type Issuer struct {
@@ -67,6 +80,20 @@ func (i *Issuer) TTL() time.Duration { return i.ttl }
 
 // Issue signs a token for userID carrying the user's session epoch.
 func (i *Issuer) Issue(userID string, epoch int) (string, error) {
+	return i.sign(userID, epoch, i.audience)
+}
+
+// IssueFor signs an access token for a session of audience: one that names
+// the student or the staff host as its audience, and for access.AudienceAny
+// the token Issue signs.
+func (i *Issuer) IssueFor(userID string, epoch int, audience access.Audience) (string, error) {
+	if audience == access.AudienceStudent || audience == access.AudienceStaff {
+		return i.sign(userID, epoch, string(audience))
+	}
+	return i.sign(userID, epoch, i.audience)
+}
+
+func (i *Issuer) sign(userID string, epoch int, audience string) (string, error) {
 	now := i.now()
 	claims := Claims{
 		Epoch: epoch,
@@ -78,14 +105,15 @@ func (i *Issuer) Issue(userID string, epoch int) (string, error) {
 			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
-	if i.audience != "" {
-		claims.Audience = jwt.ClaimStrings{i.audience}
+	if audience != "" {
+		claims.Audience = jwt.ClaimStrings{audience}
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(i.key)
 }
 
 // Verify parses and validates a token. An issuer with an audience accepts only
-// tokens for it; one without accepts only tokens that name no audience.
+// tokens for it; one without accepts a token that names no audience, or the
+// student or the staff host and nothing else.
 func (i *Issuer) Verify(raw string) (*Claims, error) {
 	claims := &Claims{}
 	options := []jwt.ParserOption{
@@ -115,7 +143,10 @@ func (i *Issuer) Verify(raw string) (*Claims, error) {
 		return nil, fmt.Errorf("%w: no subject", ErrTokenInvalid)
 	}
 	if i.audience == "" && len(claims.Audience) > 0 {
-		return nil, fmt.Errorf("%w: token is for %v", ErrTokenInvalid, claims.Audience)
+		host := claims.Host()
+		if host != access.AudienceStudent && host != access.AudienceStaff {
+			return nil, fmt.Errorf("%w: token is for %v", ErrTokenInvalid, claims.Audience)
+		}
 	}
 	return claims, nil
 }

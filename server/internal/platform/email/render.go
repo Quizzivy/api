@@ -71,6 +71,7 @@ func (DataExportReadyParams) Template() Template { return DataExportReady }
 
 type definition struct {
 	secret bool
+	staff  bool
 	decode func([]byte) (Params, error)
 	link   func(appURL string, p Params, secret string) string
 }
@@ -95,7 +96,7 @@ var definitions = map[Template]definition{
 	SignInInvite: {decode: decoder[SignInInviteParams](), link: func(appURL string, _ Params, _ string) string {
 		return appURL + "/login"
 	}},
-	DataExportReady: {decode: decoder[DataExportReadyParams](), link: func(appURL string, p Params, _ string) string {
+	DataExportReady: {staff: true, decode: decoder[DataExportReadyParams](), link: func(appURL string, p Params, _ string) string {
 		return appURL + "/admin/exports/" + url.PathEscape(p.(DataExportReadyParams).ExportID)
 	}},
 }
@@ -112,6 +113,11 @@ func templateNames() []string {
 	}
 	return names
 }
+
+// StaffOnly reports whether t's link opens a page of the staff host whoever
+// receives it. The link of any other template opens at the recipient's own
+// host.
+func StaffOnly(t Template) bool { return definitions[t].staff }
 
 // NeedsSecret reports whether t's link carries the outbox secret, so that a
 // message of it cannot be enqueued without one and no other message with one.
@@ -132,9 +138,9 @@ func DecodeParams(t Template, raw []byte) (Params, error) {
 }
 
 // Letter is what one message is rendered from: the recipient's locale, the
-// organization's short name for the header, the app's origin its link points
-// into, the template's params and, for a template that needs one, the secret
-// its link carries.
+// organization's short name for the header, the origin of the web host its
+// link points into, the template's params and, for a template that needs one,
+// the secret its link carries.
 type Letter struct {
 	Locale string
 	Org    string
