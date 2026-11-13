@@ -124,13 +124,25 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "~15 minute access token, held in memory only — never `localStorage`,\nnever `sessionStorage` (§5.2). On 401 the client calls `/auth/refresh`\nonce and retries; a second 401 logs out.\n\nWhile the account's `mustChangePassword` is set, every operation that\nneeds this token answers `403 PASSWORD_CHANGE_REQUIRED`, except\n`getCurrentUser` and `changePassword`; `logout` and `refreshSession`\nneed no token. The client sends the person to the change-password page.\n"
+        "description": "~15 minute access token, held in memory only — never `localStorage`,\nnever `sessionStorage` (§5.2). On 401 the client calls `/auth/refresh`\nonce and retries; a second 401 logs out.\n\nWhile the account's `mustChangePassword` is set, every operation that\nneeds this token answers `403 PASSWORD_CHANGE_REQUIRED`, except\n`getCurrentUser` and `changePassword`; `logout` and `refreshSession`\nneed no token. The client sends the person to the change-password page.\n\nA token belongs to the web host its session was opened at (§5.8). One\nfrom the student host is answered `403 FORBIDDEN` by every operation\nunder `/teacher` and `/admin`, and one from the staff host by every\noperation under `/app`, whatever the account's permissions. A session\nopened from any other origin has no such limit.\n"
       },
       "refreshCookie": {
         "type": "apiKey",
         "in": "cookie",
         "name": "quizzivy_refresh",
-        "description": "Opaque, rotating, `httpOnly; Secure; SameSite=Lax; Path=/auth`, and\nhost-only — no `Domain` attribute, so only the API host receives it.\n`SameSite=Lax` is sufficient because the SPA and the API are subdomains\nof one registrable domain and are therefore same-site.\n\nPresenting an already-rotated token revokes the whole family (§5.2).\n"
+        "description": "Opaque, rotating, `httpOnly; Secure; SameSite=Lax; Path=/auth`, and\nhost-only — no `Domain` attribute, so only the API host receives it.\n`SameSite=Lax` is sufficient because the SPA and the API are subdomains\nof one registrable domain and are therefore same-site.\n\nPresenting an already-rotated token revokes the whole family (§5.2).\n\n**One cookie per web host (§5.8).** The server reads the request's\n`Origin` and uses one cookie for it, never another: this one for an\norigin that is neither the student host nor the staff host (local\ndevelopment, a preview, a client that is not a browser),\n`quizzivy_refresh_student` (`studentRefreshCookie`) for the student\nhost and `quizzivy_refresh_staff` (`staffRefreshCookie`) for the staff\nhost. So one browser holds a student session and a staff session side\nby side, and signing out of one leaves the other. A session belongs to\nthe host it was opened at: its token under another host's cookie is\n`401 REFRESH_TOKEN_INVALID`.\n\nEvery operation that names \"the refresh cookie\" means the one of the\nrequest's host: sign-in, `refreshSession`, `logout`, `changePassword`\nand the caller's session list.\n"
+      },
+      "studentRefreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "quizzivy_refresh_student",
+        "description": "`refreshCookie` at the student host: the cookie of a session opened\nfrom that host's origin, with the same attributes. Only an account\nthat has the student app (`workspaces` holds `app`) is given one.\n"
+      },
+      "staffRefreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "quizzivy_refresh_staff",
+        "description": "`refreshCookie` at the staff host: the cookie of a session opened from\nthat host's origin, with the same attributes. Only an account that has\nthe teacher workspace or the Admin console (`workspaces` holds\n`teacher` or `admin`) is given one.\n"
       }
     },
     "parameters": {
@@ -14724,7 +14736,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth`"
+                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth`, under the name of the request's host (`refreshCookie`)."
               }
             },
             "content": {
@@ -14749,7 +14761,7 @@
             }
           },
           "403": {
-            "description": "`PASSWORD_SIGN_IN_DISABLED` — the centre has turned password\nsign-in off. It is decided before the email or the password is\nlooked at, so every password sign-in gets it alike and it says\nnothing about any account.\n",
+            "description": "`PASSWORD_SIGN_IN_DISABLED` — the centre has turned password\nsign-in off. It is decided before the email or the password is\nlooked at, so every password sign-in gets it alike and it says\nnothing about any account.\n\n`FORBIDDEN` — the email and the password are right, and the\naccount does not belong at the host the request came from: a\nstudent at the staff host, or staff at the student host (§5.8). No\nsession is opened, and the message names the host to sign in at;\nthe client links to that host's sign-in page.\n**Leak review.** It is decided after the password has been\nverified, so it tells the kind of an account only to someone who\nholds its password; a wrong password is `401` at either host.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -14799,7 +14811,7 @@
         ],
         "security": [],
         "summary": "Google sign-in, and the only self-signup path",
-        "description": "The frontend obtains an **authorization code with PKCE** — not an\nimplicit ID token — and this endpoint exchanges it server-side. The\nclient secret never leaves the backend (§5.3).\n\nResolution order (§5.3 step 4), in full:\n\n1. identity exists → log in\n2. verified email matches a user → link identity, log in\n3. no match **and** a valid `joinCode` → create account + enrol (§6.3)\n4. no match, no join code → `403 ACCOUNT_NOT_PROVISIONED`\n\nAn ID token with `email_verified: false` is **rejected outright** — no\nlink, no create, regardless of `joinCode`. This closes an\naccount-takeover path and is not negotiable (§5.1).\n",
+        "description": "The frontend obtains an **authorization code with PKCE** — not an\nimplicit ID token — and this endpoint exchanges it server-side. The\nclient secret never leaves the backend (§5.3).\n\nResolution order (§5.3 step 4), in full:\n\n1. identity exists → log in\n2. verified email matches a user → link identity, log in\n3. no match **and** a valid `joinCode` → create account + enrol (§6.3)\n4. no match, no join code → `403 ACCOUNT_NOT_PROVISIONED`\n\nAn ID token with `email_verified: false` is **rejected outright** — no\nlink, no create, regardless of `joinCode`. This closes an\naccount-takeover path and is not negotiable (§5.1).\n\n`redirectUri` is the callback of the host the person started from;\neach web host has its own, and the server allows exactly those.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -14844,7 +14856,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth` — §5.3 step 5. Without it the sign-in has no session."
+                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth`, under the name of the request's host (`refreshCookie`) — §5.3 step 5. Without it the sign-in has no session."
               }
             },
             "content": {
@@ -14869,7 +14881,7 @@
             }
           },
           "403": {
-            "description": "`ACCOUNT_NOT_PROVISIONED` — a valid Google identity with no matching\naccount and no join code. The client explains that a class code is\nneeded rather than offering a signup form (§5.3).\n\n`ACCOUNT_DISABLED` — the matched account is suspended. Named\nexplicitly here, unlike at password login: the caller has just\nproved to Google that they control this address, so the fact\ndiscloses nothing they could not confirm themselves, and an\nunexplained failure would send them to support instead of to the\nteacher.\n\n`IDENTITY_ALREADY_LINKED` — the verified email matches an account\nthat is already linked to a DIFFERENT Google `sub`. Linking a second\none would make \"unlink Google\" ambiguous, so it is refused (D-08).\n\n`GOOGLE_SIGN_IN_DISABLED` — the centre has turned Google sign-in\noff. `GOOGLE_DOMAIN_NOT_ALLOWED` — the verified address is outside\nthe centre's allowed domains. Both are decided for a code that\njoins a class as well.\n\n`SEAT_LIMIT` — a code would create the account, and the centre has\nused every seat an Admin allowed. The message names no figure; no\naccount is created and the code is not used.\n",
+            "description": "`ACCOUNT_NOT_PROVISIONED` — a valid Google identity with no matching\naccount and no join code. The client explains that a class code is\nneeded rather than offering a signup form (§5.3).\n\n`ACCOUNT_DISABLED` — the matched account is suspended. Named\nexplicitly here, unlike at password login: the caller has just\nproved to Google that they control this address, so the fact\ndiscloses nothing they could not confirm themselves, and an\nunexplained failure would send them to support instead of to the\nteacher.\n\n`IDENTITY_ALREADY_LINKED` — the verified email matches an account\nthat is already linked to a DIFFERENT Google `sub`. Linking a second\none would make \"unlink Google\" ambiguous, so it is refused (D-08).\n\n`GOOGLE_SIGN_IN_DISABLED` — the centre has turned Google sign-in\noff. `GOOGLE_DOMAIN_NOT_ALLOWED` — the verified address is outside\nthe centre's allowed domains. Both are decided for a code that\njoins a class as well.\n\n`SEAT_LIMIT` — a code would create the account, and the centre has\nused every seat an Admin allowed. The message names no figure; no\naccount is created and the code is not used.\n\n`FORBIDDEN` — the account Google confirmed does not belong at the\nhost the request came from (§5.8), as at `login`. A `joinCode` at\nthe staff host gets it too, before any account is looked up: a\ncode makes a student, so no account is created and the code is not\nused.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -15047,7 +15059,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth`"
+                "description": "`quizzivy_refresh=…; HttpOnly; Secure; SameSite=Lax; Path=/auth`, under the name of the request's host (`refreshCookie`)."
               }
             },
             "content": {
@@ -15060,6 +15072,16 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "description": "`FORBIDDEN` — the link is valid, and its account does not belong\nat the host the request came from (§5.8). Nothing was changed: the\nlink stays usable at the host its email named.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "410": {
             "description": "`SET_PASSWORD_LINK_INVALID` — as for `checkSetPasswordLink`. Nothing was changed.",
@@ -15120,10 +15142,16 @@
         "security": [
           {
             "refreshCookie": []
+          },
+          {
+            "studentRefreshCookie": []
+          },
+          {
+            "staffRefreshCookie": []
           }
         ],
         "summary": "Rotate the refresh token",
-        "description": "Reads the opaque token from the cookie and rotates it. Presenting an\nalready-rotated token revokes the **whole family** and forces re-login\n(§5.2).\n\nThe client must call this **single-flight** — one shared in-flight\npromise. Parallel calls on a cold page load would each present the same\ntoken, trip reuse detection, and log the user out on every load.\n",
+        "description": "Reads the opaque token from the cookie of the request's host\n(`refreshCookie`) and rotates it. Presenting an already-rotated token\nrevokes the **whole family** and forces re-login (§5.2).\n\nA session whose account no longer belongs at its host (§5.8), because\nits role changed, is revoked here and answered `401`.\n\nThe client must call this **single-flight** — one shared in-flight\npromise. Parallel calls on a cold page load would each present the same\ntoken, trip reuse detection, and log the user out on every load.\n",
         "responses": {
           "200": {
             "description": "Rotated. Sets the replacement cookie.",
@@ -15132,7 +15160,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The REPLACEMENT `quizzivy_refresh` cookie. Rotation is only\nhalf-done without it: the predecessor is revoked server-side, so\na client that kept the old value is logged out on its next call.\n"
+                "description": "The REPLACEMENT refresh cookie, under the name it came in. Rotation is only\nhalf-done without it: the predecessor is revoked server-side, so\na client that kept the old value is logged out on its next call.\n"
               }
             },
             "content": {
@@ -15298,7 +15326,7 @@
     "/auth/logout": {
       "post": {
         "operationId": "logout",
-        "description": "Revokes the presented refresh token family. The client also clears its\nstore and calls `queryClient.clear()` (§5.4).\n\nAuthenticated by the refresh COOKIE, not the access token. An expired\naccess token must not be able to strand a live refresh family: the one\nmoment a user most wants to log out is the moment their session has\ngone strange.\n\nA logout that is refused or fails still clears the refresh and docs\ncookies when the request carried the refresh cookie: during a\nmaintenance window (`503 MAINTENANCE`), over the rate limit\n(`429 RATE_LIMITED`) and when the revoke fails (`500 INTERNAL`). In\nnone of the three is the family revoked: this device is signed out,\nbut a copy of the token held elsewhere stays usable for as long as it\nis rotated, and only a password reset, a disable or a password change\nends it. A request without the cookie gets nothing cleared.\n",
+        "description": "Revokes the presented refresh token family. The client also clears its\nstore and calls `queryClient.clear()` (§5.4).\n\nIt ends the session of the host the request came from and clears that\nhost's cookie only (§5.8): a session the same browser holds at the\nother host stays signed in. The docs cookie is the Admin console's, so\na sign-out at the student host leaves it alone.\n\nAuthenticated by the refresh COOKIE, not the access token. An expired\naccess token must not be able to strand a live refresh family: the one\nmoment a user most wants to log out is the moment their session has\ngone strange.\n\nA logout that is refused or fails still clears the refresh and docs\ncookies when the request carried the refresh cookie: during a\nmaintenance window (`503 MAINTENANCE`), over the rate limit\n(`429 RATE_LIMITED`) and when the revoke fails (`500 INTERNAL`). In\nnone of the three is the family revoked: this device is signed out,\nbut a copy of the token held elsewhere stays usable for as long as it\nis rotated, and only a password reset, a disable or a password change\nends it. A request without the cookie gets nothing cleared.\n",
         "tags": [
           "auth"
         ],
@@ -15306,6 +15334,12 @@
         "security": [
           {
             "refreshCookie": []
+          },
+          {
+            "studentRefreshCookie": []
+          },
+          {
+            "staffRefreshCookie": []
           }
         ],
         "responses": {
@@ -15316,7 +15350,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Two headers. `quizzivy_refresh=; Max-Age=0` with the same Path and flags,\nor the browser keeps the old cookie; and `quizzivy_docs=; Path=/docs;\nMax-Age=0`, so signing out also ends an open API reference session (§5.5).\n"
+                "description": "Two headers. The refresh cookie of the request's host with\n`Max-Age=0` and the same Path and flags, or the browser keeps\nthe old cookie; and, except at the student host,\n`quizzivy_docs=; Path=/docs; Max-Age=0`, so signing out also\nends an open API reference session (§5.5).\n"
               }
             }
           },
@@ -15560,7 +15594,7 @@
           "auth"
         ],
         "summary": "The caller's signed-in devices",
-        "description": "Every live session of the caller, one row per sign-in, and no one\nelse's. The session of the request's refresh cookie comes first with\n`current: true`; the others follow by `lastUsedAt`, newest first, then\nby `familyId`. At most 100 rows: a caller with more sees the newest\nones, and \"sign out the others\" still ends them all.\n\nThe calling session is identified by the refresh cookie, which reaches\nthis endpoint because it is scoped `Path=/auth`. Without a cookie that\nnames a live session of the caller, the list is still returned and no\nrow is current.\n\n**Leak review.** Each row holds a handle, a label built from a closed\nlist of names, a city and a country code, and a time, all of the\ncaller's own session. A row holds no IP address, no raw user agent, no\ntoken or hash and no expiry. The location is the approximate place of\nthe last sign-in or refresh, which the caller can already see on their\nown device. Responses are `no-store`.\n",
+        "description": "Every live session of the caller at the host the request came from\n(§5.8), one row per sign-in, and no one else's. The session of the\nrequest's refresh cookie comes first with `current: true`; the others\nfollow by `lastUsedAt`, newest first, then by `familyId`. At most 100\nrows: a caller with more sees the newest ones, and \"sign out the\nothers\" still ends them all.\n\nA session the same account holds at the other web host is not in the\nlist, and `revokeSession` and `revokeOtherSessions` do not reach it.\nWhat ends the sessions of an account at both hosts is a change of its\npassword, a set-password link, an admin's reset or sign-out, and\ndisabling it.\n\nThe calling session is identified by the refresh cookie, which reaches\nthis endpoint because it is scoped `Path=/auth`. Without a cookie that\nnames a live session of the caller, the list is still returned and no\nrow is current.\n\n**Leak review.** Each row holds a handle, a label built from a closed\nlist of names, a city and a country code, and a time, all of the\ncaller's own session. A row holds no IP address, no raw user agent, no\ntoken or hash and no expiry. The location is the approximate place of\nthe last sign-in or refresh, which the caller can already see on their\nown device. Responses are `no-store`.\n",
         "responses": {
           "200": {
             "description": "The live sessions.",
