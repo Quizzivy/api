@@ -11,6 +11,6 @@ SELECT jsonb_build_object(
   'answers', (SELECT jsonb_build_object('rows',count(question_id),'digest',coalesce(sum(hashtextextended(concat_ws('|',attempt_id,question_id,payload,auto_score,manual_score),0)::numeric),0)) FROM app.attempt_answers),
   'events', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,attempt_id,session_id,kind,occurred_at,received_at,meta),0)::numeric),0)) FROM app.attempt_events),
   'audit', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,action,entity,entity_id,occurred_at,diff),0)::numeric),0)) FROM app.audit_log),
-  'media', (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'key',storage_key,'sha256',encode(checksum_sha256,'hex')) ORDER BY id),'[]'::jsonb) FROM app.media_assets WHERE deleted_at IS NULL OR id IN (SELECT media_asset_id FROM app.test_version_questions WHERE media_asset_id IS NOT NULL))
+  'media', (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'key',storage_key,'sha256',encode(checksum_sha256,'hex')) ORDER BY id),'[]'::jsonb) FROM app.media_assets WHERE purged_at IS NULL AND (deleted_at IS NULL OR id IN (SELECT media_asset_id FROM app.test_version_questions WHERE media_asset_id IS NOT NULL)))
 );
 COMMIT;

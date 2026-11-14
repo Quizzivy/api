@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,10 @@ type recoveryEvidence struct {
 		Rows   int             `json:"rows"`
 		Digest json.RawMessage `json:"digest"`
 	} `json:"users"`
+	Media []struct {
+		ID  string `json:"id"`
+		Key string `json:"key"`
+	} `json:"media"`
 }
 
 // evidenceIn runs the script's one query inside tx. The file opens and commits
@@ -50,6 +55,15 @@ func evidenceIn(t *testing.T, tx *sql.Tx) recoveryEvidence {
 	return evidence
 }
 
+func (e recoveryEvidence) lists(id string) bool {
+	return slices.ContainsFunc(e.Media, func(file struct {
+		ID  string `json:"id"`
+		Key string `json:"key"`
+	}) bool {
+		return file.ID == id
+	})
+}
+
 // The query names its columns, so a migration that drops or renames one breaks
 // the drill: users.role went in 00105 and nothing ran the script to notice.
 func TestTheRecoveryEvidenceReadsTheMigratedSchema(t *testing.T) {
@@ -73,6 +87,44 @@ func TestTheRecoveryEvidenceReadsTheMigratedSchema(t *testing.T) {
 		}
 		if after := evidenceIn(t, tx); string(after.Users.Digest) == string(before.Users.Digest) {
 			t.Error("a user's role changed and the users digest did not: the role is one of the critical columns")
+		}
+	})
+}
+
+// The drill checks every file of the manifest against storage. A file the
+// retention sweep purged has no object any more, so listing it would send the
+// operator after a loss that is none.
+func TestTheRecoveryMediaManifestListsOnlyFilesStillInStorage(t *testing.T) {
+	conn := migrated(t)
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		file := func(key, retirement string) string {
+			t.Helper()
+			var id string
+			if err := tx.QueryRow(`INSERT INTO app.media_assets
+				   (kind, storage_key, mime_type, bytes, original_filename, checksum_sha256, uploaded_by, owner_id)
+				 VALUES ('image', $1::text, 'image/png', 1024, 'i.png', sha256(convert_to($1::text, 'UTF8')), $2, $2) RETURNING id`, key, f.adminID).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			if retirement != "" {
+				if _, err := tx.Exec(`UPDATE app.media_assets SET `+retirement+` WHERE id = $1`, id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return id
+		}
+		inLibrary := file("media/recovery/in-library.png", "")
+		successor := file("media/recovery/successor.png", "")
+		replaced := file("media/recovery/replaced.png", "replaced_by = '"+successor+"', unreferenced_at = now()")
+		purged := file("media/recovery/purged.png", "replaced_by = '"+successor+"', unreferenced_at = now() - interval '8 days', purged_at = now()")
+
+		manifest := evidenceIn(t, tx)
+		for name, id := range map[string]string{"a file in the library": inLibrary, "a replaced file the sweep has not purged": replaced} {
+			if !manifest.lists(id) {
+				t.Errorf("%s is not in the media manifest", name)
+			}
+		}
+		if manifest.lists(purged) {
+			t.Error("a purged file is in the media manifest, though storage no longer holds its object")
 		}
 	})
 }
