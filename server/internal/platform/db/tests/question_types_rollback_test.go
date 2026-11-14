@@ -4,10 +4,12 @@ package db_test
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 
 	"quizzivy/internal/platform/db"
@@ -36,9 +38,28 @@ type refusal struct {
 
 func walkRefusals(t *testing.T, conn *sql.DB, dir string, steps []refusal) {
 	t.Helper()
+	walkRefusalsSaying(t, conn, dir, "", steps)
+}
+
+// matchingRefusal is how 00152's Down words its refusal, whichever of its four
+// conditions holds.
+const matchingRefusal = "matching questions exist; dropping their items would lose their answer keys"
+
+// walkRefusalsSaying is walkRefusals for Downs that refuse with a sentence of
+// their own: when says is set, each error must be the exception a Down raises
+// with exactly that sentence, so a rollback that fails for another reason is
+// not taken for the refusal. The error goose returns quotes the statement,
+// sentence included, so the sentence is read from the database's own error.
+func walkRefusalsSaying(t *testing.T, conn *sql.DB, dir, says string, steps []refusal) {
+	t.Helper()
 	for _, step := range steps {
-		if err := goose.DownTo(conn, dir, step.target); err == nil {
+		err := goose.DownTo(conn, dir, step.target)
+		if err == nil {
 			t.Fatalf("the rollback to %d ran while %s exists", step.target, step.name)
+		}
+		var raised *pgconn.PgError
+		if says != "" && (!errors.As(err, &raised) || raised.Code != "P0001" || raised.Message != says) {
+			t.Fatalf("the rollback past %s failed with %q, want the raised refusal %q", step.name, err, says)
 		}
 		if version, err := goose.GetDBVersion(conn); err != nil || version != step.stays {
 			t.Fatalf("version after refusing %s: %d, %v; want %d", step.name, version, err, step.stays)
@@ -225,7 +246,12 @@ func TestTheBandRollbackRefusesWhileABandExists(t *testing.T) {
 // in either table stops 00152 before its items go, with or without items, and a criterion in either
 // table stops 00150. Each table is left alone in front of its refusal. The
 // rollback that then runs must leave 00149's schema, and 00152's Up must apply
-// over a matching question written before it.
+// over a matching question written before it, in the bank and in a version.
+//
+// 00152's Down refuses on four conditions, and each is met alone (QC-R6B-6):
+// nothing ties an item to a question of type matching, so an item on a
+// question of another type is the one row an items-only check can see. Each of
+// those refusals must be 00152's own sentence (QC-R6B-7), not another failure.
 func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
 		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
@@ -249,6 +275,7 @@ func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 	}
 
 	var author, section, matching, criterion, frozenCriterion string
+	var choice, choiceOption, frozenChoice, frozenChoiceOption string
 	withTx(t, conn, func(tx *sql.Tx, f fixture) {
 		author = f.adminID
 		var attempt, question string
@@ -265,6 +292,20 @@ func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 			t.Fatal(err)
 		}
 		section = newVersion(t, tx, f.adminID)
+		// A choice question in the bank and one in a version, each with one
+		// option: what an item can hang on while no question is matching.
+		choice = newQuestion(t, tx, f.adminID, "single_choice", "Chọn một")
+		scan := func(dest *string, insert string, args ...any) {
+			t.Helper()
+			if err := tx.QueryRow(insert, args...).Scan(dest); err != nil {
+				t.Fatal(err)
+			}
+		}
+		scan(&choiceOption, `INSERT INTO app.question_options (question_id, ordinal, text) VALUES ($1, 0, 'A') RETURNING id`, choice)
+		scan(&frozenChoice, `INSERT INTO app.test_version_questions (test_version_section_id, ordinal, type, prompt, points)
+			VALUES ($1, 1, 'single_choice', 'Chọn một', 1.0) RETURNING id`, section)
+		scan(&frozenChoiceOption, `INSERT INTO app.test_version_options (test_version_question_id, ordinal, text)
+			VALUES ($1, 0, 'A') RETURNING id`, frozenChoice)
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
@@ -276,11 +317,35 @@ func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	count := func(query string) int {
+		t.Helper()
+		var n int
+		if err := conn.QueryRow(query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// alone fails unless the row a refusal was just met for was the only one
+	// 00152's Down looks for: others names the three conditions beside it.
+	alone := func(row, others string) {
+		t.Helper()
+		if n := count(`SELECT ` + others); n != 0 {
+			t.Fatalf("%d other rows stood beside %s, so it did not refuse alone", n, row)
+		}
+	}
+	const (
+		bankMatching   = `(SELECT count(*) FROM app.questions WHERE type = 'matching')`
+		frozenMatches  = `(SELECT count(*) FROM app.test_version_questions WHERE type = 'matching')`
+		bankItems      = `(SELECT count(*) FROM app.question_match_items)`
+		frozenItemRows = `(SELECT count(*) FROM app.test_version_match_items)`
+	)
 	var frozenMatching string
 	walkRefusals(t, conn, dir, []refusal{
 		{"a criterion grade without a band", matchItems, answerBands, func() {
 			exec(`DELETE FROM app.attempt_answer_criteria`)
 		}},
+	})
+	walkRefusalsSaying(t, conn, dir, matchingRefusal, []refusal{
 		{"a bank matching question with an item", rubricCriteria + 1, matchItems, func() {
 			exec(`DELETE FROM app.question_match_items WHERE question_id = $1`, matching)
 		}},
@@ -293,8 +358,23 @@ func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 			}
 		}},
 		{"a frozen matching question", rubricCriteria + 1, matchItems, func() {
+			alone("the frozen matching question", bankMatching+`+`+bankItems+`+`+frozenItemRows)
 			exec(`DELETE FROM app.test_version_questions WHERE id = $1`, frozenMatching)
+			exec(`INSERT INTO app.question_match_items (question_id, ordinal, text, correct_option_id)
+				VALUES ($1, 0, 'Đoạn A', $2)`, choice, choiceOption)
 		}},
+		{"a bank item with no matching question", rubricCriteria + 1, matchItems, func() {
+			alone("the bank item", bankMatching+`+`+frozenMatches+`+`+frozenItemRows)
+			exec(`DELETE FROM app.question_match_items WHERE question_id = $1`, choice)
+			exec(`INSERT INTO app.test_version_match_items (test_version_question_id, ordinal, text, correct_option_id)
+				VALUES ($1, 0, 'Đoạn A', $2)`, frozenChoice, frozenChoiceOption)
+		}},
+		{"a frozen item with no matching question", rubricCriteria + 1, matchItems, func() {
+			alone("the frozen item", bankMatching+`+`+frozenMatches+`+`+bankItems)
+			exec(`DELETE FROM app.test_version_match_items WHERE test_version_question_id = $1`, frozenChoice)
+		}},
+	})
+	walkRefusals(t, conn, dir, []refusal{
 		{"rubric criteria in both tables", fixedOrderChoices, rubricCriteria, func() {
 			exec(`DELETE FROM app.question_rubric_criteria WHERE id = $1`, criterion)
 		}},
@@ -315,15 +395,18 @@ func TestTheGradingRollbacksRefuseWhileARowNeedsThem(t *testing.T) {
 	}
 
 	exec(`INSERT INTO app.questions (type, prompt, points, created_by, owner_id) VALUES ('matching', 'Nối', 1.0, $1, $1)`, author)
+	exec(`INSERT INTO app.test_version_questions (test_version_section_id, ordinal, type, prompt, points)
+		VALUES ($1, 0, 'matching', 'Nối', 1.0)`, section)
 	if err := goose.UpTo(conn, dir, answerBands); err != nil {
-		t.Fatalf("00152 did not apply over a matching question written before it: %v", err)
+		t.Fatalf("00152 did not apply over a matching question written before it, in the bank and in a version: %v", err)
 	}
-	var unset int
-	if err := conn.QueryRow(`SELECT count(*) FROM app.questions WHERE type = 'matching' AND match_allow_reuse IS DISTINCT FROM false`).Scan(&unset); err != nil {
-		t.Fatal(err)
-	}
-	if unset != 0 {
-		t.Errorf("%d matching questions were not backfilled with match_allow_reuse = false", unset)
+	for _, table := range []string{"app.questions", "app.test_version_questions"} {
+		if n := count(`SELECT count(*) FROM ` + table + ` WHERE type = 'matching'`); n != 1 {
+			t.Fatalf("%s holds %d matching questions, want the one written before 00152", table, n)
+		}
+		if unset := count(`SELECT count(*) FROM ` + table + ` WHERE type = 'matching' AND match_allow_reuse IS DISTINCT FROM false`); unset != 0 {
+			t.Errorf("%d matching questions of %s were not backfilled with match_allow_reuse = false", unset, table)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"quizzivy/internal/modules/tests/domain"
+	"quizzivy/internal/shared/validation"
 	"strings"
 )
 
@@ -42,19 +43,15 @@ func validateOwnedGroupUnits(sections []domain.SectionInput, ids []string) error
 			}
 			id := strings.ToLower(unit.ID)
 			if !present[id] {
-				return outlineGroupError("Nhóm chưa thuộc đề này. Hãy sao chép cả nhóm vào đề trước.")
+				return validation.Refuse("sections", "Nhóm chưa thuộc đề này. Hãy sao chép cả nhóm vào đề trước.", "The group is not in this test yet. Copy the whole group into the test first.")
 			}
 			delete(present, id)
 		}
 	}
 	if len(present) > 0 {
-		return outlineGroupError("Cấu trúc đang thiếu nhóm ngữ liệu. Hãy xoá nhóm bằng thao tác riêng trước khi bỏ khỏi đề.")
+		return validation.Refuse("sections", "Cấu trúc đang thiếu nhóm ngữ liệu. Hãy xoá nhóm bằng thao tác riêng trước khi bỏ khỏi đề.", "The structure leaves out a group with shared material. Delete the group with its own operation before taking it out of the test.")
 	}
 	return nil
-}
-
-func outlineGroupError(message string) error {
-	return &domain.ValidationError{Fields: []domain.FieldError{{Field: "sections", Message: message}}}
 }
 
 func clearDraftUnits(ctx context.Context, tx pgx.Tx, testID string) error {

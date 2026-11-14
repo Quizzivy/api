@@ -23,6 +23,10 @@ var labelSources = []labelSource{
 		rows:     `SELECT u.id, ` + userName + ` AS label FROM app.users u`,
 	},
 	{
+		entities: []string{"role"},
+		rows:     `SELECT r.id, r.name AS label FROM app.roles r`,
+	},
+	{
 		entities: []string{"class", "class_member"},
 		rows:     `SELECT c.id, c.name AS label FROM app.classes c`,
 	},

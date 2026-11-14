@@ -43,7 +43,7 @@ func (s StartExportHandler) Handle(ctx context.Context, c StartExport) (domain.E
 		return domain.ExportPlan{}, err
 	}
 	search := strings.TrimSpace(c.Query)
-	filter := domain.Filter{Category: c.Category, Query: search, Actions: domain.MatchingActions(search), Window: window}
+	filter := domain.Filter{Category: c.Category, Query: search, Actions: domain.MatchingActions(search), System: domain.NamesSystem(search), Window: window}
 
 	counted, err := s.Repo.CountExport(ctx, filter)
 	if err != nil {

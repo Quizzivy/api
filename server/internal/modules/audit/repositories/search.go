@@ -53,6 +53,9 @@ func (c *clauses) search(f domain.Filter) string {
 		`EXISTS (SELECT 1 FROM app.users sa WHERE sa.id = a.actor_user_id AND (` +
 			matches("sa.full_name") + ` OR ` + matches("sa.display_name") + ` OR ` + matches("sa.email") + `))`,
 	}
+	if f.System {
+		alternatives = append(alternatives, "a.actor_user_id IS NULL")
+	}
 	if len(f.Actions) > 0 {
 		alternatives = append(alternatives, "a.action = ANY("+c.arg(f.Actions)+"::text[])")
 	}

@@ -1,6 +1,7 @@
 package ratelimit_test
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,5 +106,60 @@ func TestAValueLongerThanTheSchemaAllowsYieldsNoKey(t *testing.T) {
 	}
 	if got := code(post(`{"joinCode":"` + strings.Repeat("K", 4000) + `"}`)); got != "" {
 		t.Errorf("an over-long code produced a key of %d bytes", len(got))
+	}
+}
+
+// cutShort is a request body as net/http hands it over when the declared
+// length ends early: the bytes that arrived, the truncation reported once,
+// then a clean end on every later read.
+type cutShort struct {
+	arrived  io.Reader
+	reported bool
+}
+
+func (b *cutShort) Read(p []byte) (int, error) {
+	if n, err := b.arrived.Read(p); n > 0 || err == nil {
+		return n, nil
+	}
+	if b.reported {
+		return 0, io.EOF
+	}
+	b.reported = true
+	return 0, io.ErrUnexpectedEOF
+}
+
+func TestABodyCutShortYieldsNoKeyAndStillFailsForTheNextReader(t *testing.T) {
+	const arrived = `{"email":"a@b`
+	key := ratelimit.JSONFieldKey("email", 4096, 254)
+	r := httptest.NewRequest(http.MethodPost, "/auth/login", &cutShort{arrived: strings.NewReader(arrived)})
+
+	for reader := 1; reader <= 2; reader++ {
+		if got := key(r); got != "" {
+			t.Errorf("key reader %d: a body cut short produced key %q, want none", reader, got)
+		}
+	}
+	for reader := 1; reader <= 2; reader++ {
+		got, err := io.ReadAll(r.Body)
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("reader %d behind the limiter: err = %v, want the truncation the key reader met", reader, err)
+		}
+		if reader == 1 && string(got) != arrived {
+			t.Errorf("reader 1 behind the limiter read %q, want the bytes that arrived, %q", got, arrived)
+		}
+	}
+}
+
+func TestAReadErrorPastTheKeyLimitIsLeftToTheNextReader(t *testing.T) {
+	big := `{"email":"a@b.co","pad":"` + strings.Repeat("x", 5000)
+	r := httptest.NewRequest(http.MethodPost, "/auth/login", &cutShort{arrived: strings.NewReader(big)})
+	if got := ratelimit.JSONFieldKey("email", 1024, 254)(r); got != "" {
+		t.Errorf("oversized body produced key %q", got)
+	}
+	got, err := io.ReadAll(r.Body)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("err = %v, want the body's own truncation, which the key reader never reached", err)
+	}
+	if string(got) != big {
+		t.Errorf("the next reader got %d bytes, want %d", len(got), len(big))
 	}
 }

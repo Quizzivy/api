@@ -168,9 +168,10 @@ func (a asker) unusable(ctx context.Context, feature domain.Feature, requestID s
 	return unusable(err)
 }
 
+// unusable reads a decoder's verdict as the operation's failure: an answer with nothing usable left is domain.ErrUnusable, which is also domain.ErrUnavailable.
 func unusable(err error) error {
 	if errors.Is(err, prompts.ErrUnusable) {
-		return fmt.Errorf("%w: %w", domain.ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", domain.ErrUnusable, err)
 	}
 	return err
 }

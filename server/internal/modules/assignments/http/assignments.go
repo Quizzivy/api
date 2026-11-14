@@ -287,16 +287,7 @@ func assignmentRequest(ctx context.Context, id string) (domain.Request, bool) {
 }
 
 func assignmentValidationError(ctx context.Context, invalid *domain.ValidationError) openapi.ErrorResponse {
-	resp := httpapi.Error(ctx, openapi.VALIDATIONFAILED,
-		httpx.Text(ctx, "Dữ liệu bài giao không hợp lệ.", "The assignment data is not valid."))
-	details := map[string]interface{}{}
-	for _, f := range invalid.Fields {
-		if _, seen := details[f.Field]; !seen {
-			details[f.Field] = f.Message
-		}
-	}
-	resp.Error.Details = &details
-	return resp
+	return httpapi.Invalid(ctx, httpx.Text(ctx, "Dữ liệu bài giao không hợp lệ.", "The assignment data is not valid."), invalid)
 }
 
 func toWriteInput(ctx context.Context, body openapi.AssignmentInput) (domain.WriteInput, error) {

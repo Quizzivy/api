@@ -86,3 +86,19 @@ func TestSentenceFallsBackToTheKeyForAnActionItDoesNotKnow(t *testing.T) {
 		t.Errorf("unknown: %q", got)
 	}
 }
+
+func TestTheSystemIsNamedInEitherLanguageWithoutCaseOrAccents(t *testing.T) {
+	for _, q := range []string{"System", "system", " SYSTEM ", "sys", "s", "Hệ thống", "he thong", "HỆ THỐNG", "hệ th", "Hệ"} {
+		if !domain.NamesSystem(q) {
+			t.Errorf("%q does not name the system", q)
+		}
+	}
+	for name, q := range map[string]string{
+		"nothing": "", "blanks": "   ", "more than the name": "systems", "the name and more": "hệ thống lớp", "another word": "admin",
+		"a person called Hồng": "Hồng", "a person called Thông": "Thông", "the end of the name": "thống", "the middle of it": "yste",
+	} {
+		if domain.NamesSystem(q) {
+			t.Errorf("%s (%q) names the system", name, q)
+		}
+	}
+}

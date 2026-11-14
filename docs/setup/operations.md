@@ -124,7 +124,8 @@ See [Neon branch creation and restoration](https://neon.com/docs/manage/branches
    student paper through an isolated API instance.
 5. Check every object in the evidence's media manifest against private storage:
    object exists, downloaded bytes match the recorded SHA-256, and an unsigned
-   request does not expose it. Database recovery cannot restore missing R2
+   request does not expose it. The manifest leaves out a file the retention
+   sweep has purged, whose object is gone by design. Database recovery cannot restore missing R2
    objects. Keep a separate private object backup and rehearse restoring it.
 6. Record start/end time, branch ID, source timestamp, recovery evidence,
    application check, media check and operator. Remove the temporary branch

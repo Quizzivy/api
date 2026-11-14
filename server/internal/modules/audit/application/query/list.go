@@ -49,7 +49,7 @@ func (s ListHandler) Handle(ctx context.Context, q List) (ListResult, error) {
 		return ListResult{}, err
 	}
 	search := strings.TrimSpace(q.Query)
-	filter := domain.Filter{Category: q.Category, Query: search, Actions: domain.MatchingActions(search), Window: window}
+	filter := domain.Filter{Category: q.Category, Query: search, Actions: domain.MatchingActions(search), System: domain.NamesSystem(search), Window: window}
 
 	facets, err := s.Repo.Facets(ctx, filter)
 	if err != nil {

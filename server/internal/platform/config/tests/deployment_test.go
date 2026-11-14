@@ -324,11 +324,12 @@ func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 	}
 }
 
-// The VPS half of deploy.yml. Nothing runs it until API_HOST is set to vps,
-// so this reads the file as text and asks the things that would go wrong
-// without anyone noticing: a deploy that trusts any host key, one that reaches
-// the box before the image exists, a push from the runner's own image store,
-// and an SDK promote that no longer waits for the API job that ran.
+// The VPS half of deploy.yml, which deploys production since API_HOST is vps.
+// Only a release runs it, so this reads the file as text and asks the things
+// that would go wrong without anyone noticing: a deploy that trusts any host
+// key, one that reaches the box before the image exists, a push from the
+// runner's own image store, and an SDK promote that no longer waits for the
+// API job that ran.
 func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	text := repoFile(t, ".github/workflows/deploy.yml")
 	start := strings.Index(text, "\n  api-vps:")

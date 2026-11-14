@@ -9,6 +9,7 @@ import (
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/schedule"
+	"quizzivy/internal/shared/validation"
 	"quizzivy/internal/shared/visibility"
 	"time"
 
@@ -164,9 +165,7 @@ func requireCloseAhead(ctx context.Context, tx pgx.Tx, closesAt *time.Time) erro
 		return fmt.Errorf("assignments: check the close is ahead: %w", err)
 	}
 	if !ahead {
-		return &domain.ValidationError{Fields: []domain.FieldError{{
-			Field: "closesAt", Message: "Thời điểm đóng mới phải ở phía trước.",
-		}}}
+		return validation.Refuse("closesAt", "Thời điểm đóng mới phải ở phía trước.", "The new closing time must be in the future.")
 	}
 	return nil
 }
@@ -289,10 +288,7 @@ func writeOverrides(ctx context.Context, tx pgx.Tx, req domain.Request, in domai
 func overrideWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.ConstraintName == overrideChangesCheck {
-		return &domain.ValidationError{Fields: []domain.FieldError{{
-			Field:   "extraAttempts",
-			Message: "Học viên không còn thay đổi nào. Hãy gỡ ngoại lệ thay vì đặt về 0.",
-		}}}
+		return validation.Refuse("extraAttempts", "Học viên không còn thay đổi nào. Hãy gỡ ngoại lệ thay vì đặt về 0.", "No change is left for the student. Remove the override instead of setting it to 0.")
 	}
 	return fmt.Errorf("assignments: write overrides: %w", err)
 }

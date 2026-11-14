@@ -151,3 +151,53 @@ func TestSearchAndCategoryNarrowTogether(t *testing.T) {
 		t.Errorf("%d entries, total %d, facets %+v", len(got.Entries), got.Page.Total, got.Facets)
 	}
 }
+
+// An entry with no actor is shown as "Hệ thống" or "System" (the web's list,
+// the export's first column), so a reader who searches for that name means
+// those entries (AU-10). The name is matched in either language, without case
+// or accents, from its beginning, so the list follows the reader as they type
+// it and a person called Hồng is not taken for "hệ thống".
+func TestASearchForTheSystemFindsTheEntriesWithNoActor(t *testing.T) {
+	w := newWorld(t)
+	someone := w.user("teacher", "Người Thật "+w.nonce, "")
+	bySystem := w.write(entry{action: "x.y", at: march(10, 9, 0)})
+	alsoBySystem := w.write(entry{action: "x.y", entity: "maintenance_window", at: march(10, 10, 0)})
+	w.write(entry{actor: someone, action: "x.y", at: march(10, 11, 0)})
+
+	for _, text := range []string{"System", "system", "SYSTEM", "Hệ thống", "he thong", "HỆ THỐNG", "syst", "hệ th"} {
+		if got := w.search(text); !slices.Equal(ids(got.Entries), []int64{alsoBySystem, bySystem}) {
+			t.Errorf("%q reads %v, want the two entries with no actor, %v", text, ids(got.Entries), []int64{alsoBySystem, bySystem})
+		} else if got.Facets.All != 2 {
+			t.Errorf("%q counts %d entries in all, want the 2 it lists", text, got.Facets.All)
+		}
+	}
+	for _, text := range []string{"systems " + w.nonce, "hệ thống " + w.nonce, "Hồng " + w.nonce, "thống", "yste"} {
+		if got := w.search(text); slices.Contains(ids(got.Entries), bySystem) || slices.Contains(ids(got.Entries), alsoBySystem) {
+			t.Errorf("%q reads %v, which holds an entry with no actor: it is not the system's name from its beginning", text, ids(got.Entries))
+		}
+	}
+	if got := w.search("nguoi that " + w.nonce); len(got.Entries) != 1 {
+		t.Errorf("a search for a person reads %d entries, want only that person's: no entry without an actor", len(got.Entries))
+	}
+}
+
+func TestAnExportOfASearchForTheSystemHoldsTheSameEntries(t *testing.T) {
+	w := newWorld(t)
+	someone := w.user("teacher", "Người Thật "+w.nonce, "")
+	bySystem := w.write(entry{action: "x.y", at: march(10, 9, 0)})
+	w.write(entry{actor: someone, action: "x.y", at: march(10, 11, 0)})
+
+	filter := w.march()
+	filter.Query, filter.System = "hệ thống", domain.NamesSystem("hệ thống")
+	counted, err := w.repo.CountExport(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := w.repo.ExportBatch(context.Background(), filter, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counted.Rows != 1 || len(batch) != 1 || batch[0].ID != bySystem {
+		t.Errorf("counted %d, read %d entries; want the one entry with no actor, %d", counted.Rows, len(batch), bySystem)
+	}
+}

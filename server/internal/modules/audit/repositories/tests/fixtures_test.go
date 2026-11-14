@@ -79,6 +79,10 @@ func (f fixtures) all() map[string]fixture {
 			versionID := f.version(testID)
 			return f.attempt(f.assignment(testID, versionID), versionID, w.user("student", label, ""))
 		}},
+		"role": {"role", func(label string) string {
+			return w.insertID(`INSERT INTO app.roles (name, icon, color) VALUES ($1, 'star', 'gray') RETURNING id::text`,
+				`DELETE FROM app.roles WHERE id = $1::uuid`, label)
+		}},
 		"media":    {"media_asset", func(label string) string { return f.media(label, "ten-tep.png") }},
 		"filename": {"media_asset", func(label string) string { return f.media(nil, label) }},
 		"import": {"word_import", func(label string) string {

@@ -9,6 +9,7 @@ import (
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/schedule"
+	"quizzivy/internal/shared/validation"
 	"quizzivy/internal/shared/visibility"
 	"time"
 
@@ -333,13 +334,13 @@ func checkOptionShuffle(ctx context.Context, tx pgx.Tx, in domain.WriteInput) er
 		return fmt.Errorf("assignments: check option order: %w", err)
 	}
 	if fixed {
-		return &domain.ValidationError{Fields: []domain.FieldError{{Field: "shuffleOptions", Message: "Đề có câu hỏi dùng thứ tự đáp án cố định. Hãy tắt xáo trộn đáp án."}}}
+		return validation.Refuse("shuffleOptions", "Đề có câu hỏi dùng thứ tự đáp án cố định. Hãy tắt xáo trộn đáp án.", "The test has a question whose options keep a fixed order. Turn off shuffling the options.")
 	}
 	return nil
 }
 
 func checkTargets(ctx context.Context, tx pgx.Tx, scope access.Scope, assignmentID string, in domain.WriteInput) error {
-	var fields []domain.FieldError
+	fields := &domain.ValidationError{}
 
 	if len(in.ClassIDs) > 0 {
 		missing, err := missingIDs(ctx, tx,
@@ -349,7 +350,7 @@ func checkTargets(ctx context.Context, tx pgx.Tx, scope access.Scope, assignment
 			return err
 		}
 		for _, id := range missing {
-			fields = append(fields, domain.FieldError{Field: "targets.classIds", Message: "Không tìm thấy lớp " + id + "."})
+			fields.AddIn("targets.classIds", fmt.Sprintf("Không tìm thấy lớp %s.", id), fmt.Sprintf("Class %s was not found.", id))
 		}
 	}
 
@@ -367,12 +368,12 @@ func checkTargets(ctx context.Context, tx pgx.Tx, scope access.Scope, assignment
 			return err
 		}
 		for _, id := range missing {
-			fields = append(fields, domain.FieldError{Field: "targets.studentIds", Message: "Không tìm thấy học viên " + id + "."})
+			fields.AddIn("targets.studentIds", fmt.Sprintf("Không tìm thấy học viên %s.", id), fmt.Sprintf("Student %s was not found.", id))
 		}
 	}
 
-	if len(fields) > 0 {
-		return &domain.ValidationError{Fields: fields}
+	if err := fields.OrNil(); err != nil {
+		return err
 	}
 	return nil
 }

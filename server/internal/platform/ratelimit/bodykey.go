@@ -14,7 +14,10 @@ import (
 // decodes the first JSON value as the handler does, so trailing bytes cannot
 // hide the field. A body over maxBytes, or a value longer than maxRunes, yields
 // no key: the route's body limit and its schema refuse such a request before
-// any handler runs.
+// any handler runs. A body whose read fails yields no key either, and the
+// restored body fails the same way for the next reader: a request body reports
+// a truncation once and a clean end afterwards, so without that the reader
+// behind the limiter would take a body cut short for a whole one.
 func JSONFieldKey(field string, maxBytes int64, maxRunes int) KeyFunc {
 	return JSONFieldKeyFunc(field, maxBytes, maxRunes, nil)
 }
@@ -26,13 +29,7 @@ func JSONFieldKeyFunc(field string, maxBytes int64, maxRunes int, canonical func
 			return ""
 		}
 
-		limited := io.LimitReader(r.Body, maxBytes+1)
-		buf, err := io.ReadAll(limited)
-		r.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(bytes.NewReader(buf), r.Body), r.Body}
-
+		buf, err := peekBody(r, maxBytes+1)
 		if err != nil || int64(len(buf)) > maxBytes {
 			return ""
 		}
@@ -55,3 +52,24 @@ func JSONFieldKeyFunc(field string, maxBytes int64, maxRunes int, canonical func
 		return strings.ToLower(strings.TrimSpace(value))
 	}
 }
+
+// peekBody reads up to limit bytes of r's body and puts the body back for the
+// next reader: the bytes read, then the rest, or the error that ended the read.
+func peekBody(r *http.Request, limit int64) ([]byte, error) {
+	buf, err := io.ReadAll(io.LimitReader(r.Body, limit))
+	rest := io.Reader(r.Body)
+	if err != nil {
+		rest = failedRead{err}
+	}
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(buf), rest), r.Body}
+	return buf, err
+}
+
+// failedRead stands where a body stopped being readable and answers every
+// read with the error that stopped it.
+type failedRead struct{ err error }
+
+func (f failedRead) Read([]byte) (int, error) { return 0, f.err }

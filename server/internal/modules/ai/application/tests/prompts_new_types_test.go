@@ -3,7 +3,9 @@ package application_test
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -190,5 +192,60 @@ func TestAMatchingDraftOverEightItemsOrTwelveChoicesIsDroppedAndOtherTypesKeepEi
 	}
 	if len(got[1].Options) != 8 {
 		t.Errorf("a single choice kept %d options, want at most 8", len(got[1].Options))
+	}
+}
+
+var matchingLimits = regexp.MustCompile(`options are (\d+)-(\d+) choices, items are (\d+)-(\d+) things to match`)
+
+// The numbers the matching rule gives the model are the ones the decoder
+// keeps a draft by (QC AIT-4): a draft at each limit the prompt names is kept,
+// and one past any of them is dropped.
+func TestTheMatchingRuleNamesTheLimitsTheDecoderKeeps(t *testing.T) {
+	draft := func(options, items int) map[string]any {
+		texts, pairs := []string{}, []map[string]any{}
+		for i := range options {
+			texts = append(texts, strings.Repeat("c", i+1))
+		}
+		for i := range items {
+			answer := ""
+			if options > 0 {
+				answer = texts[i%options]
+			}
+			pairs = append(pairs, map[string]any{"text": strings.Repeat("i", i+1), "answer": answer})
+		}
+		return map[string]any{"type": "matching", "prompt": fmt.Sprintf("%d choices, %d items", options, items), "options": texts, "answers": []string{}, "items": pairs, "explanation": ""}
+	}
+	for name, in := range map[string]prompts.GenerateInput{
+		"from a source": {Source: sourceText, Types: []string{prompts.Matching}, Count: 8, Level: "b1", Language: domain.English},
+		"standalone":    {Source: "jobs", Types: []string{prompts.Matching}, Count: 8, Level: "b1", Language: domain.English, Standalone: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			named := matchingLimits.FindStringSubmatch(prompts.Generate(in).User)
+			if named == nil {
+				t.Fatalf("the prompt names no limits for a matching question:\n%s", prompts.Generate(in).User)
+			}
+			var limit [4]int
+			for i := range limit {
+				limit[i], _ = strconv.Atoi(named[i+1])
+			}
+			minChoices, maxChoices, minItems, maxItems := limit[0], limit[1], limit[2], limit[3]
+			if minChoices != 2 || maxChoices != prompts.MaxDraftMatchChoices || minItems != 2 || maxItems != prompts.MaxDraftMatchItems {
+				t.Errorf("the prompt asks for %d-%d choices and %d-%d items, want 2-%d and 2-%d, what a draft is kept by",
+					minChoices, maxChoices, minItems, maxItems, prompts.MaxDraftMatchChoices, prompts.MaxDraftMatchItems)
+			}
+			for _, c := range []struct {
+				options, items int
+				kept           bool
+			}{
+				{minChoices, minItems, true}, {maxChoices, maxItems, true}, {minChoices, maxItems, true}, {maxChoices, minItems, true},
+				{maxChoices + 1, maxItems, false}, {maxChoices, maxItems + 1, false},
+				{minChoices - 1, minItems, false}, {minChoices, minItems - 1, false},
+			} {
+				got, err := prompts.DecodeGenerate(marshal(t, map[string]any{"questions": []map[string]any{draft(c.options, c.items)}}), in)
+				if kept := err == nil && len(got) == 1; kept != c.kept {
+					t.Errorf("a draft of %d choices and %d items: kept %v, want %v by the limits the prompt names (%s)", c.options, c.items, kept, c.kept, named[0])
+				}
+			}
+		})
 	}
 }

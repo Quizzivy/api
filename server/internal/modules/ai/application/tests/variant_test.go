@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -194,4 +196,130 @@ func TestAVariantThatRunsOutOfTimeReturnsWhatItHas(t *testing.T) {
 		t.Errorf("%d changes, want the first request's %d", len(got.Changes), prompts.VariantChunkSize)
 	}
 	onlyEnded(t, o, 1)
+}
+
+// The three ways a variant pass ends that nothing covered (VR-10): the
+// provider's client panics, the caller goes away, and the pass costs more than
+// the one reservation held for it.
+
+func TestAPanicInOneVariantRequestStillEndsTheReservationOnceWithWhatWasBilled(t *testing.T) {
+	for name, c := range map[string]struct {
+		panics  func(ports.Request) bool
+		settles int
+	}{
+		"one of three requests": {func(req ports.Request) bool { return askedNumbers(req)[0] == 9 }, 1},
+		"every one of them":     {func(ports.Request) bool { return true }, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+				if c.panics(req) {
+					panic("the provider client crashed")
+				}
+				return rewordEach(req)
+			}}
+			o := variantOps(t, completer, 0, 24)
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_, _ = o.app.Queries.Variant.Handle(context.Background(), reword())
+			}()
+			if recovered == nil || !strings.Contains(fmt.Sprint(recovered), "the provider client crashed") {
+				t.Fatalf("recovered %v, want the provider's panic to reach the caller", recovered)
+			}
+			if asked := len(completer.seen()); asked != 3 {
+				t.Fatalf("%d requests were made, want all three: a panic in one does not stop the others", asked)
+			}
+			onlyEnded(t, o, c.settles)
+			if c.settles == 1 && o.repo.settled[0].Tokens != totalTokens(2) {
+				t.Errorf("settled %+v, want the two requests that returned", o.repo.settled[0].Tokens)
+			}
+		})
+	}
+}
+
+func TestACancelledVariantSettlesWhatWasBilledOnceAndReleasesTheRest(t *testing.T) {
+	for name, c := range map[string]struct {
+		settles int
+	}{
+		"after one request answered": {1},
+		"before any answered":        {0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var started atomic.Int32
+			answeredOne := make(chan struct{})
+			var once sync.Once
+			completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+				started.Add(1)
+				if c.settles == 1 && askedNumbers(req)[0] == 1 {
+					defer once.Do(func() { close(answeredOne) })
+					return rewordEach(req)
+				}
+				<-ctx.Done()
+				return ports.Response{}, ctx.Err()
+			}}
+			o := variantOps(t, completer, 0, 24)
+			go func() {
+				for started.Load() < 3 {
+					time.Sleep(time.Millisecond)
+				}
+				if c.settles == 1 {
+					<-answeredOne
+				}
+				cancel()
+			}()
+			got, err := o.app.Queries.Variant.Handle(ctx, reword())
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want the cancellation", err)
+			}
+			if len(got.Changes) != 0 {
+				t.Errorf("a cancelled variant returned %d changes, want none: nobody is there to apply them", len(got.Changes))
+			}
+			onlyEnded(t, o, c.settles)
+			if c.settles == 1 && o.repo.settled[0].Tokens != totalTokens(1) {
+				t.Errorf("settled %+v, want the one request that answered", o.repo.settled[0].Tokens)
+			}
+		})
+	}
+}
+
+// One reservation of the feature's ceiling covers every request of the pass
+// (VR-4 describes the rule; this pins it). A pass that the provider metered
+// above it is settled once with everything metered, the teacher is charged
+// what was held, the overrun is logged, and no change is lost to it.
+func TestAVariantThatCostsMoreThanItsCeilingIsChargedWhatWasHeldAndSaysSo(t *testing.T) {
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) { return rewordEach(req) }}
+	o := variantOps(t, completer, 0, 40)
+	ceiling := domain.FeatureVariant.Ceiling()
+	// testPrices: one credit an input token and two an output token on the capable tier.
+	metered := 5 * (perCall.InputTokens + 2*perCall.OutputTokens)
+	if metered <= ceiling {
+		t.Fatalf("five requests meter %d credits, which is within the ceiling of %d: the fixture proves nothing", metered, ceiling)
+	}
+	o.repo.settleOut = domain.Settled{Charged: ceiling, Metered: metered}
+
+	got, err := o.app.Queries.Variant.Handle(context.Background(), reword())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Changes) != 40 {
+		t.Errorf("%d changes, want all 40: the overrun is the centre's cost, not the teacher's loss", len(got.Changes))
+	}
+	onlyEnded(t, o, 1)
+	if held := o.repo.reserved[0]; held.Feature != domain.FeatureVariant || held.Credits != ceiling {
+		t.Errorf("reserved %+v, want the variant's ceiling of %d once for the whole pass", held, ceiling)
+	}
+	if s := o.repo.settled[0]; s.Metered != metered || s.Tokens != totalTokens(5) || s.Reservation.Credits != ceiling {
+		t.Errorf("settlement %+v, want the %d credits and the tokens of all five requests against the %d held", s, metered, ceiling)
+	}
+	if got.Usage.Credits != ceiling {
+		t.Errorf("the answer says the call cost %d credits, want the %d that were charged", got.Usage.Credits, ceiling)
+	}
+	logs := o.logs.String()
+	for _, want := range []string{"level=WARN", `msg="ai call cost more than its ceiling"`, "feature=variant", fmt.Sprintf("ceiling=%d", ceiling), fmt.Sprintf("metered=%d", metered)} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("the log lacks %s:\n%s", want, logs)
+		}
+	}
 }
