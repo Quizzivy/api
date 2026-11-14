@@ -205,7 +205,7 @@ func csvHeader(ctx context.Context, loc *time.Location) []string {
 }
 
 func csvCells(ctx context.Context, e domain.Entry, lang domain.Language, loc *time.Location) []string {
-	actor, actorID := httpx.Text(ctx, "Hệ thống", "System"), ""
+	actor, actorID := httpx.Text(ctx, domain.SystemActorVI, domain.SystemActorEN), ""
 	if e.Actor != nil {
 		actor, actorID = e.Actor.Name, e.Actor.ID
 	}
