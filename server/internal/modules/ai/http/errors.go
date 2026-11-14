@@ -95,9 +95,10 @@ func failureOf(ctx context.Context, err error) (*failure, error) {
 	switch {
 	case errors.As(err, &exhausted):
 		return exhaustedFailure(ctx, exhausted.Scope), nil
+	case errors.Is(err, domain.ErrUnusable):
+		return unavailable(ctx, httpx.Text(ctx, "AI đã trả lời nhưng không có nội dung nào dùng được. Hãy thử lại.", "AI answered, but nothing it wrote could be used. Try again.")), nil
 	case errors.Is(err, domain.ErrUnavailable):
-		message := httpx.Text(ctx, "AI chưa phản hồi. Hãy thử lại sau ít phút.", "AI didn’t respond. Try again in a minute.")
-		return &failure{status: http.StatusServiceUnavailable, retryAfter: retryAfterSeconds, body: httpapi.Error(ctx, openapi.AIUNAVAILABLE, message)}, nil
+		return unavailable(ctx, httpx.Text(ctx, "AI chưa phản hồi. Hãy thử lại sau ít phút.", "AI didn’t respond. Try again in a minute.")), nil
 	case errors.As(err, &invalid):
 		return &failure{status: http.StatusBadRequest, body: httpapi.Invalid(ctx, httpx.Text(ctx, "Dữ liệu không hợp lệ.", "The data is not valid."), invalid)}, nil
 	}
@@ -107,6 +108,11 @@ func failureOf(ctx context.Context, err error) (*failure, error) {
 		}
 	}
 	return nil, err
+}
+
+// unavailable is 503 AI_UNAVAILABLE with Retry-After, for a call that gave the teacher nothing: message says whether the provider did not answer or answered nothing usable. The code is one, as the contract has it.
+func unavailable(ctx context.Context, message string) *failure {
+	return &failure{status: http.StatusServiceUnavailable, retryAfter: retryAfterSeconds, body: httpapi.Error(ctx, openapi.AIUNAVAILABLE, message)}
 }
 
 func exhaustedFailure(ctx context.Context, scope domain.Scope) *failure {
