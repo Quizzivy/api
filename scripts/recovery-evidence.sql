@@ -4,7 +4,7 @@ SELECT jsonb_build_object(
   'migration', (SELECT max(version_id) FROM public.goose_db_version WHERE is_applied),
   'unvalidatedConstraints', (SELECT count(oid) FROM pg_constraint WHERE connamespace='app'::regnamespace AND NOT convalidated),
   'appCanRewriteLogs', has_table_privilege('quizzivy_app','app.attempt_events','UPDATE,DELETE') OR has_table_privilege('quizzivy_app','app.audit_log','UPDATE,DELETE'),
-  'users', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,email,full_name,role,disabled_at),0)::numeric),0)) FROM app.users),
+  'users', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,email,full_name,role_id,disabled_at),0)::numeric),0)) FROM app.users),
   'versions', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,test_id,version,total_points,published_at),0)::numeric),0)) FROM app.test_versions),
   'questions', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,test_version_section_id,prompt,points,sample_answer,media_asset_id),0)::numeric),0)) FROM app.test_version_questions),
   'attempts', (SELECT jsonb_build_object('rows',count(id),'digest',coalesce(sum(hashtextextended(concat_ws('|',id,assignment_id,student_id,status,started_at,submitted_at,deadline_at),0)::numeric),0)) FROM app.attempts),
