@@ -50,10 +50,10 @@ func TestMissingMediaNamesEachQuestionAndGroupThatUsesAGoneAsset(t *testing.T) {
 		t.Fatalf("got %d violations, want %d: %+v", len(invalid.Violations), len(want), invalid.Violations)
 	}
 	for i, got := range invalid.Violations {
-		if got.Message == "" {
-			t.Errorf("violation %d carries no message", i)
+		if got.Message == "" || got.English == "" || got.English == got.Message {
+			t.Errorf("violation %d is worded %q and %q, want a Vietnamese and an English sentence", i, got.Message, got.English)
 		}
-		got.Message = ""
+		got.Message, got.English = "", ""
 		if got != want[i] {
 			t.Errorf("violation %d is %+v, want %+v", i, got, want[i])
 		}

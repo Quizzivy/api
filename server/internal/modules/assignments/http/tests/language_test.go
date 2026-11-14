@@ -125,8 +125,10 @@ func TestAssignmentRefusalsSpeakTheCallersLanguage(t *testing.T) {
 		blankReasonEN  = "Give a reason for reopening."
 		closesInPastVI = "Thời điểm đóng mới phải ở phía trước."
 		closesInPastEN = "The new closing time must be in the future."
-		noTargets      = "Chọn ít nhất một lớp hoặc một học viên."
 	)
+	opens := time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC)
+	// What the domain says of an assignment that closes as it opens and names nobody.
+	refusedByTheDomain := domain.WriteInput{OpensAt: opens, ClosesAt: opens, Review: domain.Review{Release: domain.ReleaseOnSubmit}}.Validate()
 	for _, c := range []struct {
 		name      string
 		serve     refusing
@@ -206,14 +208,40 @@ func TestAssignmentRefusalsSpeakTheCallersLanguage(t *testing.T) {
 			en:     "This cannot be deleted because assignments, attempts or history still refer to it.",
 		},
 		{
-			name:      "creating an assignment the domain refuses",
-			serve:     creating(&domain.ValidationError{Fields: []domain.FieldError{{Field: "targets", Message: noTargets}}}),
+			name:   "creating an assignment the domain refuses",
+			serve:  creating(refusedByTheDomain),
+			status: http.StatusBadRequest,
+			code:   openapi.VALIDATIONFAILED,
+			vi:     "Dữ liệu bài giao không hợp lệ.",
+			en:     "The assignment data is not valid.",
+			detailsVI: map[string]interface{}{
+				"window.closesAt": "Thời điểm đóng phải sau thời điểm mở.",
+				"targets":         "Chọn ít nhất một lớp hoặc một học viên.",
+			},
+			detailsEN: map[string]interface{}{
+				"window.closesAt": "The closing time must be after the opening time.",
+				"targets":         "Choose at least one class or one student.",
+			},
+		},
+		{
+			name:      "setting an override the domain refuses",
+			serve:     overriding(domain.OverrideInput{Reason: " "}.Validate()),
 			status:    http.StatusBadRequest,
 			code:      openapi.VALIDATIONFAILED,
 			vi:        "Dữ liệu bài giao không hợp lệ.",
 			en:        "The assignment data is not valid.",
-			detailsVI: map[string]interface{}{"targets": noTargets},
-			detailsEN: map[string]interface{}{"targets": noTargets},
+			detailsVI: map[string]interface{}{"reason": "Hãy ghi lý do.", "extendBy": "Hãy chọn ít nhất một thay đổi: thời gian đóng, thời lượng hoặc số lượt làm."},
+			detailsEN: map[string]interface{}{"reason": "Give a reason.", "extendBy": "Choose at least one change: the closing time, the duration or the number of attempts."},
+		},
+		{
+			name:      "a refusal worded in one language only is passed on as it is",
+			serve:     creating(&domain.ValidationError{Fields: []domain.FieldError{{Field: "studentNote", Message: "Ghi chú cho học viên phải là văn bản."}}}),
+			status:    http.StatusBadRequest,
+			code:      openapi.VALIDATIONFAILED,
+			vi:        "Dữ liệu bài giao không hợp lệ.",
+			en:        "The assignment data is not valid.",
+			detailsVI: map[string]interface{}{"studentNote": "Ghi chú cho học viên phải là văn bản."},
+			detailsEN: map[string]interface{}{"studentNote": "Ghi chú cho học viên phải là văn bản."},
 		},
 		{
 			name:   "a student opening an assignment that is not theirs",

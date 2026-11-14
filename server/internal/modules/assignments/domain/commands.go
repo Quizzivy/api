@@ -72,30 +72,30 @@ type WriteInput struct {
 }
 
 func (in WriteInput) Validate() error {
-	var fields []FieldError
+	fields := &ValidationError{}
 
 	if !in.ClosesAt.After(in.OpensAt) {
-		fields = append(fields, FieldError{Field: "window.closesAt", Message: "Thời điểm đóng phải sau thời điểm mở."})
+		fields.AddIn("window.closesAt", "Thời điểm đóng phải sau thời điểm mở.", "The closing time must be after the opening time.")
 	}
 
 	if in.CloseNow && in.OpensAt.After(in.Now) {
-		fields = append(fields, FieldError{Field: "closeNow", Message: "Không thể đóng ngay khi thời điểm mở còn ở phía trước."})
+		fields.AddIn("closeNow", "Không thể đóng ngay khi thời điểm mở còn ở phía trước.", "The assignment cannot be closed now while its opening time is still ahead.")
 	}
 
 	if !in.Review.Release.Valid() {
-		fields = append(fields, FieldError{Field: "review.release", Message: "Thời điểm công bố kết quả không hợp lệ."})
+		fields.AddIn("review.release", "Thời điểm công bố kết quả không hợp lệ.", "The time results are released is not valid.")
 	}
 
 	if in.StudentNote != nil && utf8.RuneCountInString(*in.StudentNote) > MaxStudentNote {
-		fields = append(fields, FieldError{Field: "studentNote", Message: "Ghi chú cho học viên tối đa 500 ký tự."})
+		fields.AddIn("studentNote", "Ghi chú cho học viên tối đa 500 ký tự.", "The note for students can have at most 500 characters.")
 	}
 
 	if !in.Draft && len(in.ClassIDs) == 0 && len(in.StudentIDs) == 0 {
-		fields = append(fields, FieldError{Field: "targets", Message: "Chọn ít nhất một lớp hoặc một học viên."})
+		fields.AddIn("targets", "Chọn ít nhất một lớp hoặc một học viên.", "Choose at least one class or one student.")
 	}
 
-	if len(fields) > 0 {
-		return &ValidationError{Fields: fields}
+	if err := fields.OrNil(); err != nil {
+		return err
 	}
 	return nil
 }

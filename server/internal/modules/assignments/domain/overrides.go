@@ -48,20 +48,20 @@ func (in OverrideInput) CleanReason() string {
 // ways of naming the close at once, and a request that changes nothing. That
 // ClosesAt is ahead is judged where the write is, at the database's clock.
 func (in OverrideInput) Validate() error {
-	var fields []FieldError
+	fields := &ValidationError{}
 
 	if in.CleanReason() == "" {
-		fields = append(fields, FieldError{Field: "reason", Message: "Hãy ghi lý do."})
+		fields.AddIn("reason", "Hãy ghi lý do.", "Give a reason.")
 	}
 	if in.ExtendBy != nil && in.ClosesAt != nil {
-		fields = append(fields, FieldError{Field: "closesAt", Message: "Chỉ chọn một trong hai: gia hạn thêm hoặc thời điểm đóng mới."})
+		fields.AddIn("closesAt", "Chỉ chọn một trong hai: gia hạn thêm hoặc thời điểm đóng mới.", "Choose only one of the two: more time or a new closing time.")
 	}
 	if in.ExtendBy == nil && in.ClosesAt == nil && in.DurationMin == nil && in.ExtraAttempts == nil {
-		fields = append(fields, FieldError{Field: "extendBy", Message: "Hãy chọn ít nhất một thay đổi: thời gian đóng, thời lượng hoặc số lượt làm."})
+		fields.AddIn("extendBy", "Hãy chọn ít nhất một thay đổi: thời gian đóng, thời lượng hoặc số lượt làm.", "Choose at least one change: the closing time, the duration or the number of attempts.")
 	}
 
-	if len(fields) > 0 {
-		return &ValidationError{Fields: fields}
+	if err := fields.OrNil(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -144,9 +144,26 @@ func fieldsOf(t *testing.T, err error) map[string]string {
 	}
 	out := map[string]string{}
 	for _, f := range invalid.Fields {
+		if f.English == "" || f.English == f.Message {
+			t.Errorf("%s is refused with %q and no English sentence of its own (%q)", f.Field, f.Message, f.English)
+		}
 		out[f.Field] = f.Message
 	}
 	return out
+}
+
+func englishOf(t *testing.T, err error, field string) string {
+	t.Helper()
+	var invalid *domain.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("want a ValidationError, got %v", err)
+	}
+	for _, f := range invalid.Fields {
+		if f.Field == field {
+			return f.English
+		}
+	}
+	return ""
 }
 
 func TestACreatedAssignmentCarriesItsTargetsAndRoster(t *testing.T) {
@@ -275,6 +292,9 @@ func TestAnUnknownTargetIsNamed(t *testing.T) {
 	message, ok := fieldsOf(t, err)["targets.studentIds"]
 	if !ok {
 		t.Fatalf("want a studentIds error, got %v", err)
+	}
+	if english := englishOf(t, err, "targets.studentIds"); !strings.Contains(english, ghost) {
+		t.Errorf("the English message does not name the id: %q", english)
 	}
 	if !strings.Contains(message, ghost) {
 		t.Errorf("the message does not name the id: %q", message)

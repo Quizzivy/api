@@ -45,19 +45,24 @@ func (PublishManager) Validate(d DraftContent) error {
 	add := func(v Violation) { violations = append(violations, v) }
 
 	if len(d.Sections) == 0 {
-		add(Violation{Rule: SectionNotEmpty, Message: "Đề cần ít nhất một phần có câu hỏi."})
+		add(Violation{Rule: SectionNotEmpty, Message: "Đề cần ít nhất một phần có câu hỏi.", English: "The test needs at least one section with a question."})
 	}
 	var total int64
 	for _, section := range d.Sections {
 		for _, group := range section.Groups {
 			if err := group.ValidateForPublish(false); err != nil {
-				add(Violation{Rule: GroupValid, SectionID: section.ID, GroupID: group.Group.ID, Message: "Nhóm câu hỏi chưa đầy đủ hoặc có liên kết ngữ liệu không hợp lệ."})
+				add(Violation{
+					Rule: GroupValid, SectionID: section.ID, GroupID: group.Group.ID,
+					Message: "Nhóm câu hỏi chưa đầy đủ hoặc có liên kết ngữ liệu không hợp lệ.",
+					English: "The question group is not complete, or a link to its material is not valid.",
+				})
 			}
 		}
 		if len(section.Questions) == 0 {
 			add(Violation{
 				Rule:      SectionNotEmpty,
 				Message:   fmt.Sprintf("Phần %q chưa có câu hỏi nào.", section.Title),
+				English:   fmt.Sprintf("Section %q has no questions yet.", section.Title),
 				SectionID: section.ID,
 			})
 			continue
@@ -70,7 +75,7 @@ func (PublishManager) Validate(d DraftContent) error {
 	}
 
 	if total > 99_999_999 {
-		add(Violation{Rule: TotalPointsValid, Message: "Tổng điểm của đề không được vượt quá 999999,99."})
+		add(Violation{Rule: TotalPointsValid, Message: "Tổng điểm của đề không được vượt quá 999999,99.", English: "The test's total points cannot be more than 999999.99."})
 	}
 	if len(violations) > 0 {
 		return &PublishValidationError{Violations: violations}
@@ -95,6 +100,7 @@ func (PublishManager) MissingMedia(d DraftContent, missing []string) error {
 				violations = append(violations, Violation{
 					Rule:       missingAttachmentRule(q),
 					Message:    "Tệp đính kèm của câu hỏi không tồn tại hoặc đã bị xoá. Hãy chọn tệp khác.",
+					English:    "The question's attachment does not exist or has been deleted. Choose another file.",
 					SectionID:  section.ID,
 					QuestionID: q.SourceID,
 				})
@@ -115,6 +121,7 @@ func (PublishManager) MissingMedia(d DraftContent, missing []string) error {
 			violations = append(violations, Violation{
 				Rule:      GroupValid,
 				Message:   "Một tệp ngữ liệu của nhóm không tồn tại hoặc đã bị xoá. Hãy chọn tệp khác.",
+				English:   "A material file of the group does not exist or has been deleted. Choose another file.",
 				SectionID: section.ID,
 				GroupID:   group.Group.ID,
 			})
