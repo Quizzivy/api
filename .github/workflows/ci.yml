@@ -224,6 +224,27 @@ jobs:
       - name: Apply migrations
         run: goose -dir migrations postgres "$TEST_DATABASE_URL" up
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The recovery drill's verifier (docs/setup/operations.md) names the
+      # columns it digests, so a migration that drops or renames one breaks it.
+      # Nothing ran it, and it failed on production the day it was needed
+      # (users.role, dropped by 00105). Run here against the schema the
+      # migrations have just made, then again against its own output, which is
+      # the comparison the drill makes. The verifier hides psql's error by
+      # design; on a failure the query is run once more to show it.
+      - name: Recovery verifier runs on the migrated schema
+        env:
+          RESTORE_DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          if ! node scripts/verify-recovery.mjs > "$RUNNER_TEMP/recovery.json"; then
+            psql -X -qAt -v ON_ERROR_STOP=1 -f scripts/recovery-evidence.sql "$RESTORE_DATABASE_URL" > /dev/null || true
+            exit 1
+          fi
+          node scripts/verify-recovery.mjs "$RUNNER_TEMP/recovery.json" > /dev/null
+
       - name: Prepare grading queue concurrency database
         id: grading-queue-db
         env:

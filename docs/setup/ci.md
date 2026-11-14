@@ -11,7 +11,7 @@ rules require; it passes only when every job did what the plan asked of it.
 | Plan | everything | Tests `scripts/ci/`, then decides which jobs run |
 | Contract | `code` | `make gen-check`: fetch `@quizzivy/sdk` at the version `api/sdk-version` names, copy its contract, test data and catalogs into `api/`, regenerate `server/gen`, fail on drift |
 | Server lint | `server` | vet, staticcheck, golangci-lint, gofmt |
-| Server tests | `server` | unit, integration and end-to-end tiers, the Word converter tests; migrations up, down, up |
+| Server tests | `server` | unit, integration and end-to-end tiers, the Word converter tests; migrations up, down, up; the recovery verifier (`scripts/verify-recovery.mjs`) against the migrated database |
 | Production image | `image` | Builds the root `Dockerfile`; starts `/app/api` and `/app/import-worker` from it as `nonroot` |
 | CI result | — | Fails unless each job above did what the plan said |
 | Sonar | everything | Pushes to `develop` only; not part of the result |
