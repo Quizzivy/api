@@ -123,4 +123,7 @@ func assertFixedShuffleError(t *testing.T, err error) {
 	if !errors.As(err, &invalid) || len(invalid.Fields) != 1 || invalid.Fields[0].Field != "shuffleOptions" {
 		t.Fatalf("wanted actionable shuffleOptions validation: %v", err)
 	}
+	if refused := invalid.Fields[0]; refused.English == "" || refused.English == refused.Message {
+		t.Errorf("shuffleOptions is refused with %q and no English sentence of its own (%q)", refused.Message, refused.English)
+	}
 }

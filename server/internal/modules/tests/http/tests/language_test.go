@@ -177,8 +177,10 @@ func TestTestRefusalsSpeakTheCallersLanguage(t *testing.T) {
 	const (
 		notPublishableVI = "Đề chưa thể xuất bản. Vui lòng sửa các vấn đề được đánh dấu."
 		notPublishableEN = "The test cannot be published yet. Please fix the marked problems."
-		wordedByDomain   = "Tổng điểm của đề không được vượt quá 999999,99."
 	)
+	blank := " "
+	nearTheLimit := domain.DraftQuestion{SourceID: uuid.NewString(), Type: "short_answer", Prompt: "Hà Nội?", Points: "999999.99"}
+	pastTheLimit := domain.DraftContent{Sections: []domain.DraftSection{{ID: uuid.NewString(), Title: "Reading", Questions: []domain.DraftQuestion{nearTheLimit, nearTheLimit}}}}
 	for _, c := range []struct {
 		name        string
 		serve       refusing
@@ -236,16 +238,25 @@ func TestTestRefusalsSpeakTheCallersLanguage(t *testing.T) {
 			detailEN: "A question in the test has been deleted.",
 		},
 		{
-			name: "publishing a draft the domain found a problem in",
-			serve: publishingTest(&domain.PublishValidationError{Violations: []domain.Violation{
-				{Rule: domain.TotalPointsValid, Message: wordedByDomain},
-			}}),
+			name:        "publishing a draft the domain found a problem in",
+			serve:       publishingTest(domain.Publishing.Validate(pastTheLimit)),
 			status:      http.StatusConflict,
 			code:        openapi.PUBLISHVALIDATIONFAILED,
 			vi:          notPublishableVI,
 			en:          notPublishableEN,
-			violationVI: wordedByDomain,
-			violationEN: wordedByDomain,
+			violationVI: "Tổng điểm của đề không được vượt quá 999999,99.",
+			violationEN: "The test's total points cannot be more than 999999.99.",
+		},
+		{
+			name:     "saving a test the domain refuses",
+			serve:    updatingTest(domain.UpdateInput{Title: &blank}.Validate()),
+			status:   http.StatusBadRequest,
+			code:     openapi.VALIDATIONFAILED,
+			vi:       "Dữ liệu đề không hợp lệ.",
+			en:       "The test data is not valid.",
+			detail:   "title",
+			detailVI: "Tên đề không được để trống.",
+			detailEN: "The test name cannot be empty.",
 		},
 		{
 			name:        "publishing a draft with no sections",

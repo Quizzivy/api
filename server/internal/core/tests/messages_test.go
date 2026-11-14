@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func transports(t *testing.T, server string) []string {
@@ -35,8 +36,9 @@ func TestNoTransportMessageIsVietnameseOnly(t *testing.T) {
 
 // The modules whose domain, use cases and repositories word every field
 // message in Vietnamese and in English (D-009, #284). A module joins the list
-// once its messages are pairs; the questions module went first, in R6.
-var pairedModules = []string{"questions"}
+// once its messages are pairs; the questions module went first, in R6, then
+// tests and assignments (Quizzivy/api#9).
+var pairedModules = []string{"questions", "tests", "assignments"}
 
 func TestNoDomainMessageIsVietnameseOnly(t *testing.T) {
 	server := filepath.Join("..", "..", "..")
@@ -106,9 +108,21 @@ func vietnameseOnly(path string) ([]string, error) {
 			if len(node.Args) < 3 || isBlank(node.Args[2]) {
 				report(node.Pos(), "this message has no English sentence")
 			}
+		case *ast.CompositeLit:
+			message, english := sentence(keyed(node, "Message")), keyed(node, "English")
+			if message == nil {
+				return true
+			}
+			worded[message] = true
+			if lit := sentence(english); lit != nil {
+				worded[lit] = true
+			}
+			if english == nil || isBlank(english) {
+				report(node.Pos(), "this message has no English sentence")
+			}
 		case *ast.BasicLit:
-			if node.Kind == token.STRING && !worded[node] && beyondASCII(node.Value) {
-				report(node.Pos(), "this sentence is not the Vietnamese or English argument of httpx.Text, httpx.TextFor, AddIn, Refuse or Pair")
+			if node.Kind == token.STRING && !worded[node] && wordedBeyondASCII(node.Value) {
+				report(node.Pos(), "this sentence is not the Vietnamese or English of httpx.Text, httpx.TextFor, AddIn, Refuse, Pair or a literal's Message and English")
 			}
 		}
 		return true
@@ -133,9 +147,28 @@ func wordsAMessage(call *ast.CallExpr, pkg string) bool {
 	return false
 }
 
+// keyed is the value a composite literal gives the field name, nil when the
+// literal does not name it: a refusal built as a literal words its sentences
+// in Message and English.
+func keyed(lit *ast.CompositeLit, name string) ast.Expr {
+	for _, element := range lit.Elts {
+		pair, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if key, ok := pair.Key.(*ast.Ident); ok && key.Name == name {
+			return pair.Value
+		}
+	}
+	return nil
+}
+
 // sentence is the string literal arg words a message with: the literal itself,
 // or the format of a fmt.Sprintf that fills it in. Nil otherwise.
 func sentence(arg ast.Expr) *ast.BasicLit {
+	if arg == nil {
+		return nil
+	}
 	if call, ok := arg.(*ast.CallExpr); ok && len(call.Args) > 0 {
 		fun, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || fun.Sel.Name != "Sprintf" {
@@ -161,9 +194,12 @@ func isBlank(arg ast.Expr) bool {
 	return strings.TrimSpace(unquoted(lit.Value)) == ""
 }
 
-func beyondASCII(literal string) bool {
+// wordedBeyondASCII reports whether literal holds a letter outside ASCII, as
+// every Vietnamese sentence does. A dash, an arrow, an ellipsis or a set of
+// whitespace is not a sentence in any language.
+func wordedBeyondASCII(literal string) bool {
 	for _, r := range unquoted(literal) {
-		if r > 0x7F {
+		if r > 0x7F && unicode.IsLetter(r) {
 			return true
 		}
 	}

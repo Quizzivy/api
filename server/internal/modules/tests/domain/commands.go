@@ -91,36 +91,35 @@ func sectionField(i int, field string) string {
 
 // Validate checks the parts of an outline write a schema cannot express.
 func (in UpdateInput) Validate() error {
-	var errs []FieldError
-	add := func(field, msg string) { errs = append(errs, FieldError{Field: field, Message: msg}) }
+	errs := &ValidationError{}
 
 	if in.Title != nil && strings.TrimSpace(*in.Title) == "" {
-		add("title", "Tên đề không được để trống.")
+		errs.AddIn("title", "Tên đề không được để trống.", "The test name cannot be empty.")
 	}
 	if in.Status != nil && !in.Status.valid() {
-		add("status", "Trạng thái không hợp lệ.")
+		errs.AddIn("status", "Trạng thái không hợp lệ.", "The status is not valid.")
 	}
 	if in.Status != nil && *in.Status == Published {
-		add("status", "Dùng thao tác xuất bản để chuyển đề sang trạng thái published.")
+		errs.AddIn("status", "Dùng thao tác xuất bản để chuyển đề sang trạng thái published.", "Use the publish operation to move the test to published.")
 	}
 
 	for i, s := range in.Sections {
 		if strings.TrimSpace(s.Title) == "" {
-			add(sectionField(i, "title"), "Tên phần không được để trống.")
+			errs.AddIn(sectionField(i, "title"), "Tên phần không được để trống.", "The section name cannot be empty.")
 		}
 		seen := make(map[string]bool, len(s.QuestionIDs))
 		for _, id := range s.QuestionIDs {
 			if seen[id] {
-				add(sectionField(i, "questionIds"), "Một câu hỏi chỉ được xuất hiện một lần trong phần.")
+				errs.AddIn(sectionField(i, "questionIds"), "Một câu hỏi chỉ được xuất hiện một lần trong phần.", "A question can appear only once in a section.")
 				break
 			}
 			seen[id] = true
 		}
 	}
-	errs = append(errs, validateMixedOutline(in)...)
+	validateMixedOutline(in, errs)
 
-	if len(errs) > 0 {
-		return &ValidationError{Fields: errs}
+	if err := errs.OrNil(); err != nil {
+		return err
 	}
 	return nil
 }
