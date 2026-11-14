@@ -41,11 +41,16 @@ type MatchPair struct {
 	Answer string
 }
 
-// The most items and choices a drafted matching question keeps, within what the bank takes.
+// The fewest and the most items and choices a drafted matching question keeps, within what the bank takes. The prompt asks the model for the same numbers (matchingLimits).
 const (
+	MinDraftMatchItems   = 2
 	MaxDraftMatchItems   = 8
+	MinDraftMatchChoices = 2
 	MaxDraftMatchChoices = 12
 )
+
+// matchingLimits is the part of the matching rule that tells the model how many choices and items to write: the limits withMatches keeps a draft by, so the model is never asked for less than is kept or told it may write what is dropped.
+var matchingLimits = fmt.Sprintf("options are %d-%d choices, items are %d-%d things to match", MinDraftMatchChoices, MaxDraftMatchChoices, MinDraftMatchItems, MaxDraftMatchItems)
 
 const generateSystem = "You write English test questions for Vietnamese learners. Every answer must be supported by the source. " + untrusted + "Reply with JSON only."
 
@@ -60,7 +65,7 @@ var typeRules = map[string]string{
 	FillBlank:      "fill_blank = a sentence with ___ for one gap; the answer is 1-3 words from the source.",
 	ShortAnswer:    "short_answer = a question answered in 1-3 words from the source.",
 	Tfng:           "tfng = a statement about the source; the options are exactly True, False and Not given. True when the source says it, False when the source says the opposite, Not given when the source does not say either way.",
-	Matching:       "matching = the prompt says what to match (such as each statement with the person who says it); options are 3-8 choices, items are 2-6 things to match, each with answer = the text of the choice that matches it, from the source; one or two choices may match nothing.",
+	Matching:       "matching = the prompt says what to match (such as each statement with the person who says it); " + matchingLimits + ", each with answer = the text of the choice that matches it, from the source; one or two choices may match nothing.",
 	Essay:          "essay = the prompt is a writing task about the source with its purpose and length (such as 150-250 words); answers holds one line on what a strong answer covers.",
 }
 
@@ -70,7 +75,7 @@ var standaloneRules = map[string]string{
 	TrueFalse:      typeRules[TrueFalse],
 	FillBlank:      "fill_blank = a sentence with ___ for one gap that only one answer of 1-3 words fits; list the accepted spellings.",
 	ShortAnswer:    "short_answer = a question with one answer of 1-3 words.",
-	Matching:       "matching = the prompt says what to match (such as each word with its meaning); options are 3-8 choices, items are 2-6 things to match, each with answer = the text of the choice that matches it and only that one; one or two choices may match nothing.",
+	Matching:       "matching = the prompt says what to match (such as each word with its meaning); " + matchingLimits + ", each with answer = the text of the choice that matches it and only that one; one or two choices may match nothing.",
 	Essay:          "essay = the prompt is a writing task with its purpose and length (such as 150-250 words); answers holds one line on what a strong answer covers.",
 }
 
@@ -245,10 +250,10 @@ func withKey(out Question, q rawQuestion) (Question, bool) {
 	return out, true
 }
 
-// withMatches keeps a matching draft only as the model wrote it, with nothing repaired (D-079 (i)): 2 to MaxDraftMatchChoices choices and 2 to MaxDraftMatchItems items, every text non-empty, no two choices and no two items the same once trimmed and compared without case or extra spaces, and each item's answer the text of exactly one choice under the same comparison. AnswerKey is the choices the items use, in the order of the choices.
+// withMatches keeps a matching draft only as the model wrote it, with nothing repaired (D-079 (i)): MinDraftMatchChoices to MaxDraftMatchChoices choices and MinDraftMatchItems to MaxDraftMatchItems items, every text non-empty, no two choices and no two items the same once trimmed and compared without case or extra spaces, and each item's answer the text of exactly one choice under the same comparison. AnswerKey is the choices the items use, in the order of the choices.
 func withMatches(out Question, q rawQuestion) (Question, bool) {
-	options, ok := uniqueTexts(q.Options, MaxDraftMatchChoices)
-	if !ok || len(q.Items) < 2 || len(q.Items) > MaxDraftMatchItems {
+	options, ok := uniqueTexts(q.Options, MinDraftMatchChoices, MaxDraftMatchChoices)
+	if !ok || len(q.Items) < MinDraftMatchItems || len(q.Items) > MaxDraftMatchItems {
 		return out, false
 	}
 	out.Options = options
@@ -268,9 +273,9 @@ func withMatches(out Question, q rawQuestion) (Question, bool) {
 	return out, true
 }
 
-// uniqueTexts reads 2 to limit texts as one line each, and is false when one is empty or two are the same without case or extra spaces.
-func uniqueTexts(texts []string, limit int) ([]string, bool) {
-	if len(texts) < 2 || len(texts) > limit {
+// uniqueTexts reads fewest to most texts as one line each, and is false when one is empty or two are the same without case or extra spaces.
+func uniqueTexts(texts []string, fewest, most int) ([]string, bool) {
+	if len(texts) < fewest || len(texts) > most {
 		return nil, false
 	}
 	out := make([]string, 0, len(texts))

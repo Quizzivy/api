@@ -351,6 +351,9 @@ func TestACallThatFailsIsSettledOnlyForWhatTheProviderBilledAndTheCallerIsToldTo
 			if err == nil || errors.Is(err, domain.ErrUnavailable) != c.unavailable {
 				t.Fatalf("err = %v, want unavailable %v", err, c.unavailable)
 			}
+			if errors.Is(err, domain.ErrUnusable) {
+				t.Errorf("err = %v: a call the provider failed is not an answer with nothing usable", err)
+			}
 			if c.settles != (len(o.repo.settled) == 1) || c.settles == (len(o.repo.released) == 1) {
 				t.Errorf("settled %d, released %d, want settled %v", len(o.repo.settled), len(o.repo.released), c.settles)
 			}
@@ -375,6 +378,9 @@ func TestAnAnswerWithNothingUsableIsSettledLoggedAndReportedUnavailable(t *testi
 			_, err := operations()[0].run(o)
 			if !errors.Is(err, domain.ErrUnavailable) {
 				t.Fatalf("err = %v, want ErrUnavailable", err)
+			}
+			if !errors.Is(err, domain.ErrUnusable) {
+				t.Errorf("err = %v, want it told apart from a provider that did not answer (ErrUnusable)", err)
 			}
 			if len(o.repo.settled) != 1 || len(o.repo.released) != 0 {
 				t.Errorf("settled %d, released %d; the provider was paid for the answer", len(o.repo.settled), len(o.repo.released))

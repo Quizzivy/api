@@ -121,6 +121,7 @@ func TestEveryRefusalAnswersItsStatusItsCodeAndTheCallersLanguage(t *testing.T) 
 		{"a request from an earlier month", domain.ErrRequestExpired, 409, "AI_REQUEST_EXPIRED", "Yêu cầu thuộc về tháng trước nên không thể duyệt.", "The request is from an earlier month and cannot be approved."},
 		{"an allowance below the use", domain.ErrAllowanceBelowUse, 409, "AI_ALLOWANCE_BELOW_USE", "Hạn mức không được thấp hơn mức giáo viên đã dùng hoặc đang giữ trong tháng.", "The allowance cannot be below what the teacher has used or holds this month."},
 		{"a provider that did not answer", fmt.Errorf("%w: down", domain.ErrUnavailable), 503, "AI_UNAVAILABLE", "AI chưa phản hồi. Hãy thử lại sau ít phút.", "AI didn’t respond. Try again in a minute."},
+		{"an answer with nothing usable in it", fmt.Errorf("%w: none of the 3 questions in the answer is usable", domain.ErrUnusable), 503, "AI_UNAVAILABLE", "AI đã trả lời nhưng không có nội dung nào dùng được. Hãy thử lại.", "AI answered, but nothing it wrote could be used. Try again."},
 	} {
 		for language, want := range map[string]string{"vi": c.vi, "en": c.en} {
 			response := pauseWith(t, true, language, c.err)
@@ -133,9 +134,10 @@ func TestEveryRefusalAnswersItsStatusItsCodeAndTheCallersLanguage(t *testing.T) 
 }
 
 func TestAProviderThatDidNotAnswerAsksTheCallerToWaitHalfAMinute(t *testing.T) {
-	response := pauseWith(t, true, "en", domain.ErrUnavailable)
-	if got := response.Header().Get("Retry-After"); got != "30" {
-		t.Errorf("Retry-After %q, want 30", got)
+	for name, failure := range map[string]error{"a provider that did not answer": domain.ErrUnavailable, "an answer with nothing usable": domain.ErrUnusable} {
+		if got := pauseWith(t, true, "en", failure).Header().Get("Retry-After"); got != "30" {
+			t.Errorf("%s: Retry-After %q, want 30", name, got)
+		}
 	}
 	if got := pauseWith(t, true, "en", domain.ErrNotFound).Header().Get("Retry-After"); got != "" {
 		t.Errorf("a refusal that retrying cannot cure asks the caller to wait %q", got)

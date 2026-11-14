@@ -57,6 +57,8 @@ var (
 	ErrOff = errors.New("ai: the assistant is not configured")
 	// ErrUnavailable is a call that produced nothing a teacher can use: the provider failed after its retries, refused, or answered something that fails the operation's own checks. What the provider billed was settled; the rest was released.
 	ErrUnavailable = errors.New("ai: the provider gave no usable answer")
+	// ErrUnusable is the ErrUnavailable of a call the provider did answer: after the operation's own checks nothing in the answer was left to return. It satisfies errors.Is(err, ErrUnavailable), so it is settled, coded and retried as one; the sentence the teacher reads is its own.
+	ErrUnusable = fmt.Errorf("%w: nothing in the answer could be used", ErrUnavailable)
 	// ErrReadOff is an operation that would send a student's answer, asked by a teacher who has turned that off.
 	ErrReadOff = errors.New("ai: the teacher does not let the assistant read student answers")
 	// ErrForbidden is a write to a teacher the actor may not act on under the subset rule.
