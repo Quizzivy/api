@@ -9,10 +9,14 @@ const (
 	SystemActorEN = "System"
 )
 
-// NamesSystem reports whether q is that name or a part of it, in either
-// language, without regard to case or accents: the way a search matches an
-// actor's name. An empty q names nothing.
+// NamesSystem reports whether q is that name or the beginning of it, in either
+// language, without regard to case or accents. An empty q names nothing.
+//
+// It is the beginning and not any part, as an actor's name is matched by,
+// because this one name is weighed against every search: by any part, a search
+// for a person called Hồng or Thông ("hong" and "thong" are in "he thong")
+// would read every entry nobody is recorded for.
 func NamesSystem(q string) bool {
 	needle := Fold(strings.TrimSpace(q))
-	return needle != "" && (strings.Contains(Fold(SystemActorVI), needle) || strings.Contains(Fold(SystemActorEN), needle))
+	return needle != "" && (strings.HasPrefix(Fold(SystemActorVI), needle) || strings.HasPrefix(Fold(SystemActorEN), needle))
 }
