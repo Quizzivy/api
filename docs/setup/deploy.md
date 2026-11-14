@@ -1,13 +1,15 @@
 # Deploying
 
-> **After the repository split.** This repository deploys the API only; the web
-> deploys from `Quizzivy/web`. Until the owner switches production over, the
-> repository variable `API_HOST` is unset here and the Deploy workflow deploys
-> nothing; production still deploys from `SekiroKenjii/Quizzivy`. After the
-> API job, the `sdk` job asks `Quizzivy/sdk` to make the pinned release
-> `latest` (D-081, D-082 (iv)); it needs the secret `SDK_DISPATCH_TOKEN`. What
-> follows still describes the web job, which now lives in `Quizzivy/web`, and
-> is rewritten when production switches.
+> **Since the repository split.** This repository deploys the API only, and it
+> deploys production: since 2026-11-12 the repository variable `API_HOST` is
+> `vps`, and a merge into `main` goes to the VPS through the `api-vps` job
+> ("Choosing where the API runs"). The `api` job is the Fly deploy the variable
+> can switch back to. The web deploys from `Quizzivy/web`, after this one
+> (`docs/deploy.md` there). After the API job, the `sdk` job asks
+> `Quizzivy/sdk` to make the pinned release `latest` (D-081, D-082 (iv)); it
+> needs the secret `SDK_DISPATCH_TOKEN`. Where a section below speaks of a
+> `web` job or of Pages deploying second, it describes the workflow before the
+> split and the releases made with it: this workflow has no `web` job any more.
 
 Merging `release/*` into `main` ships. Nothing else does, and nothing deploys
 from `develop`.
@@ -35,7 +37,10 @@ the tip check is what keeps that from putting an earlier release back.
 |---|---|---|
 | `api` | Fly.io `quizzivy-api` | `flyctl deploy --remote-only` |
 | `api-vps` | the VPS, instead of `api` | build and push the image to `ghcr.io`, then `ssh deploy@host deploy <sha>` |
-| `web` | Cloudflare Pages `quizzivy-web` | `pnpm build` then `wrangler pages deploy` |
+| `sdk` | `Quizzivy/sdk` | after the API job that ran, asks for the pinned release to become `latest` |
+
+The web is no longer deployed from here: `Quizzivy/web` builds and deploys it
+to Cloudflare Pages `quizzivy-web` with its own workflow.
 
 The API goes first. The SPA is the half that calls the other, so the window
 between the two deploys is old-SPA-against-new-API rather than the reverse. That
@@ -80,10 +85,11 @@ gh secret list && gh variable list
 
 ## Choosing where the API runs
 
-The repository variable `API_HOST` picks one of the two API jobs: `fly` (the
-default when it is unset) or `vps`. Any other value stops the run before
-anything deploys. `web` waits for whichever job ran. Switching is therefore a
-variable, not a code change, and so is switching back:
+The repository variable `API_HOST` picks one of the two API jobs: `fly` or
+`vps`, which is what it is set to since 2026-11-12. Unset, the run deploys
+nothing and says so; any other value stops the run before anything deploys.
+`sdk` waits for whichever job ran. Switching is therefore a variable, not a
+code change, and so is switching back:
 
 ```bash
 gh variable set API_HOST --body vps    # or: fly
