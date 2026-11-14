@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quizzivy API",
-    "version": "0.13.5",
+    "version": "0.13.8",
     "contact": {
       "name": "Thuong",
       "url": "https://github.com/SekiroKenjii/Quizzivy"
@@ -1725,7 +1725,7 @@
           "details": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Shape depends on `code`. Field-level validation errors land here\nas `{ field: message }` for react-hook-form.\n\nThe per-field sentences the rules word for a refused question,\ntest or assignment, and the `message` of each publish violation\nthey produce (every one but that of a test with no part at all),\nare Vietnamese whatever the header says (issue 284). A per-field\nsentence the operation words itself follows the header, as\n`message` does.\n"
+            "description": "Shape depends on `code`. Field-level validation errors land here\nas `{ field: message }` for react-hook-form.\n\nA per-field sentence follows the header, as `message` does, and\nso does the `message` of each publish violation. The one\nexception is the note beside a refused field of a role\n(`/admin/roles`) or of an AI request, rule, allowance or credit\noperation: those are short English notes whatever the header says.\n"
           },
           "requestId": {
             "$ref": "#/components/schemas/Uuid",
