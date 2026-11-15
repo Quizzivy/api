@@ -32,6 +32,9 @@ type Generate struct {
 	Level        string
 	Explanations bool
 	Language     domain.Language
+	ChooseN      bool
+	// MaxWords, above zero, is the word limit of the short_answer drafts.
+	MaxWords int
 }
 
 // Generated is the draft questions and what the call cost.
@@ -46,7 +49,7 @@ func (h GenerateHandler) Handle(ctx context.Context, q Generate) (Generated, err
 	if h.Completer == nil {
 		return Generated{}, domain.ErrOff
 	}
-	in := prompts.GenerateInput{Types: q.Types, Count: q.Count, Level: q.Level, Explanations: q.Explanations, Standalone: q.Standalone}
+	in := prompts.GenerateInput{Types: q.Types, Count: q.Count, Level: q.Level, Explanations: q.Explanations, Standalone: q.Standalone, ChooseN: q.ChooseN, MaxWords: q.MaxWords}
 	var err error
 	if q.Standalone {
 		in.Source, in.Section, err = h.topic(ctx, q)

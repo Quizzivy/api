@@ -19,10 +19,24 @@ func NewPostgres(dbx db.Context) *Postgres { return &Postgres{Repository: db.New
 
 var _ domain.Repository = (*Postgres)(nil)
 
+// removedActor is the boolean SQL expression over an audit row aliased alias
+// that its actor is an account since removed (domain.Record.ActorRemoved):
+// no actor is left, and the row kept what the request recorded.
+func removedActor(alias string) string {
+	return fmt.Sprintf(`(%[1]s.actor_user_id IS NULL AND (%[1]s.ip IS NOT NULL OR %[1]s.user_agent IS NOT NULL))`, alias)
+}
+
+// systemActor is the boolean SQL expression over an audit row aliased alias
+// that it is the system's own entry: no actor, and nothing of a request.
+func systemActor(alias string) string {
+	return fmt.Sprintf(`(%[1]s.actor_user_id IS NULL AND %[1]s.ip IS NULL AND %[1]s.user_agent IS NULL)`, alias)
+}
+
 func recordsSQL(where, tail string) string {
 	return `
 	SELECT p.id, p.occurred_at, p.action, p.entity, p.entity_id::text, host(p.ip), p.user_agent, p.diff,
-	       u.id::text, coalesce(nullif(u.display_name, ''), u.full_name), u.avatar_key
+	       u.id::text, coalesce(nullif(u.display_name, ''), u.full_name), u.avatar_key,
+	       ` + removedActor("p") + `
 	  FROM (SELECT a.id, a.occurred_at, a.actor_user_id, a.action, a.entity, a.entity_id, a.ip, a.user_agent, a.diff
 	          FROM app.audit_log a
 	         WHERE ` + where + `
@@ -101,7 +115,7 @@ func scanRecord(rows pgx.Rows) (domain.Record, error) {
 		avatarKey *string
 	)
 	if err := rows.Scan(&rec.ID, &rec.OccurredAt, &rec.Action, &rec.EntityType, &rec.EntityID, &rec.IP, &rec.UserAgent, &rec.Diff,
-		&actorID, &actorName, &avatarKey); err != nil {
+		&actorID, &actorName, &avatarKey, &rec.ActorRemoved); err != nil {
 		return domain.Record{}, err
 	}
 	if actorID != nil {

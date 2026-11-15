@@ -249,3 +249,57 @@ func TestTheMatchingRuleNamesTheLimitsTheDecoderKeeps(t *testing.T) {
 		})
 	}
 }
+
+// docs#5: Generate writes "Choose N" multiple choice and short answers within
+// a word limit when the teacher asks, and its drafts carry them.
+func TestGenerateWritesChooseNAndAWordLimitWhenAsked(t *testing.T) {
+	in := prompts.GenerateInput{Source: "parks", Types: []string{prompts.MultipleChoice, prompts.ShortAnswer}, Count: 8, Level: "b1", Language: domain.English, Standalone: true, ChooseN: true, MaxWords: 2}
+	none := []any{}
+	choice := func(prompt string, answers ...string) map[string]any {
+		return map[string]any{"type": "multiple_choice", "prompt": prompt, "options": []string{"trees", "benches", "cars", "lakes", "roads"}, "answers": answers, "items": none, "explanation": ""}
+	}
+	short := func(prompt string, answers ...string) map[string]any {
+		return map[string]any{"type": "short_answer", "prompt": prompt, "options": []string{}, "answers": answers, "items": none, "explanation": ""}
+	}
+	answer := map[string]any{"questions": []map[string]any{
+		choice("Choose TWO things a park has.", "trees", "benches"),
+		choice("One correct only, so no Choose N.", "trees"),
+		short("What do people sit on? Write NO MORE THAN TWO WORDS.", "a bench", "wooden park benches"),
+		short("Too long: every answer is past the limit.", "a long wooden bench"),
+	}}
+	p := prompts.Generate(in)
+	conforms(t, p.Schema, answer)
+	for _, want := range []string{"the prompt says how many to choose", "no more than 2 words", `"Write NO MORE THAN TWO WORDS."`} {
+		if !strings.Contains(p.User, want) {
+			t.Errorf("the prompt lacks %q:\n%s", want, p.User)
+		}
+	}
+	got, err := prompts.DecodeGenerate(marshal(t, answer), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("%d drafts kept, want 2: %+v", len(got), got)
+	}
+	if mc := got[0]; mc.SelectCount == nil || *mc.SelectCount != 2 || mc.MaxWords != nil {
+		t.Errorf("the multiple choice draft = %+v, want selectCount 2", mc)
+	}
+	if sa := got[1]; sa.MaxWords == nil || *sa.MaxWords != 2 || !slices.Equal(sa.AnswerKey, []string{"a bench"}) || sa.SelectCount != nil {
+		t.Errorf("the short answer draft = %+v, want maxWords 2 and only the answer within it", sa)
+	}
+
+	plain := in
+	plain.ChooseN, plain.MaxWords = false, 0
+	kept, err := prompts.DecodeGenerate(marshal(t, answer), plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range kept {
+		if q.SelectCount != nil || q.MaxWords != nil {
+			t.Errorf("a draft of a request that asked for neither carries %v and %v", q.SelectCount, q.MaxWords)
+		}
+	}
+	if strings.Contains(prompts.Generate(plain).User, "how many to choose") {
+		t.Error("a request that did not ask for Choose N asks for it")
+	}
+}
