@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"quizzivy/internal/modules/ai/domain"
 )
@@ -65,7 +66,13 @@ const VariantChunkSize = 8
 
 const variantMaxTokens = 2500
 
-// VariantCalls builds the requests for "Make a variant" of a whole draft: one Variant request for each VariantChunkSize questions in paper order, and beside each the part of in it varies, which DecodeVariant reads its answer against. It answers domain.ErrNothingToRead for a draft with no question and domain.ErrTooLarge for one longer than MaxReadChars, whatever the size of its parts.
+// VariantAnswerBudget is the most answer tokens VariantCalls lets the questions of one request call for, as variantAnswerTokens estimates them. It leaves a quarter of variantMaxTokens spare, so an answer that rewrites long prompts still ends before max_tokens cuts its JSON off, which would lose every change of the request (VR-6).
+const VariantAnswerBudget = variantMaxTokens * 3 / 4
+
+// variantChangeTokens is what one change costs in the answer besides the text it writes: its keys, the question number, the kind and the empty fields.
+const variantChangeTokens = 30
+
+// VariantCalls builds the requests for "Make a variant" of a whole draft, in paper order, and beside each the part of in it varies, which DecodeVariant reads its answer against. A request holds at most VariantChunkSize questions and no more than VariantAnswerBudget of estimated answer. One question never needs more than the budget, since a prompt is read to 1,500 characters and an option to 300. It answers domain.ErrNothingToRead for a draft with no question and domain.ErrTooLarge for one longer than MaxReadChars, whatever the size of its parts.
 func VariantCalls(in VariantInput) ([]Prompt, []VariantInput, error) {
 	if len(in.Questions) == 0 {
 		return nil, nil, domain.ErrNothingToRead
@@ -75,7 +82,7 @@ func VariantCalls(in VariantInput) ([]Prompt, []VariantInput, error) {
 	}
 	var calls []Prompt
 	var parts []VariantInput
-	for chunk := range slices.Chunk(in.Questions, VariantChunkSize) {
+	for _, chunk := range variantChunks(in) {
 		part := VariantInput{Questions: chunk, Changes: in.Changes, Difficulty: in.Difficulty}
 		prompt, err := Variant(part)
 		if err != nil {
@@ -86,7 +93,47 @@ func VariantCalls(in VariantInput) ([]Prompt, []VariantInput, error) {
 	return calls, parts, nil
 }
 
-// Variant builds one request for "Make a variant" of in's questions, which VariantCalls keeps to VariantChunkSize. It answers domain.ErrNothingToRead for a draft with no question and domain.ErrTooLarge for one longer than MaxReadChars.
+// variantChunks cuts the questions, in order, into runs of at most VariantChunkSize whose estimated answers fit VariantAnswerBudget.
+func variantChunks(in VariantInput) [][]domain.PaperQuestion {
+	var chunks [][]domain.PaperQuestion
+	var chunk []domain.PaperQuestion
+	tokens := 0
+	for _, q := range in.Questions {
+		need := VariantAnswerTokens(q, in.Changes)
+		if len(chunk) > 0 && (len(chunk) == VariantChunkSize || tokens+need > VariantAnswerBudget) {
+			chunks, chunk, tokens = append(chunks, chunk), nil, 0
+		}
+		chunk, tokens = append(chunk, q), tokens+need
+	}
+	return append(chunks, chunk)
+}
+
+// VariantAnswerTokens estimates, from above, the answer tokens the changes asked for can take for q: one change of each kind, a reword writing the prompt again, a new wrong option as long as the longest option, a reorder listing every option's letter. Text is counted at three characters a token, which is fewer than the provider fits in English and about what it fits in Vietnamese.
+func VariantAnswerTokens(q domain.PaperQuestion, changes []string) int {
+	tokens := 0
+	for _, kind := range changes {
+		tokens += variantChangeTokens
+		switch kind {
+		case VariantReword:
+			tokens += estimatedTokens(clip(q.Prompt, 1500))
+		case VariantDistract:
+			longest := 0
+			for _, o := range q.Options {
+				longest = max(longest, estimatedTokens(clip(oneLine(o.Text), 300)))
+			}
+			tokens += longest
+		case VariantReorder:
+			tokens += 2 * len(q.Options)
+		}
+	}
+	return tokens
+}
+
+func estimatedTokens(text string) int {
+	return (utf8.RuneCountInString(text) + 2) / 3
+}
+
+// Variant builds one request for "Make a variant" of in's questions, which VariantCalls keeps to VariantChunkSize and VariantAnswerBudget. It answers domain.ErrNothingToRead for a draft with no question and domain.ErrTooLarge for one longer than MaxReadChars.
 func Variant(in VariantInput) (Prompt, error) {
 	if len(in.Questions) == 0 {
 		return Prompt{}, domain.ErrNothingToRead

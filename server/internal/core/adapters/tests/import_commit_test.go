@@ -63,6 +63,13 @@ func commitSetup(t *testing.T) commitHarness {
 func cleanupCommits(t *testing.T, pool *pgxpool.Pool, userID string) {
 	ctx := context.Background()
 	for _, sql := range []string{
+		// The audit rows go first, while the entities they name can still be
+		// found; deleting the user afterwards would only blank their actor.
+		`DELETE FROM app.audit_log WHERE actor_user_id=$1
+		   OR entity_id IN (SELECT id FROM app.word_imports WHERE created_by=$1)
+		   OR entity_id IN (SELECT id FROM app.tests WHERE created_by=$1)
+		   OR entity_id IN (SELECT id FROM app.questions WHERE created_by=$1)
+		   OR entity_id IN (SELECT id FROM app.question_groups WHERE created_by=$1)`,
 		`DELETE FROM app.test_section_units WHERE test_section_id IN (SELECT s.id FROM app.test_sections s JOIN app.tests x ON x.id=s.test_id WHERE x.created_by=$1)`,
 		`DELETE FROM app.test_section_questions WHERE test_section_id IN (SELECT s.id FROM app.test_sections s JOIN app.tests x ON x.id=s.test_id WHERE x.created_by=$1)`,
 		`DELETE FROM app.group_gap_bindings WHERE stimulus_id IN (SELECT m.id FROM app.group_stimuli m JOIN app.question_groups g ON g.id=m.group_id WHERE g.created_by=$1)`,
@@ -81,6 +88,7 @@ func cleanupCommits(t *testing.T, pool *pgxpool.Pool, userID string) {
 		`DELETE FROM app.word_import_sources WHERE import_id IN (SELECT id FROM app.word_imports WHERE created_by=$1)`,
 		`DELETE FROM app.word_import_source_sets WHERE import_id IN (SELECT id FROM app.word_imports WHERE created_by=$1)`,
 		`DELETE FROM app.word_imports WHERE created_by=$1`,
+		`DELETE FROM app.users WHERE id=$1`,
 	} {
 		if _, err := pool.Exec(ctx, sql, userID); err != nil {
 			t.Errorf("cleanup %q: %v", sql, err)

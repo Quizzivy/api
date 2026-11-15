@@ -163,6 +163,7 @@ func (r *profileRace) cleanup() {
 	r.captureAudits()
 	r.removeUser()
 	r.verifyAuditRetention()
+	r.removeAudits()
 	r.pool.Close()
 	r.report.PoolClosed = true
 	r.report.Events = append(r.report.Events, "pool-close")
@@ -283,6 +284,20 @@ func (r *profileRace) removeUser() {
 			r.failure("absence", fmt.Errorf("remaining=%d", count))
 		}
 	}
+}
+
+// removeAudits deletes the audit rows that name the fixture's user, once
+// verifyAuditRetention has seen them outlive it, so a run leaves no row behind
+// on the database. It records no event: the order of the steps it follows is
+// what the lifecycle tests pin.
+func (r *profileRace) removeAudits() {
+	if r.id == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := r.pool.Exec(ctx, `DELETE FROM app.audit_log WHERE entity='user' AND entity_id=$1::uuid`, r.id)
+	r.failure("audit removal", err)
 }
 
 func (r *profileRace) verifyAuditRetention() {
