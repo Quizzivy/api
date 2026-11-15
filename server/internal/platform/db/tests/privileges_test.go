@@ -240,6 +240,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"audit_log":                    {"INSERT": "*"},
 	"class_join_codes":             {"SELECT": "class_id,code_ciphertext,id,key_id,lookup_scheme,revoked_at", "UPDATE": "code_ciphertext,code_hash,key_id"},
 	"classes":                      {"SELECT": "teacher_id"},
+	"leads":                        {"SELECT": "created_at,id", "DELETE": "*"},
 	"maintenance_windows":          {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
 	"media_assets":                 {"SELECT": "owner_id"},
 	"notification_preferences":     {"SELECT": "event,in_app,user_id"},
