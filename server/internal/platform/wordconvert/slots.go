@@ -34,10 +34,16 @@ func (c *Converter) removeOwnedContainer(job, owner string) (bool, error) {
 	return true, c.removeContainer(id)
 }
 
+// reapStoppedSlot removes a slot container that is no longer converting, such
+// as one a worker left behind when it died. The slot is found by name in the
+// container list, but its state is read with inspect: Docker wakes a waiting
+// "docker run" before it records the exit in the list, so the list can still
+// call a container running after it has exited (Quizzivy/api#37), while inspect
+// waits for the exit to be recorded.
 func (c *Converter) reapStoppedSlot(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(bounded, c.executable, "ps", "--all", "--filter", "name=^/"+converterSlot+"$", "--filter", "label=quizzivy.word-converter=true", "--filter", "status=exited", "--filter", "status=dead", "--filter", "status=created", "--format", "{{.ID}}").Output()
+	output, err := exec.CommandContext(bounded, c.executable, "ps", "--all", "--filter", "name=^/"+converterSlot+"$", "--filter", "label=quizzivy.word-converter=true", "--format", "{{.ID}}").Output()
 	if err != nil {
 		return ErrConversion
 	}
@@ -48,7 +54,17 @@ func (c *Converter) reapStoppedSlot(ctx context.Context) error {
 	if !containerIdentity.MatchString(id) {
 		return ErrConversion
 	}
-	return c.removeContainer(id)
+	state, err := exec.CommandContext(bounded, c.executable, "inspect", "--type", "container", "--format", "{{.State.Status}}", id).Output()
+	if err != nil {
+		// Gone since the list was read; the run that follows finds the name free
+		// or, if another conversion took it, answers busy.
+		return nil
+	}
+	switch strings.TrimSpace(string(state)) {
+	case "exited", "dead", "created":
+		return c.removeContainer(id)
+	}
+	return nil
 }
 
 func (c *Converter) slotOccupied(ctx context.Context) (bool, error) {
