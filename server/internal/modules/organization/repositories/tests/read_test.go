@@ -70,6 +70,7 @@ func TestReadMapsEveryColumnToItsField(t *testing.T) {
 		       allowed_google_domains = ARRAY['b.example', 'a.example'],
 		       keep_answers_months = 12, keep_focus_events_months = 24, anonymise_disabled_after_months = 24,
 		       limit_seats = 300, limit_storage_bytes = 21474836480, limit_emails_per_month = 50000, warn_at_percent = 90,
+		       lead_recipients = ARRAY['tu-van@tta.example', 'a@tta.example'],
 		       revision = 41, updated_by = $1::uuid`, author)
 
 	got := s.stored()
@@ -89,9 +90,10 @@ func TestReadMapsEveryColumnToItsField(t *testing.T) {
 		Limits: limits.Stored{
 			limits.Seats: 300, limits.StorageBytes: 20 * limits.GiB, limits.EmailsPerMonth: 50000, limits.WarnAtPercent: 90,
 		},
-		Revision:  41,
-		UpdatedBy: author,
-		UpdatedAt: got.UpdatedAt,
+		LeadRecipients: []string{"tu-van@tta.example", "a@tta.example"},
+		Revision:       41,
+		UpdatedBy:      author,
+		UpdatedAt:      got.UpdatedAt,
 	}
 	if !sameSettings(got, want) {
 		t.Errorf("document = %+v, want %+v", got, want)

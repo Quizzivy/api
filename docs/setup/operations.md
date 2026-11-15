@@ -185,6 +185,15 @@ system to serve users. Existing access JWTs can stay valid until `ACCESS_TOKEN_T
 
 Every sweep audit entry has no actor and carries `databaseRole` in its diff.
 
+The sweep has a fourth step that no setting switches off: it deletes every consultation request
+(`app.leads`, "Consultation requests", below) created more than 12 months ago, by the same UTC
+arithmetic and strict `<`, whatever its status: the privacy notice promises that to the person who
+sent it. One
+`retention.leads_removed` entry per batch holds the cutoff and the count, and nothing a request
+held. It runs under the same `RETENTION_SWEEP_ENABLED` switch as the others: while the nightly
+run is a dry run, no request is deleted, so check the switch is `true` once the landing site's
+form is live.
+
 ### The maintenance role
 
 `cmd/maintenance` connects as `quizzivy_maintenance`, never as the owner and never as the API's
@@ -200,9 +209,13 @@ audit log, cannot touch `ai_usage_ledger`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
 more adds the grant in its own migration.
 
-**Never set `MAINTENANCE_DATABASE_URL` on the API or on Fly.** The credential lives in two
-places: the GitHub environment `production-maintenance` (as the secret
-`MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine.
+**Never set `MAINTENANCE_DATABASE_URL` on the API or on Fly.** Against a managed database the
+credential lives in two places: the GitHub environment `production-maintenance` (as the secret
+`MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine. On
+the server that production runs on since 2026-11-12 it lives in one: the role's password is in
+the database's own secret file there, and `Quizzivy/infra`'s `vps/scripts/maintenance` gives the
+connection string to the one-off container that runs the command and to nothing else ("Where
+the sweep runs" below).
 
 **What a leaked `MAINTENANCE_DATABASE_URL` costs.** The role is the operator role for every
 `cmd/maintenance` command, not only the sweep, so its reach is the sum of them. Whoever holds the
@@ -230,6 +243,28 @@ runs another command or a second consumer holds the connection string. To revoke
 run `ALTER ROLE quizzivy_maintenance NOLOGIN` as the owner. To rotate it, run
 `ALTER ROLE quizzivy_maintenance PASSWORD '<new random password>'` as the owner (step 1 below does
 the same), then replace the secret `MAINTENANCE_DATABASE_URL` with the new connection string.
+
+### Where the sweep runs
+
+Since 2026-11-12 production's database is on the server's private network, and nothing outside
+the server can connect to it: not a GitHub runner, not the operator's machine. The workflow
+below cannot reach it and is disabled in the Actions tab. The sweep runs on the server instead:
+
+- The image carries the command as `/app/maintenance`, beside `/app/api`, `/app/import-worker`
+  and `/app/migrate`. Nothing in the image starts it.
+- `Quizzivy/infra` runs it: `vps/scripts/maintenance <command> [flags]` starts a one-off
+  container of the image the API runs, on the stack's network, as `quizzivy_maintenance`. A
+  systemd timer runs `vps/scripts/maintenance sweep` at 20:00 UTC (03:00 in Ho Chi Minh City),
+  which is `maintenance retention-sweep -budget 5m`, and a failed run mails the operator.
+- The switch moved with it. The nightly run applies only while the server's
+  `/opt/quizzivy/compose.env` holds `RETENTION_SWEEP_ENABLED=true`; otherwise it is a dry run.
+  The repository variable of the same name is read by the workflow alone.
+- The report is the same JSON ("Reading the report" below), in the unit's journal.
+
+The order of the first time is the workflow's, steps 3 and 4 below: read a dry run, then set the
+switch. The runbook is `docs/vps.md` in `Quizzivy/infra`, "Maintenance commands and the
+retention sweep". What follows describes the workflow, which is still the way against a
+database a GitHub runner can reach.
 
 ### The nightly workflow
 
@@ -307,6 +342,7 @@ runs in a read-only transaction).
   "answers": {"enabled": true, "cutoff": "2024-10-14T20:00:07Z", "attempts": 12, "answers": 310, "batches": 1, "overdueInProgress": 0},
   "focusEvents": {"cutoff": "2025-09-14T20:00:07Z", "events": 4200, "batches": 9},
   "accounts": {"enabled": false, "anonymise": 0, "skippedOwners": 0, "skippedInProgress": 0, "notices": 0, "batches": 0, "failedAccounts": 0},
+  "leads": {"cutoff": "2025-10-14T20:00:07Z", "leads": 3, "batches": 0},
   "complete": true
 }
 ```
@@ -324,6 +360,9 @@ runs in a read-only transaction).
   days, which looks the same as a sweep with nothing to do. Open the workflow's job summary every week, or add
   a failure notification to the repository, and check that the schedule still shows as enabled.
   A backlog the first night does not clear is normal.
+- `leads` is the consultation requests step: `leads.leads` is the requests created before its
+  `cutoff`, 12 months back, that the run deleted or, on a dry run, would delete. It has no
+  `enabled`, because no setting turns it off.
 - `overdueInProgress` counts attempts still in progress past their deadline on an assignment that
   closed before the answers cutoff. The sweep never removes their answers: an overdue attempt is
   closed, and scored from its stored answers, only when a teacher's monitor reads its assignment,
@@ -336,7 +375,9 @@ runs in a read-only transaction).
 ### By hand
 
 The same binary runs the sweep from the operator's machine, with `MAINTENANCE_DATABASE_URL` set
-to the role's connection string and nothing else changed:
+to the role's connection string and nothing else changed. On the server, the same commands go
+through `vps/scripts/maintenance` of `Quizzivy/infra`, run as the `deploy` user, for example
+`vps/scripts/maintenance retention-sweep -budget 5m`:
 
 ```sh
 maintenance retention-sweep -budget 5m
@@ -499,6 +540,60 @@ UPDATE app.refresh_tokens SET revoked_at = now()
 Outside production the two settings default to `http://localhost:5173`, one
 origin for both, where every session is `any`: one host for every account, as
 before the hosts were split.
+
+### The landing site's origin
+
+`LANDING_URL` is the origin of the landing site (`https://quizzivy.com`). It is
+not a web host: nobody signs in there, so it is never listed in
+`CORS_ALLOWED_ORIGINS`, whose origins call every operation with credentials.
+Its pages call two open operations from that origin, without credentials:
+`POST /public/leads`, the consultation form, and `GET /public/status`. When a
+request's `Origin` is exactly an origin of `LANDING_URL`, the API answers CORS for those two
+and their preflights only: `Access-Control-Allow-Origin` with that origin,
+`Access-Control-Expose-Headers: X-Request-Id, Retry-After` (the form reads
+`Retry-After` on a `429`), the one method and the `Content-Type` header on the
+preflight, and never `Access-Control-Allow-Credentials`. The answer is on every
+status of those two operations, a `429`, a `400` and the `503` of a maintenance
+window included. Any other path or method from that origin, and
+`https://www.quizzivy.com` or `http://quizzivy.com`, is answered as an origin
+nobody listed.
+
+The setting is optional, and unset it changes nothing. It is a list: one
+origin, or several separated by commas, as `CORS_ALLOWED_ORIGINS` is written.
+**Production holds `https://quizzivy.com` alone.** A second origin is for a
+test, such as the Pages project's own `pages.dev` host while the form is tried
+before the domain is attached:
+
+```
+LANDING_URL=https://quizzivy.com,https://<project>.pages.dev
+```
+
+Take it out again once the test is over, and restart the API: every origin in
+the list can send the form, and a `pages.dev` host is not the centre's site.
+Each origin of the list is admitted to the same two operations and nothing
+else, and an origin the list does not hold is answered as before.
+
+Each item is an origin (scheme and host, a port if any, no path), `https` in
+production, and the API refuses to start when one equals `STUDENT_APP_URL` or
+`STAFF_APP_URL` or is listed in `CORS_ALLOWED_ORIGINS`. It also refuses an
+origin written twice and an empty item (`a,,b`, or a trailing comma), so a typo
+stops the start rather than admit less than was meant. The refusal of a list
+names the item, as `LANDING_URL (origin 2) must be https in production`. Only
+the API reads the setting; the worker does not. On the box it is set where the
+two web hosts' settings are (`Quizzivy/infra`, `docs/vps.md`); on Fly it would
+be a line of `fly.toml`'s `[env]`.
+
+To check it from a shell, with the origin the browser would send:
+
+```sh
+curl -si -X OPTIONS https://api.quizzivy.com/public/leads \
+  -H 'Origin: https://quizzivy.com' -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type' | grep -i '^access-control'
+```
+
+It prints `access-control-allow-origin: https://quizzivy.com`, the method
+`POST`, the header `Content-Type` and no `access-control-allow-credentials`.
+The same request for `/auth/login` prints nothing.
 
 ## Maintenance windows
 
@@ -686,8 +781,8 @@ worker, through Resend's HTTP API with `RESEND_API_KEY`. `EMAIL_FROM` and the
 key are set together, and production refuses to start without both. A message's
 link points into one of the two web hosts ("The two web hosts", above): the
 staff host when the recipient's role, as the message is sent, opens the teacher
-workspace or the Admin console, and for the data-export message whoever
-receives it; the student host otherwise. Start-up refuses a malformed
+workspace or the Admin console, and for the data-export message and the notice
+of a consultation request whoever receives it; the student host otherwise. Start-up refuses a malformed
 `EMAIL_FROM` or `EMAIL_REPLY_TO` (one address, no line break). The emails-per-day and emails-per-month limits ("The centre's usage limits",
 below) count sends per local day and month in `APP_TIMEZONE`; the excess moves to
 the next local midnight or the 1st, and a held message whose link has expired is
@@ -710,6 +805,47 @@ release. A failed row keeps its `last_error_code` (`http_422:validation_error`,
 `secret_unreadable`, ...) and nothing of the message. The logs carry the
 outbox id, template, outcome and recipient domain, never an address, a subject
 or a link.
+
+## Consultation requests
+
+The landing site's form sends `POST /public/leads` (R11). A request that passes
+validation is stored in `app.leads` with the consent it carried: the notice's
+version and the time. The row holds what the form asked for and nothing about
+the caller, no IP address and no user agent. The limit is 3 a minute and 10 an
+hour per address, in memory, on each machine.
+
+Two requests are answered `202 {"received": true}` like any other and not
+stored: one that filled the form's unseen `website` field, and one whose phone
+number already has two requests stored from the last 24 hours. Each leaves one
+log line, `lead_dropped`, with `reason` `honeypot` or `repeat` and nothing the
+person typed. A run of `repeat` lines is someone resending a number; a run of
+`honeypot` lines is a bot, and neither needs action.
+
+Each stored request queues one `lead_received` email for every address in the
+settings' `leadRecipients` (Admin console, Organization settings; at most five),
+in the transaction that stores it. The email names the given name, the courses,
+who they are for and when to call, and links to the request in the Admin
+console at the staff host; it never holds the phone number or the full name. It
+is written in the recipient's language when the address is an account's, and in
+Vietnamese otherwise. With no recipient, the request is stored and nobody is
+told: the Admin console's nav count (`newLeads`) is then the only signal, so set
+the recipients before the form goes live. These messages count against the
+emails-per-day limit like any other.
+
+Only an Admin reads the requests (`/admin/leads`, behind the hidden key
+`system.leads`, which no role can be granted). A change of status or note and a
+removal are audited as `lead.updated` and `lead.deleted`, with the status before
+and after and whether the note changed, never the note, the name or the number.
+To remove one person's requests on their demand, delete them in the console, or
+as `quizzivy_migrate`:
+
+```sql
+DELETE FROM app.leads WHERE phone_digits = '0903123456';
+```
+
+A deletion by SQL leaves no audit entry; write down who asked and when. The
+retention sweep deletes every request 12 months after it was sent ("Retention
+and anonymization", above), and the data export holds them in `leads.csv`.
 
 ## Daily housekeeping
 
@@ -1079,6 +1215,7 @@ hold a student's words.
 - Maintenance dry-run review and first authorized production batch: pending.
 - Email (v0.12.0): one real message from `quizzivy.com` whose headers show SPF, DKIM
   and DMARC passing (`dns.md`, "Email (Resend)"): pending the release.
-- Retention sweep (v0.12.0): the first manual dry run of `retention-sweep.yml` on
-  production, read by the owner before `RETENTION_SWEEP_ENABLED` is set ("The
-  nightly workflow"): pending the release.
+- Retention sweep (v0.12.0): the first dry run on production, read by the owner
+  before `RETENTION_SWEEP_ENABLED` is set. Since the database moved onto the
+  server that is a run of `vps/scripts/maintenance sweep` there and the switch
+  in its `compose.env` ("Where the sweep runs"): pending.

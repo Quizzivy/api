@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/hex"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
 	"quizzivy/gen/openapi"
 	"quizzivy/internal/modules/organization/domain"
 	"quizzivy/internal/platform/httpapi"
@@ -106,11 +108,12 @@ func settingsBody(s domain.Settings, env limits.Env) openapi.OrganizationSetting
 			Google: s.SignIn.Google, Password: s.SignIn.Password, ForcePasswordChange: s.SignIn.ForcePasswordChange,
 			JoinCodes: s.SignIn.JoinCodes, AllowedGoogleDomains: append([]string{}, s.SignIn.AllowedGoogleDomains...),
 		},
-		Retention:     openapi.RetentionPolicy{KeepFocusEventsMonths: openapi.RetentionPolicyKeepFocusEventsMonths(s.Retention.KeepFocusEventsMonths)},
-		Limits:        limitsBody(s.Limits),
-		LimitDefaults: defaultsBody(env),
-		Revision:      s.Revision,
-		UpdatedAt:     s.UpdatedAt.UTC(),
+		Retention:      openapi.RetentionPolicy{KeepFocusEventsMonths: openapi.RetentionPolicyKeepFocusEventsMonths(s.Retention.KeepFocusEventsMonths)},
+		Limits:         limitsBody(s.Limits),
+		LimitDefaults:  defaultsBody(env),
+		LeadRecipients: recipientsBody(s.LeadRecipients),
+		Revision:       s.Revision,
+		UpdatedAt:      s.UpdatedAt.UTC(),
 	}
 	if m := s.Retention.KeepAnswersMonths; m != nil {
 		out.Retention.KeepAnswersMonths = new(openapi.RetentionPolicyKeepAnswersMonths(*m))
@@ -123,6 +126,22 @@ func settingsBody(s domain.Settings, env limits.Env) openapi.OrganizationSetting
 	if s.UpdatedBy != "" {
 		id := httpapi.ParseUUID(s.UpdatedBy)
 		out.UpdatedBy = &id
+	}
+	return out
+}
+
+func recipientsBody(recipients []string) openapi.LeadRecipients {
+	out := make(openapi.LeadRecipients, len(recipients))
+	for i, address := range recipients {
+		out[i] = openapi_types.Email(address)
+	}
+	return out
+}
+
+func recipientsOf(in openapi.LeadRecipients) []string {
+	out := make([]string, len(in))
+	for i, address := range in {
+		out[i] = string(address)
 	}
 	return out
 }
@@ -144,6 +163,9 @@ func settingsOf(in openapi.OrganizationSettingsInput) domain.Settings {
 	out := domain.Settings{Profile: profile, SignIn: signInOf(in.SignIn), Retention: retentionOf(in.Retention)}
 	if in.Limits != nil {
 		out.Limits = limitsOf(*in.Limits)
+	}
+	if in.LeadRecipients != nil {
+		out.LeadRecipients = recipientsOf(*in.LeadRecipients)
 	}
 	return out
 }
@@ -221,6 +243,8 @@ func reasonText(ctx context.Context, reason string) (string, bool) {
 		return httpx.Text(ctx, "Máy chủ không có logo này. Hãy tải lên lại.", "The server holds no such logo. Upload it again."), true
 	case domain.ReasonRange:
 		return httpx.Text(ctx, "Giá trị nằm ngoài khoảng cho phép.", "Outside the range this limit allows."), true
+	case domain.ReasonRecipients:
+		return httpx.Text(ctx, "Tối đa 5 địa chỉ nhận thông báo.", "At most 5 addresses to notify."), true
 	case domain.ReasonLogoStore:
 		return httpx.Text(ctx, "Máy chủ chưa có kho lưu trữ nên chưa thể lưu logo.", "This server has no object storage, so a logo cannot be kept."), true
 	}

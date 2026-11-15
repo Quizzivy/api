@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -215,7 +216,8 @@ func (s *session) fullDocument() domain.Settings {
 			KeepFocusEventsMonths:        6,
 			AnonymiseDisabledAfterMonths: intp(12),
 		},
-		Limits: limits.Stored{limits.Seats: 400, limits.EmailsPerDay: 80},
+		Limits:         limits.Stored{limits.Seats: 400, limits.EmailsPerDay: 80},
+		LeadRecipients: []string{"tu-van@hoamai.example", "le-tan@hoamai.example"},
 	}
 }
 
@@ -288,6 +290,7 @@ type rawRow struct {
 	keepAnswers  *int16
 	keepFocus    int16
 	anonymise    *int16
+	recipients   []string
 	revision     int32
 	updatedBy    *string
 	updatedAt    time.Time
@@ -311,13 +314,13 @@ func readRawTable(t *testing.T, q db.Querier, table string) rawRow {
 		SELECT name, short_name, website, contact_email, front_desk_phone, front_desk_hours, address,
 		       logo_sha256, logo_type, logo_dark_sha256, logo_dark_type,
 		       google_sign_in, password_sign_in, force_password_change, join_codes_enabled, allowed_google_domains,
-		       keep_answers_months, keep_focus_events_months, anonymise_disabled_after_months,
+		       keep_answers_months, keep_focus_events_months, anonymise_disabled_after_months, lead_recipients,
 		       revision, updated_by::text, updated_at
 		  FROM `+table).Scan(
 		&r.name, &r.shortName, &r.website, &r.contactEmail, &r.phone, &r.hours, &r.address,
 		&r.logo, &r.logoType, &r.logoDark, &r.logoDarkType,
 		&r.google, &r.password, &r.force, &r.joinCodes, &r.domains,
-		&r.keepAnswers, &r.keepFocus, &r.anonymise,
+		&r.keepAnswers, &r.keepFocus, &r.anonymise, &r.recipients,
 		&r.revision, &r.updatedBy, &r.updatedAt); err != nil {
 		t.Fatalf("raw row of %s: %v", table, err)
 	}
@@ -350,7 +353,12 @@ func months16(m *int) *int16 {
 func rawOf(d domain.Settings, revision int32, updatedBy string, updatedAt time.Time) rawRow {
 	light, lightType := logoColumns(d.Profile.LightLogo)
 	dark, darkType := logoColumns(d.Profile.DarkLogo)
+	recipients := d.LeadRecipients
+	if recipients == nil {
+		recipients = []string{}
+	}
 	return rawRow{
+		recipients:   recipients,
 		name:         d.Profile.Name,
 		shortName:    textOrNil(d.Profile.ShortName),
 		website:      textOrNil(d.Profile.Website),
@@ -380,7 +388,9 @@ func sameSettings(a, b domain.Settings) bool {
 	x, y := a, b
 	x.UpdatedAt, y.UpdatedAt = time.Time{}, time.Time{}
 	x.Limits, y.Limits = nil, nil
-	return reflect.DeepEqual(x, y) && a.UpdatedAt.Equal(b.UpdatedAt) && a.Limits.Equal(b.Limits)
+	x.LeadRecipients, y.LeadRecipients = nil, nil
+	return reflect.DeepEqual(x, y) && a.UpdatedAt.Equal(b.UpdatedAt) && a.Limits.Equal(b.Limits) &&
+		slices.Equal(a.LeadRecipients, b.LeadRecipients)
 }
 
 func sameDocument(t *testing.T, what string, got, want domain.Settings) {
@@ -396,6 +406,9 @@ func sameDocument(t *testing.T, what string, got, want domain.Settings) {
 	}
 	if !got.Limits.Equal(want.Limits) {
 		t.Errorf("%s: limits = %v, want %v", what, got.Limits, want.Limits)
+	}
+	if !slices.Equal(got.LeadRecipients, want.LeadRecipients) {
+		t.Errorf("%s: lead recipients = %v, want %v", what, got.LeadRecipients, want.LeadRecipients)
 	}
 }
 

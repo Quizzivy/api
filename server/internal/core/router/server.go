@@ -16,6 +16,7 @@ import (
 	identitytoken "quizzivy/internal/modules/identity/application/token"
 	identityhttp "quizzivy/internal/modules/identity/http"
 	importshttp "quizzivy/internal/modules/imports/http"
+	leadshttp "quizzivy/internal/modules/leads/http"
 	mediahttp "quizzivy/internal/modules/media/http"
 	notificationshttp "quizzivy/internal/modules/notifications/http"
 	organizationhttp "quizzivy/internal/modules/organization/http"
@@ -42,6 +43,7 @@ type Server struct {
 	notificationshttp.Notifications
 	organizationhttp.Organization
 	exportshttp.Exports
+	leadshttp.Leads
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger
@@ -58,6 +60,9 @@ type Deps struct {
 	Maintenance httpx.MaintenanceSource
 	// Principals resolves who a request acts as; New refuses a nil one.
 	Principals httpx.PrincipalResolver
+	// LandingOrigins are the landing site's origins (LANDING_URL), each of
+	// which may call LandingOperations without credentials; none admits none.
+	LandingOrigins []string
 }
 
 var _ openapi.StrictServerInterface = (*Server)(nil)

@@ -1,3 +1,4 @@
+DELETE /admin/leads/{id} system.leads
 DELETE /admin/users/{id} people.users.manage
 DELETE /auth/google/link self
 DELETE /auth/sessions/{familyId} self
@@ -19,6 +20,8 @@ GET /admin/audit-log system.audit.read
 GET /admin/audit-log/export system.audit.read
 GET /admin/classes scope.all
 GET /admin/data-exports/{id} system.data_export
+GET /admin/leads system.leads
+GET /admin/leads/{id} system.leads
 GET /admin/overview workspace.admin
 GET /admin/roles people.roles.manage
 GET /admin/roles/assignable people.users.manage
@@ -77,6 +80,7 @@ GET /teacher/tests/{id}/preview workspace.teacher
 GET /teacher/tests/{id}/versions workspace.teacher
 GET /teacher/tests/{id}/versions/{version}/diff workspace.teacher
 PATCH /admin/ai/rules ai.credits.manage
+PATCH /admin/leads/{id} system.leads
 PATCH /admin/roles/{id} people.roles.manage
 PATCH /app/attempts/{id}/answers learning.take_tests
 PATCH /auth/me self

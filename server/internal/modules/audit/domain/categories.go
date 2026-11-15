@@ -67,6 +67,8 @@ var allOnlyEntities = []string{
 	"attempt_events",
 	"audit_log",
 	"data_export",
+	"lead",
+	"leads",
 	"maintenance_window",
 	"organization",
 }

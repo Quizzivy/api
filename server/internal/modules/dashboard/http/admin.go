@@ -23,6 +23,7 @@ func adminViewer(ctx context.Context) domain.AdminViewer {
 		Audit:    keys.Has(access.SystemAuditRead),
 		Settings: keys.Has(access.SystemSettingsWrite),
 		Credits:  keys.Has(access.AICreditsManage),
+		Leads:    keys.Has(access.SystemLeads),
 		All:      keys.Has(access.ScopeAll),
 	}
 }
@@ -51,7 +52,7 @@ func (h Dashboard) GetAdminSummary(ctx context.Context, _ openapi.GetAdminSummar
 	if err != nil {
 		return nil, err
 	}
-	return openapi.GetAdminSummary200JSONResponse{MustChangePassword: summary.MustChangePassword}, nil
+	return openapi.GetAdminSummary200JSONResponse{MustChangePassword: summary.MustChangePassword, NewLeads: summary.NewLeads}, nil
 }
 
 // GetUsage implements GET /admin/usage.

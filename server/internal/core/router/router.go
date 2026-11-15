@@ -4,6 +4,7 @@ package router
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -46,13 +47,18 @@ func New(deps Deps, logger *slog.Logger, allowedOrigins []string, clientIPHeader
 	}
 
 	openRoutes := httpx.OpenRoutes(spec, "bearerAuth")
+	for _, operation := range LandingOperations() {
+		if _, open := openRoutes[operation]; !open {
+			return nil, fmt.Errorf("router: %s is admitted from the landing origin and is not an open operation", operation)
+		}
+	}
 
 	validate, err := httpx.ValidateRequests(spec)
 	if err != nil {
 		return nil, err
 	}
 
-	server := &Server{Access: deps.Modules.Access, AI: deps.Modules.AI, Audit: deps.Modules.Audit, Imports: deps.Modules.Imports, Dashboard: deps.Modules.Dashboard, Classes: deps.Modules.Classes, Identity: deps.Modules.Identity, Questions: deps.Modules.Questions, Media: deps.Modules.Media, Tests: deps.Modules.Tests, Assignments: deps.Modules.Assignments, Attempts: deps.Modules.Attempts, Availability: deps.Modules.Availability, Notifications: deps.Modules.Notifications, Organization: deps.Modules.Organization, Exports: deps.Modules.Exports, Deps: deps, Logger: logger}
+	server := &Server{Access: deps.Modules.Access, AI: deps.Modules.AI, Audit: deps.Modules.Audit, Imports: deps.Modules.Imports, Dashboard: deps.Modules.Dashboard, Classes: deps.Modules.Classes, Identity: deps.Modules.Identity, Questions: deps.Modules.Questions, Media: deps.Modules.Media, Tests: deps.Modules.Tests, Assignments: deps.Modules.Assignments, Attempts: deps.Modules.Attempts, Availability: deps.Modules.Availability, Notifications: deps.Modules.Notifications, Organization: deps.Modules.Organization, Exports: deps.Modules.Exports, Leads: deps.Modules.Leads, Deps: deps, Logger: logger}
 	strict := openapi.NewStrictHandlerWithOptions(server, nil, openapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, _ error) {
 			httpx.WriteMalformedBody(w, r)
@@ -108,7 +114,23 @@ func New(deps Deps, logger *slog.Logger, allowedOrigins []string, clientIPHeader
 	})
 
 	gated := routedOnly(mux, httpx.Maintenance(deps.Maintenance, deps.Modules.Identity.ClearSessionOnRefusedLogout)(servedMethodOnly(mux, handler, requirements, openRoutes)))
-	return httpx.RequestID(httpx.Logging(logger)(httpx.SecurityHeaders(httpx.CORS(allowedOrigins)(gated)))), nil
+	return httpx.RequestID(httpx.Logging(logger)(httpx.SecurityHeaders(httpx.CORS(allowedOrigins, landingAccess(deps.LandingOrigins)...)(gated)))), nil
+}
+
+// LandingOperations are the open operations the landing site's pages call
+// from each of its origins, without credentials: the consultation form's
+// submission and the status its status page reads. New refuses one that needs
+// a token.
+func LandingOperations() []string {
+	return []string{"POST /public/leads", "GET /public/status"}
+}
+
+func landingAccess(origins []string) []httpx.PublicOrigin {
+	admitted := make([]httpx.PublicOrigin, len(origins))
+	for i, origin := range origins {
+		admitted[i] = httpx.PublicOrigin{Origin: origin, Operations: LandingOperations()}
+	}
+	return admitted
 }
 
 func parameterName(err error) string {

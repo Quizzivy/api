@@ -31,6 +31,7 @@ type adminStore struct {
 	held       domain.Held
 	limits     limits.Stored
 
+	newLeads   int
 	window     domain.EmailWindow
 	asked      []string
 	accountsAt time.Time
@@ -47,6 +48,11 @@ func (s *adminStore) Accounts(_ context.Context, since time.Time) (domain.Accoun
 func (s *adminStore) MustChangePassword(context.Context) (int, error) {
 	s.asked = append(s.asked, "MustChangePassword")
 	return s.mustChange, nil
+}
+
+func (s *adminStore) NewLeads(context.Context) (int, error) {
+	s.asked = append(s.asked, "NewLeads")
+	return s.newLeads, nil
 }
 
 func (s *adminStore) ActiveBetween(_ context.Context, from, to time.Time) (int, error) {
@@ -480,5 +486,36 @@ func TestUsageCountsMailByTheCentresDayAndMonth(t *testing.T) {
 	if !w.Now.Equal(want.Now) || !w.DayStart.Equal(want.DayStart) || !w.NextDay.Equal(want.NextDay) ||
 		!w.MonthStart.Equal(want.MonthStart) || !w.NextMonth.Equal(want.NextMonth) {
 		t.Errorf("window = %+v, want %+v", w, want)
+	}
+}
+
+// TestTheSummaryCountsNewLeadsOnlyForWhoHoldsTheLeadsKey fails when the count
+// of unhandled consultation requests is run, or answered, for a viewer without
+// system.leads, when it is withheld from one who has the key, and when the
+// two counts of the summary stop being decided each by its own key. The
+// temporary-password test covers the other count.
+func TestTheSummaryCountsNewLeadsOnlyForWhoHoldsTheLeadsKey(t *testing.T) {
+	repo, p := centre()
+	repo.newLeads = 7
+	app := admin(repo, p, nil)
+	leadsOnly, err := app.Queries.AdminSummary.Handle(context.Background(), query.AdminSummary{Viewer: domain.AdminViewer{Leads: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadsOnly.NewLeads == nil || *leadsOnly.NewLeads != 7 || leadsOnly.MustChangePassword != nil || !slices.Equal(repo.asked, []string{"NewLeads"}) {
+		t.Errorf("with system.leads alone: new leads %v, must change %v after asking %v; want 7, null and one query", leadsOnly.NewLeads, leadsOnly.MustChangePassword, repo.asked)
+	}
+	repo.asked = nil
+	usersOnly, err := app.Queries.AdminSummary.Handle(context.Background(), query.AdminSummary{Viewer: domain.AdminViewer{Users: true, Audit: true, Settings: true, All: true, Credits: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usersOnly.NewLeads != nil || usersOnly.MustChangePassword == nil || !slices.Equal(repo.asked, []string{"MustChangePassword"}) {
+		t.Errorf("without system.leads: new leads %v after asking %v, want null and no count of requests", usersOnly.NewLeads, repo.asked)
+	}
+	repo.asked = nil
+	both, err := app.Queries.AdminSummary.Handle(context.Background(), query.AdminSummary{Viewer: domain.AdminViewer{Users: true, Leads: true}})
+	if err != nil || both.NewLeads == nil || both.MustChangePassword == nil || *both.NewLeads != 7 || *both.MustChangePassword != 3 {
+		t.Errorf("with both keys: %+v, %v; want 7 requests and 3 passwords", both, err)
 	}
 }

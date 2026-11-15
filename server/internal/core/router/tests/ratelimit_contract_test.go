@@ -72,7 +72,7 @@ func TestEveryRateLimitBlockMatchesTheRegistry(t *testing.T) {
 			}
 		}
 	})
-	if checked != 11 {
-		t.Errorf("%d operations declare x-rate-limit, want 11: the join preview and join, login, Google, refresh, logout, the set-password check and set, the status and the organization with its logo", checked)
+	if checked != 12 {
+		t.Errorf("%d operations declare x-rate-limit, want 12: the join preview and join, login, Google, refresh, logout, the set-password check and set, the status, the organization with its logo and the consultation form", checked)
 	}
 }

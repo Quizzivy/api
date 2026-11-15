@@ -39,6 +39,7 @@ func RateLimits() *ratelimit.Registry {
 	reg.Add("GET /public/status", capacity, ratelimit.PerMinute(120), ratelimit.PerHour(2000))
 	reg.Add("GET /public/organization", capacity, ratelimit.PerMinute(120), ratelimit.PerHour(2000))
 	reg.Add("GET /public/organization/logo", capacity, ratelimit.PerMinute(300))
+	reg.Add("POST /public/leads", capacity, ratelimit.PerMinute(3), ratelimit.PerHour(10))
 
 	return reg
 }

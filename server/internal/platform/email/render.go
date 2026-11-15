@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	texttemplate "text/template"
+	"time"
 )
 
 // Template names a message the app sends. It is stored in the outbox, so a
@@ -22,6 +23,7 @@ const (
 	PasswordResetLink Template = "password_reset_link"
 	SignInInvite      Template = "sign_in_invite"
 	DataExportReady   Template = "data_export_ready"
+	LeadReceived      Template = "lead_received"
 )
 
 // Locales are the languages every template is written in, Vietnamese first.
@@ -61,6 +63,20 @@ type DataExportReadyParams struct {
 	ExportID string `json:"exportId"`
 }
 
+// LeadReceivedParams tell one of the centre's lead recipients that a
+// consultation request arrived, and link to it in the Admin console. They hold
+// the one word of the name a notification may carry and never the full name or
+// the phone number: the person agreed to a call back, not to their number
+// sitting in an inbox.
+type LeadReceivedParams struct {
+	LeadID     string    `json:"leadId"`
+	GivenName  string    `json:"givenName"`
+	Interests  []string  `json:"interests"`
+	CourseFor  string    `json:"courseFor"`
+	CallTime   string    `json:"callTime"`
+	ReceivedAt time.Time `json:"receivedAt"`
+}
+
 func (AccountInviteParams) Template() Template { return AccountInvite }
 
 func (PasswordResetLinkParams) Template() Template { return PasswordResetLink }
@@ -68,6 +84,8 @@ func (PasswordResetLinkParams) Template() Template { return PasswordResetLink }
 func (SignInInviteParams) Template() Template { return SignInInvite }
 
 func (DataExportReadyParams) Template() Template { return DataExportReady }
+
+func (LeadReceivedParams) Template() Template { return LeadReceived }
 
 type definition struct {
 	secret bool
@@ -99,11 +117,14 @@ var definitions = map[Template]definition{
 	DataExportReady: {staff: true, decode: decoder[DataExportReadyParams](), link: func(appURL string, p Params, _ string) string {
 		return appURL + "/admin/exports/" + url.PathEscape(p.(DataExportReadyParams).ExportID)
 	}},
+	LeadReceived: {staff: true, decode: decoder[LeadReceivedParams](), link: func(appURL string, p Params, _ string) string {
+		return appURL + "/admin/leads/" + url.PathEscape(p.(LeadReceivedParams).LeadID)
+	}},
 }
 
 // Templates lists every template the app sends.
 func Templates() []Template {
-	return []Template{AccountInvite, PasswordResetLink, SignInInvite, DataExportReady}
+	return []Template{AccountInvite, PasswordResetLink, SignInInvite, DataExportReady, LeadReceived}
 }
 
 func templateNames() []string {
@@ -140,13 +161,15 @@ func DecodeParams(t Template, raw []byte) (Params, error) {
 // Letter is what one message is rendered from: the recipient's locale, the
 // organization's short name for the header, the origin of the web host its
 // link points into, the template's params and, for a template that needs one,
-// the secret its link carries.
+// the secret its link carries. Zone is the time zone a template writes a time
+// in, UTC when nil.
 type Letter struct {
 	Locale string
 	Org    string
 	AppURL string
 	Params Params
 	Secret string
+	Zone   *time.Location
 }
 
 // Rendered is a rendered message's subject on one line, and its text and HTML
@@ -161,6 +184,7 @@ type view struct {
 	Org    string
 	Link   string
 	Params Params
+	Zone   *time.Location
 }
 
 type pair struct {
@@ -231,7 +255,11 @@ func (r *Renderer) Render(l Letter) (Rendered, error) {
 	if def.secret && l.Secret == "" {
 		return Rendered{}, fmt.Errorf("email: %s needs a secret", t)
 	}
-	v := view{Org: l.Org, Link: def.link(strings.TrimRight(l.AppURL, "/"), l.Params, l.Secret), Params: l.Params}
+	zone := l.Zone
+	if zone == nil {
+		zone = time.UTC
+	}
+	v := view{Org: l.Org, Link: def.link(strings.TrimRight(l.AppURL, "/"), l.Params, l.Secret), Params: l.Params, Zone: zone}
 	var subject, text, html bytes.Buffer
 	if err := p.text.ExecuteTemplate(&subject, "subject", v); err != nil {
 		return Rendered{}, err
