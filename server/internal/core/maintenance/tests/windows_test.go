@@ -365,6 +365,10 @@ func commitAssignment(t *testing.T, base time.Time) *committed {
 			sql string
 			arg any
 		}{
+			// The audit rows of the windows, the attempts and the assignment go
+			// first, while the rows they name can still be found.
+			{`DELETE FROM app.audit_log WHERE entity_id IN (SELECT id FROM app.maintenance_windows WHERE starts_at >= $1 AND starts_at < $1 + interval '30 days')`, base},
+			{`DELETE FROM app.audit_log WHERE entity_id::text = $1 OR entity_id IN (SELECT id FROM app.attempts WHERE assignment_id::text = $1)`, c.assignment},
 			{`DELETE FROM app.maintenance_windows WHERE starts_at >= $1 AND starts_at < $1 + interval '30 days'`, base},
 			{`DELETE FROM app.attempts WHERE assignment_id::text = $1`, c.assignment},
 			{`DELETE FROM app.assignments WHERE id::text = $1`, c.assignment},
@@ -469,6 +473,9 @@ func TestWindowScheduleSerialisesAgainstAttemptStart(t *testing.T) {
 				t.Fatalf("attempt %d: an attempt started across a new window kept deadline %v, want %v; "+
 					"it will be cut off by the maintenance", attempt, stored, want)
 			}
+		}
+		if _, err := c.pool.Exec(ctx, `DELETE FROM app.audit_log WHERE entity_id IN (SELECT id FROM app.attempts WHERE student_id = $1::uuid) OR entity_id IN (SELECT id FROM app.maintenance_windows WHERE starts_at = $2)`, in.StudentID, windowStart); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := c.pool.Exec(ctx, `DELETE FROM app.attempts WHERE student_id = $1::uuid`, in.StudentID); err != nil {
 			t.Fatal(err)

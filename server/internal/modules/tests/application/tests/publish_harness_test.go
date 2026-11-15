@@ -38,14 +38,7 @@ func pubMakeAuthor(t *testing.T, pool *pgxpool.Pool) string {
 		"publish-"+hex.EncodeToString(nonce)+"@example.com").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM app.audit_log WHERE actor_user_id = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.test_versions WHERE published_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.tests WHERE created_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.questions WHERE created_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.users WHERE id = $1`, id)
-	})
+	t.Cleanup(func() { removeAuthor(t, pool, id) })
 	return id
 }
 

@@ -71,18 +71,43 @@ func seedWorld(t *testing.T, pool *pgxpool.Pool, totalPoints string) world {
 
 	t.Cleanup(func() {
 		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM app.attempt_answers WHERE attempt_id IN
-			(SELECT id FROM app.attempts WHERE student_id = $1::uuid)`, w.student)
-		_, _ = pool.Exec(c, `DELETE FROM app.attempts WHERE student_id = $1::uuid`, w.student)
-		_, _ = pool.Exec(c, `DELETE FROM app.assignments WHERE test_id = $1::uuid`, w.testID)
-		_, _ = pool.Exec(c, `DELETE FROM app.test_versions WHERE test_id = $1::uuid`, w.testID)
-		_, _ = pool.Exec(c, `DELETE FROM app.tests WHERE id = $1::uuid`, w.testID)
-		_, _ = pool.Exec(c, `DELETE FROM app.class_members WHERE class_id = $1::uuid`, w.class)
-		_, _ = pool.Exec(c, `DELETE FROM app.classes WHERE id = $1::uuid`, w.class)
-		_, _ = pool.Exec(c, `DELETE FROM app.audit_log WHERE actor_user_id IN ($1::uuid,$2::uuid)`, w.admin, w.student)
-		_, _ = pool.Exec(c, `DELETE FROM app.users WHERE id IN ($1::uuid,$2::uuid)`, w.admin, w.student)
+		for _, step := range []struct {
+			sql  string
+			args []any
+		}{
+			{`DELETE FROM app.attempt_answers WHERE attempt_id IN (SELECT id FROM app.attempts WHERE student_id = $1::uuid)`, []any{w.student}},
+			{`DELETE FROM app.attempts WHERE student_id = $1::uuid`, []any{w.student}},
+			{`DELETE FROM app.assignments WHERE test_id = $1::uuid`, []any{w.testID}},
+			{`DELETE FROM app.test_versions WHERE test_id = $1::uuid`, []any{w.testID}},
+			{`DELETE FROM app.tests WHERE id = $1::uuid`, []any{w.testID}},
+			{`DELETE FROM app.class_members WHERE class_id = $1::uuid`, []any{w.class}},
+			{`DELETE FROM app.classes WHERE id = $1::uuid`, []any{w.class}},
+			{`DELETE FROM app.audit_log WHERE actor_user_id IN ($1::uuid,$2::uuid)`, []any{w.admin, w.student}},
+			// The student apart from the Admin: one statement for both kept
+			// both whenever the guard kept the Admin.
+			{`DELETE FROM app.users WHERE id = $1::uuid`, []any{w.student}},
+		} {
+			if _, err := pool.Exec(c, step.sql, step.args...); err != nil {
+				t.Errorf("clean up %q: %v", step.sql, err)
+			}
+		}
+		removeWorldAdmin(t, pool, w.admin)
 	})
 	return w
+}
+
+// removeWorldAdmin deletes a world's Admin, unless it is the database's only
+// active Admin: on a fresh database the users_last_admin guard never lets that
+// one go, so it is kept and logged rather than failing the test it served.
+func removeWorldAdmin(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `DELETE FROM app.users WHERE id = $1::uuid`, id)
+	switch {
+	case db.IsCheckViolation(err, "users_last_admin"):
+		t.Logf("kept the Admin %s: it is the only active Admin, which the users_last_admin guard never lets go", id)
+	case err != nil:
+		t.Errorf("clean up: %v", err)
+	}
 }
 
 func (w world) assignment(t *testing.T, pool *pgxpool.Pool) string {
