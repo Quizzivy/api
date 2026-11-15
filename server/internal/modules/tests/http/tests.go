@@ -429,9 +429,9 @@ func toStudentQuestion(q domain.PreviewQuestion) (openapi.StudentQuestion, error
 		MediaAlt:        q.MediaAlt,
 		Points:          points,
 		SelectCount:     q.SelectCount,
-		MaxWords:        q.MaxWords,
 		MatchAllowReuse: q.MatchReuse,
 	}
+	sq.MaxWords, sq.EssayMaxWords = httpapi.WordLimits(q.Type == "essay", q.MaxWords)
 	if len(q.Options) > 0 {
 		options := make([]openapi.StudentOption, len(q.Options))
 		for j, o := range q.Options {

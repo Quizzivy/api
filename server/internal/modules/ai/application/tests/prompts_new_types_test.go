@@ -303,3 +303,29 @@ func TestGenerateWritesChooseNAndAWordLimitWhenAsked(t *testing.T) {
 		t.Error("a request that did not ask for Choose N asks for it")
 	}
 }
+
+// The essay word limit (the owner, 2026-11-15): Generate writes each essay task
+// for an answer within it, and the draft carries it.
+func TestGenerateWritesAnEssayWithinItsWordLimit(t *testing.T) {
+	in := prompts.GenerateInput{Source: "cities", Types: []string{prompts.Essay}, Count: 2, Level: "b2", Language: domain.English, Standalone: true, EssayMaxWords: 250}
+	none := []any{}
+	answer := map[string]any{"questions": []map[string]any{
+		{"type": "essay", "prompt": "Write about a city you know. Write no more than 250 words.", "options": []string{}, "answers": []string{"Names the city and two reasons."}, "items": none, "explanation": ""},
+	}}
+	p := prompts.Generate(in)
+	conforms(t, p.Schema, answer)
+	if !strings.Contains(p.User, "no more than 250 words") {
+		t.Errorf("the prompt lacks the essay's limit:\n%s", p.User)
+	}
+	got, err := prompts.DecodeGenerate(marshal(t, answer), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].MaxWords == nil || *got[0].MaxWords != 250 {
+		t.Errorf("drafts %+v, want the essay with maxWords 250", got)
+	}
+	in.EssayMaxWords = 0
+	if strings.Contains(prompts.Generate(in).User, "no more than") {
+		t.Error("a request with no essay limit asks for one")
+	}
+}

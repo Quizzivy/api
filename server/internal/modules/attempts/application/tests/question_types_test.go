@@ -56,7 +56,7 @@ func seedTypedWorld(t *testing.T, pool *pgxpool.Pool) typedWorld {
 	w.chooseTwo = question(5, "type, select_count", "'multiple_choice', 2")
 	options(w.chooseTwo, true, false, true, false)
 	w.limited = question(6, "type, max_words", "'short_answer', 3")
-	w.essay = question(7, "type, sample_answer", "'essay', $3", secretSampleAnswer)
+	w.essay = question(7, "type, sample_answer, max_words", "'essay', $3, 250", secretSampleAnswer)
 	_, err := pool.Exec(ctx, `INSERT INTO app.test_version_rubric_criteria (test_version_question_id, ordinal, label) VALUES ($1::uuid, 0, 'TIEU-CHI-AN')`, w.essay)
 	must(err)
 	w.matching = question(8, "type, match_allow_reuse", "'matching', false")
@@ -131,6 +131,9 @@ func TestThePaperCarriesTheRulesAndKeysOfTheNewTypes(t *testing.T) {
 	}
 	if got := questionOf(t, session, w.limited).MaxWords; got == nil || *got != 3 {
 		t.Errorf("maxWords = %v, want 3", got)
+	}
+	if got := questionOf(t, session, w.essay).MaxWords; got == nil || *got != 250 {
+		t.Errorf("the essay's maxWords = %v, want 250", got)
 	}
 	matching := questionOf(t, session, w.matching)
 	if matching.MatchAllowReuse == nil || *matching.MatchAllowReuse {

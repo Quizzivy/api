@@ -4503,6 +4503,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "rubric": {
             "type": "array",
             "maxItems": 6,
@@ -7854,6 +7857,15 @@
         "maximum": 100,
         "description": "`short_answer` only: the word limit. Advice, never truncation: the\nengine counts words and flags \"too many\", the server stores whatever\nwas typed, and the grader sees an over-limit badge.\n"
       },
+      "EssayMaxWords": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 1,
+        "maximum": 1000,
+        "description": "`essay` only: the word limit, as `maxWords` is a short answer's. Advice,\nnever truncation: the engine counts words and flags \"too many\", the\nserver stores whatever was typed, and the grader sees an over-limit\nbadge. Null is no limit.\n"
+      },
       "MatchAllowReuse": {
         "type": [
           "boolean",
@@ -9068,6 +9080,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
           },
@@ -9314,6 +9329,10 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords",
             "description": "`short_answer` only. A rule the student is told; the engine counts words and never cuts text."
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "`essay` only. A rule the student is told; the engine counts words and never cuts text."
           },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
@@ -10628,7 +10647,7 @@
       },
       "DiffField": {
         "type": "string",
-        "description": "The part of a question that differs, for a `changed` entry.\n`prompt` and `explanation` cover the text and the rich content;\n`options` the text and content of the choices in their order, `blanks`\nthe gaps and their case rule, and `media` the attachment with its audio\npolicy and transcript. `items` is the text of a matching question's\nitems in their order, `rubric` an essay's criterion labels in their\norder, and `rules` the rules a student is told: a multiple choice's\n`selectCount`, a short answer's `maxWords` and a matching question's\n`matchAllowReuse`. `context` is the shared material of the group\nthe question belongs to, or its being in a group at all, and `section`\nthe part of the paper it sits in. The correct options, the accepted\nanswers and the choice each matching item is keyed to are not here:\nthey are `answer` entries.\n",
+        "description": "The part of a question that differs, for a `changed` entry.\n`prompt` and `explanation` cover the text and the rich content;\n`options` the text and content of the choices in their order, `blanks`\nthe gaps and their case rule, and `media` the attachment with its audio\npolicy and transcript. `items` is the text of a matching question's\nitems in their order, `rubric` an essay's criterion labels in their\norder, and `rules` the rules a student is told: a multiple choice's\n`selectCount`, a short answer's `maxWords`, an essay's `essayMaxWords` and a matching question's\n`matchAllowReuse`. `context` is the shared material of the group\nthe question belongs to, or its being in a group at all, and `section`\nthe part of the paper it sits in. The correct options, the accepted\nanswers and the choice each matching item is keyed to are not here:\nthey are `answer` entries.\n",
         "enum": [
           "type",
           "prompt",
@@ -12441,6 +12460,10 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords",
             "description": "A word limit for the `short_answer` questions: each is written to be\nanswered within it, and its draft carries it. Absent or `null`, the\ndrafts carry none.\n"
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "A word limit for the `essay` questions: each task is written for an\nanswer within it, and its draft carries it. Absent or `null`, the\ndrafts carry none.\n"
           }
         }
       },
@@ -12503,6 +12526,10 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords",
             "description": "`short_answer` only, present when the request set `maxWords`: the limit the question is saved with."
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "`essay` only, present when the request set `essayMaxWords`: the limit the question is saved with."
           }
         }
       },
@@ -14011,7 +14038,7 @@
       },
       "QuestionInput": {
         "type": "object",
-        "description": "Create/update body for a bank question. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
+        "description": "Create/update body for a bank question. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
         "required": [
           "type",
           "prompt",
@@ -14220,6 +14247,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
           },
@@ -14302,7 +14332,7 @@
       },
       "StoredQuestionInput": {
         "type": "object",
-        "description": "Stored editable content used by teacher reads, bodyless copies and version\nrestoration. Existing choice arrays retain their length; the eight-option\nlimit applies to authoring requests. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
+        "description": "Stored editable content used by teacher reads, bodyless copies and version\nrestoration. Existing choice arrays retain their length; the eight-option\nlimit applies to authoring requests. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
         "required": [
           "type",
           "prompt",
@@ -14511,6 +14541,9 @@
           },
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
           },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"

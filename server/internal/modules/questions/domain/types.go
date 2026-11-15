@@ -9,17 +9,11 @@ import (
 
 // validateTypeFields refuses a field that belongs to another type and checks
 // each type's own: selectCount on a multiple choice, maxWords on a short
-// answer, matchAllowReuse and matchItems on matching, rubric on an essay.
+// answer or an essay, matchAllowReuse and matchItems on matching, rubric on an
+// essay.
 func validateTypeFields(in Input, errs *ValidationError) {
 	validateSelectCount(in, errs)
-	if in.MaxWords != nil {
-		switch {
-		case in.Type != ShortAnswer:
-			errs.AddIn("maxWords", "Chỉ câu trả lời ngắn mới có giới hạn số từ.", "Only a short answer has a word limit.")
-		case *in.MaxWords < 1 || *in.MaxWords > MaxWordsLimit:
-			errs.AddIn("maxWords", "Giới hạn số từ phải từ 1 đến 100.", "The word limit must be from 1 to 100.")
-		}
-	}
+	validateWordLimit(in, errs)
 	switch {
 	case in.Type == Matching && in.MatchAllowReuse == nil:
 		errs.AddIn("matchAllowReuse", "Hãy chọn một lựa chọn có được dùng cho nhiều mục hay không.",
@@ -145,5 +139,30 @@ func validateRubric(in Input, errs *ValidationError) {
 			errs.AddIn(field, "Hai tiêu chí không được trùng tên.", "Two criteria cannot have the same label.")
 		}
 		seen[label] = true
+	}
+}
+
+// validateWordLimit checks the one stored word limit, which the contract
+// sends as a short answer's `maxWords` (1 to 100) or an essay's
+// `essayMaxWords` (1 to 1000), and refuses either field on a type it is not
+// for, by the field's own name.
+func validateWordLimit(in Input, errs *ValidationError) {
+	switch in.MisplacedWordLimit {
+	case "maxWords":
+		errs.AddIn("maxWords", "Chỉ câu trả lời ngắn mới có giới hạn số từ.", "Only a short answer has a word limit.")
+	case "essayMaxWords":
+		errs.AddIn("essayMaxWords", "Chỉ bài luận mới có giới hạn số từ này.", "Only an essay has this word limit.")
+	}
+	if in.MaxWords == nil {
+		return
+	}
+	switch {
+	case in.Type == Essay && (*in.MaxWords < 1 || *in.MaxWords > MaxEssayWordsLimit):
+		errs.AddIn("essayMaxWords", "Giới hạn số từ của bài luận phải từ 1 đến 1000.", "An essay's word limit must be from 1 to 1000.")
+	case in.Type == Essay:
+	case in.Type != ShortAnswer:
+		errs.AddIn("maxWords", "Chỉ câu trả lời ngắn mới có giới hạn số từ.", "Only a short answer has a word limit.")
+	case *in.MaxWords < 1 || *in.MaxWords > MaxWordsLimit:
+		errs.AddIn("maxWords", "Giới hạn số từ phải từ 1 đến 100.", "The word limit must be from 1 to 100.")
 	}
 }

@@ -35,6 +35,8 @@ type Generate struct {
 	ChooseN      bool
 	// MaxWords, above zero, is the word limit of the short_answer drafts.
 	MaxWords int
+	// EssayMaxWords, above zero, is the word limit of the essay drafts.
+	EssayMaxWords int
 }
 
 // Generated is the draft questions and what the call cost.
@@ -49,7 +51,12 @@ func (h GenerateHandler) Handle(ctx context.Context, q Generate) (Generated, err
 	if h.Completer == nil {
 		return Generated{}, domain.ErrOff
 	}
-	in := prompts.GenerateInput{Types: q.Types, Count: q.Count, Level: q.Level, Explanations: q.Explanations, Standalone: q.Standalone, ChooseN: q.ChooseN, MaxWords: q.MaxWords}
+	// A short answer's limit is at most 100, as the bank holds it; the
+	// essays' is essayMaxWords.
+	if q.MaxWords > prompts.MaxShortAnswerWords {
+		return Generated{}, validation.Refuse("maxWords", "Giới hạn số từ phải từ 1 đến 100.", "The word limit must be from 1 to 100.")
+	}
+	in := prompts.GenerateInput{Types: q.Types, Count: q.Count, Level: q.Level, Explanations: q.Explanations, Standalone: q.Standalone, ChooseN: q.ChooseN, MaxWords: q.MaxWords, EssayMaxWords: q.EssayMaxWords}
 	var err error
 	if q.Standalone {
 		in.Source, in.Section, err = h.topic(ctx, q)

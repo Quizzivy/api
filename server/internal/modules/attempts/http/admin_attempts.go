@@ -327,7 +327,8 @@ func (h Attempts) toAPIReviewQuestion(ctx context.Context, q domain.ReviewQuesti
 		}
 	}
 	out.Options = &options
-	out.SelectCount, out.MaxWords, out.MatchAllowReuse = q.SelectCount, q.MaxWords, q.MatchAllowReuse
+	out.SelectCount, out.MatchAllowReuse = q.SelectCount, q.MatchAllowReuse
+	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == "essay", q.MaxWords)
 	if q.Type == "matching" {
 		items := make([]openapi.AdminMatchItem, len(q.MatchItems))
 		for i, it := range q.MatchItems {

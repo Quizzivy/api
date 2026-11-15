@@ -35,6 +35,10 @@ type Input struct {
 	SampleAnswer       *string
 	SelectCount        *int
 	MaxWords           *int
+	// MisplacedWordLimit names the contract field of a word limit sent for a
+	// type it is not for (`maxWords` on an essay, `essayMaxWords` on any other
+	// type), so validation refuses it by name; empty when none was.
+	MisplacedWordLimit string
 	MatchAllowReuse    *bool
 	MatchItems         []MatchItemInput
 	Rubric             []RubricCriterionInput
