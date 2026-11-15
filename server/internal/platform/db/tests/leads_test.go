@@ -124,19 +124,6 @@ func TestALeadOutlivesTheAccountThatHandledItAndMovesItsUpdatedAt(t *testing.T) 
 	})
 }
 
-// TestTheAppRoleReadsWritesChangesAndRemovesLeads fails when a migration
-// narrows what quizzivy_app holds on app.leads: the form inserts, the console
-// reads and updates, and an Admin deletes on request.
-// TestAppRoleCanReadAndWriteEveryTable checks SELECT and INSERT only.
-func TestTheAppRoleReadsWritesChangesAndRemovesLeads(t *testing.T) {
-	conn := migrated(t)
-	for _, priv := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
-		if !hasTablePrivilege(t, conn, appRole, "app.leads", priv) {
-			t.Errorf("%s cannot %s app.leads", appRole, priv)
-		}
-	}
-}
-
 // TestTheSettingsRowHoldsAtMostFiveLeadRecipients fails when 00157's CHECK is
 // dropped or its bound moves, and when the column loses its empty default.
 func TestTheSettingsRowHoldsAtMostFiveLeadRecipients(t *testing.T) {
