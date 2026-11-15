@@ -520,7 +520,7 @@ not a web host: nobody signs in there, so it is never listed in
 `CORS_ALLOWED_ORIGINS`, whose origins call every operation with credentials.
 Its pages call two open operations from that origin, without credentials:
 `POST /public/leads`, the consultation form, and `GET /public/status`. When a
-request's `Origin` is exactly `LANDING_URL`, the API answers CORS for those two
+request's `Origin` is exactly an origin of `LANDING_URL`, the API answers CORS for those two
 and their preflights only: `Access-Control-Allow-Origin` with that origin,
 `Access-Control-Expose-Headers: X-Request-Id, Retry-After` (the form reads
 `Retry-After` on a `429`), the one method and the `Content-Type` header on the
@@ -530,12 +530,30 @@ window included. Any other path or method from that origin, and
 `https://www.quizzivy.com` or `http://quizzivy.com`, is answered as an origin
 nobody listed.
 
-The setting is optional, and unset it changes nothing. It is an origin (scheme
-and host, a port if any, no path), `https` in production, and the API refuses
-to start when it equals `STUDENT_APP_URL` or `STAFF_APP_URL` or is listed in
-`CORS_ALLOWED_ORIGINS`. Only the API reads it; the worker does not. On the box
-it is set where the two web hosts' settings are (`Quizzivy/infra`,
-`docs/vps.md`); on Fly it would be a line of `fly.toml`'s `[env]`.
+The setting is optional, and unset it changes nothing. It is a list: one
+origin, or several separated by commas, as `CORS_ALLOWED_ORIGINS` is written.
+**Production holds `https://quizzivy.com` alone.** A second origin is for a
+test, such as the Pages project's own `pages.dev` host while the form is tried
+before the domain is attached:
+
+```
+LANDING_URL=https://quizzivy.com,https://<project>.pages.dev
+```
+
+Take it out again once the test is over, and restart the API: every origin in
+the list can send the form, and a `pages.dev` host is not the centre's site.
+Each origin of the list is admitted to the same two operations and nothing
+else, and an origin the list does not hold is answered as before.
+
+Each item is an origin (scheme and host, a port if any, no path), `https` in
+production, and the API refuses to start when one equals `STUDENT_APP_URL` or
+`STAFF_APP_URL` or is listed in `CORS_ALLOWED_ORIGINS`. It also refuses an
+origin written twice and an empty item (`a,,b`, or a trailing comma), so a typo
+stops the start rather than admit less than was meant. The refusal of a list
+names the item, as `LANDING_URL (origin 2) must be https in production`. Only
+the API reads the setting; the worker does not. On the box it is set where the
+two web hosts' settings are (`Quizzivy/infra`, `docs/vps.md`); on Fly it would
+be a line of `fly.toml`'s `[env]`.
 
 To check it from a shell, with the origin the browser would send:
 

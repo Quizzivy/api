@@ -60,9 +60,9 @@ type Deps struct {
 	Maintenance httpx.MaintenanceSource
 	// Principals resolves who a request acts as; New refuses a nil one.
 	Principals httpx.PrincipalResolver
-	// LandingOrigin is the landing site's origin (LANDING_URL), which may call
-	// LandingOperations without credentials; empty admits none.
-	LandingOrigin string
+	// LandingOrigins are the landing site's origins (LANDING_URL), each of
+	// which may call LandingOperations without credentials; none admits none.
+	LandingOrigins []string
 }
 
 var _ openapi.StrictServerInterface = (*Server)(nil)

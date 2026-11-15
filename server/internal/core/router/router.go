@@ -114,16 +114,23 @@ func New(deps Deps, logger *slog.Logger, allowedOrigins []string, clientIPHeader
 	})
 
 	gated := routedOnly(mux, httpx.Maintenance(deps.Maintenance, deps.Modules.Identity.ClearSessionOnRefusedLogout)(servedMethodOnly(mux, handler, requirements, openRoutes)))
-	landing := httpx.PublicOrigin{Origin: deps.LandingOrigin, Operations: LandingOperations()}
-	return httpx.RequestID(httpx.Logging(logger)(httpx.SecurityHeaders(httpx.CORS(allowedOrigins, landing)(gated)))), nil
+	return httpx.RequestID(httpx.Logging(logger)(httpx.SecurityHeaders(httpx.CORS(allowedOrigins, landingAccess(deps.LandingOrigins)...)(gated)))), nil
 }
 
 // LandingOperations are the open operations the landing site's pages call
-// from their own origin, without credentials: the consultation form's
+// from each of its origins, without credentials: the consultation form's
 // submission and the status its status page reads. New refuses one that needs
 // a token.
 func LandingOperations() []string {
 	return []string{"POST /public/leads", "GET /public/status"}
+}
+
+func landingAccess(origins []string) []httpx.PublicOrigin {
+	admitted := make([]httpx.PublicOrigin, len(origins))
+	for i, origin := range origins {
+		admitted[i] = httpx.PublicOrigin{Origin: origin, Operations: LandingOperations()}
+	}
+	return admitted
 }
 
 func parameterName(err error) string {

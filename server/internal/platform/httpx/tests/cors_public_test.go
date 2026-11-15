@@ -187,3 +187,41 @@ func TestWithoutAPublicOriginItsOperationsAdmitNobody(t *testing.T) {
 		}
 	}
 }
+
+// TestEachPublicOriginIsAdmittedToItsOwnOperationsAndAnsweredByItsOwnName
+// fails when several public origins are folded into one: an origin reaching an
+// operation only another was given, or being answered with another's name. The
+// tests above pass a single public origin.
+func TestEachPublicOriginIsAdmittedToItsOwnOperationsAndAnsweredByItsOwnName(t *testing.T) {
+	const pages = "https://quizzivy-landing.pages.dev"
+	h := httpx.CORS([]string{allowed},
+		httpx.PublicOrigin{Origin: landing, Operations: []string{"POST /public/leads"}},
+		httpx.PublicOrigin{Origin: pages, Operations: []string{"GET /public/status"}},
+	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }))
+	for _, c := range []struct {
+		origin, method, path string
+		admitted             bool
+	}{
+		{landing, http.MethodPost, "/public/leads", true},
+		{landing, http.MethodGet, "/public/status", false},
+		{pages, http.MethodGet, "/public/status", true},
+		{pages, http.MethodPost, "/public/leads", false},
+		{"https://elsewhere.pages.dev", http.MethodGet, "/public/status", false},
+	} {
+		want := ""
+		if c.admitted {
+			want = c.origin
+		}
+		simple := from(h, c.origin, c.method, c.path, "")
+		pre := from(h, c.origin, http.MethodOptions, c.path, c.method)
+		if got := simple.Header().Get("Access-Control-Allow-Origin"); got != want {
+			t.Errorf("%s %s from %s: Allow-Origin %q, want %q", c.method, c.path, c.origin, got, want)
+		}
+		if got := pre.Header().Get("Access-Control-Allow-Origin"); got != want {
+			t.Errorf("the preflight of %s %s from %s: Allow-Origin %q, want %q", c.method, c.path, c.origin, got, want)
+		}
+		if _, set := simple.Header()["Access-Control-Allow-Credentials"]; set {
+			t.Errorf("%s %s from %s allows credentials", c.method, c.path, c.origin)
+		}
+	}
+}

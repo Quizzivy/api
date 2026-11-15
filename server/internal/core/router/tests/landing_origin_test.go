@@ -18,7 +18,10 @@ const landingOrigin = "https://quizzivy.com"
 
 func landingRouter(t *testing.T, origin string, window *maintenanceWindow) http.Handler {
 	t.Helper()
-	deps := router.Deps{Principals: newFakePrincipals(), DB: fakeDB{}, LandingOrigin: origin}
+	deps := router.Deps{Principals: newFakePrincipals(), DB: fakeDB{}}
+	if origin != "" {
+		deps.LandingOrigins = strings.Split(origin, ",")
+	}
 	if window != nil {
 		deps.Maintenance = window
 		deps.Modules = router.Modules{Availability: availabilityhttp.NewAvailability(availabilityapp.New(window, nil))}
@@ -184,6 +187,53 @@ func TestTheLandingOperationsAreTheFormAndTheStatus(t *testing.T) {
 	for _, operation := range got {
 		if !slices.Contains(theOpenTwelve, operation) {
 			t.Errorf("%s is admitted from the landing origin and is not an open operation", operation)
+		}
+	}
+}
+
+// TestEachLandingOriginOfAListReachesTheFormAndTheStatusAndNoOtherOriginDoes
+// fails when the router hands only the first origin of LANDING_URL to the
+// CORS middleware, answers one listed origin with the other's name, admits a
+// listed origin to a sign-in, or admits an origin the list does not hold
+// because it resembles one that it does. The tests above configure a single
+// origin.
+func TestEachLandingOriginOfAListReachesTheFormAndTheStatusAndNoOtherOriginDoes(t *testing.T) {
+	const pagesOrigin = "https://quizzivy-landing.pages.dev"
+	h := landingRouter(t, landingOrigin+","+pagesOrigin, nil)
+	operations := map[string]string{"/public/leads": http.MethodPost, "/public/status": http.MethodGet}
+
+	for i, origin := range []string{landingOrigin, pagesOrigin} {
+		address := "203.0.113.6" + string(rune('0'+i)) + ":1"
+		for path, method := range operations {
+			simple := fromOrigin(h, origin, method, path, address, false)
+			exposed := simple.Header().Get("Access-Control-Expose-Headers")
+			if simple.Header().Get("Access-Control-Allow-Origin") != origin || allowsCredentials(simple) ||
+				!strings.Contains(exposed, "Retry-After") || !strings.Contains(exposed, "X-Request-Id") {
+				t.Errorf("%s %s from %s: Allow-Origin %q, credentials %v, exposed %q; want that origin, no credentials, Retry-After and X-Request-Id",
+					method, path, origin, simple.Header().Get("Access-Control-Allow-Origin"), allowsCredentials(simple), exposed)
+			}
+			pre := fromOrigin(h, origin, method, path, address, true)
+			if pre.Code != http.StatusNoContent || pre.Header().Get("Access-Control-Allow-Origin") != origin ||
+				pre.Header().Get("Access-Control-Allow-Methods") != method || pre.Header().Get("Access-Control-Allow-Headers") != "Content-Type" || allowsCredentials(pre) {
+				t.Errorf("the preflight of %s %s from %s: %d %v", method, path, origin, pre.Code, pre.Header())
+			}
+		}
+		for _, preflight := range []bool{false, true} {
+			login := fromOrigin(h, origin, http.MethodPost, "/auth/login", address, preflight)
+			if got := login.Header().Get("Access-Control-Allow-Origin"); got != "" {
+				t.Errorf("POST /auth/login (preflight %v) from %s: Allow-Origin %q, want none", preflight, origin, got)
+			}
+		}
+	}
+
+	for _, stranger := range []string{"https://quizzivy-landing-preview.pages.dev", "https://pages.dev", "https://staging.quizzivy.com", landingOrigin + "," + pagesOrigin} {
+		for path, method := range operations {
+			for _, preflight := range []bool{false, true} {
+				rec := fromOrigin(h, stranger, method, path, "203.0.113.69:1", preflight)
+				if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+					t.Errorf("%s %s (preflight %v) from %s, which the list does not hold: Allow-Origin %q", method, path, preflight, stranger, got)
+				}
+			}
 		}
 	}
 }

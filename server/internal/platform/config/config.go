@@ -23,9 +23,9 @@ type Config struct {
 	// (STUDENT_APP_URL and STAFF_APP_URL): what a request's Origin is read
 	// against to decide whose session it is, and where an email's link points.
 	Hosts access.Hosts
-	// LandingOrigin is the origin of the landing site (LANDING_URL), whose
+	// LandingOrigins are the origins of the landing site (LANDING_URL), whose
 	// pages call two open operations without credentials; empty when unset.
-	LandingOrigin               string
+	LandingOrigins              []string
 	ClientIPHeader              string
 	GoogleClientID              string
 	GoogleClientSecret          string
@@ -286,26 +286,47 @@ func loadHosts(cfg *Config) error {
 }
 
 func loadLanding(cfg *Config) error {
-	raw := strings.TrimSpace(os.Getenv("LANDING_URL"))
-	if raw == "" {
+	raw := os.Getenv("LANDING_URL")
+	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	origin, err := parseOrigin("LANDING_URL", raw, "https://quizzivy.com")
+	items := strings.Split(raw, ",")
+	for i, item := range items {
+		name := "LANDING_URL"
+		if len(items) > 1 {
+			name = fmt.Sprintf("LANDING_URL (origin %d)", i+1)
+		}
+		origin, err := landingOrigin(cfg, name, strings.TrimSpace(item))
+		if err != nil {
+			return err
+		}
+		if slices.Contains(cfg.LandingOrigins, origin) {
+			return fmt.Errorf("%s repeats an origin the list already holds", name)
+		}
+		cfg.LandingOrigins = append(cfg.LandingOrigins, origin)
+	}
+	return nil
+}
+
+func landingOrigin(cfg *Config, name, item string) (string, error) {
+	if item == "" {
+		return "", fmt.Errorf("%s is empty: a list of origins has no empty item, so remove the comma with nothing beside it", name)
+	}
+	origin, err := parseOrigin(name, item, "https://quizzivy.com")
 	if err != nil {
-		return err
+		return "", err
 	}
 	switch {
 	case cfg.Env == productionEnv && !strings.HasPrefix(origin, schemeHTTPS+"://"):
-		return fmt.Errorf("LANDING_URL must be https in production: the form sends a name and a phone number from it")
+		return "", fmt.Errorf("%s must be https in production: the form sends a name and a phone number from it", name)
 	case origin == cfg.Hosts.Student:
-		return fmt.Errorf("LANDING_URL must not be STUDENT_APP_URL: the landing site calls two open operations without a session, and a web host signs people in")
+		return "", fmt.Errorf("%s must not be STUDENT_APP_URL: the landing site calls two open operations without a session, and a web host signs people in", name)
 	case origin == cfg.Hosts.Staff:
-		return fmt.Errorf("LANDING_URL must not be STAFF_APP_URL: the landing site calls two open operations without a session, and a web host signs people in")
+		return "", fmt.Errorf("%s must not be STAFF_APP_URL: the landing site calls two open operations without a session, and a web host signs people in", name)
 	case slices.Contains(cfg.AllowedOrigins, origin):
-		return fmt.Errorf("LANDING_URL must not be listed in CORS_ALLOWED_ORIGINS: an origin listed there calls every operation with credentials")
+		return "", fmt.Errorf("%s must not be listed in CORS_ALLOWED_ORIGINS: an origin listed there calls every operation with credentials", name)
 	}
-	cfg.LandingOrigin = origin
-	return nil
+	return origin, nil
 }
 
 func loadGoogle(cfg *Config) error {

@@ -29,7 +29,7 @@ var leadVisitors atomic.Int64
 func bootForLeads(t *testing.T) *world {
 	t.Helper()
 	w := boot(t, func(c *config.Config) {
-		c.LandingOrigin = landingOrigin
+		c.LandingOrigins = []string{landingOrigin}
 		c.ClientIPHeader = clientIPHeader
 	})
 	t.Cleanup(func() {
