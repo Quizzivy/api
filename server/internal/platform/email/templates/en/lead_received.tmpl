@@ -1,0 +1,45 @@
+{{define "subject"}}{{.Org}}: New consultation request · {{.Params.GivenName}}{{end}}
+
+{{define "interest"}}{{if eq . "ielts"}}IELTS{{else if eq . "toeic"}}TOEIC{{else if eq . "communication"}}Conversational English{{else if eq . "kids"}}English for children{{else if eq . "business"}}Business English{{else}}{{.}}{{end}}{{end}}
+
+{{define "interests"}}{{range $i, $interest := .}}{{if $i}}, {{end}}{{template "interest" $interest}}{{else}}No course chosen{{end}}{{end}}
+
+{{define "courseFor"}}{{if eq . "self"}}The sender{{else if eq . "child"}}The sender's child{{else if eq . "company"}}The sender's company{{else}}{{.}}{{end}}{{end}}
+
+{{define "callTime"}}{{if eq . "any"}}Any time{{else if eq . "morning"}}Morning, 8:00 to 12:00{{else if eq . "afternoon"}}Afternoon, 13:00 to 17:00{{else if eq . "evening"}}Evening, 18:00 to 20:00{{else}}{{.}}{{end}}{{end}}
+
+{{define "receivedAt"}}{{(.Params.ReceivedAt.In .Zone).Format "2 Jan 2006, 15:04 (GMT-07:00)"}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{.Params.GivenName}} has sent a consultation request from the landing page.
+
+Interested in: {{template "interests" .Params.Interests}}
+Course for: {{template "courseFor" .Params.CourseFor}}
+Best time to call: {{template "callTime" .Params.CallTime}}
+Received: {{template "receivedAt" .}}
+
+The full name and the phone number are in the Admin console. Open the request to call back:
+
+{{.Link}}
+
+Sign in with an Admin account. This message does not hold the sender's phone number.{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{.Params.GivenName}} has sent a consultation request from the landing page.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;border-collapse:collapse">
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Interested in</td><td style="padding:2px 0;font-weight:bold">{{template "interests" .Params.Interests}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Course for</td><td style="padding:2px 0;font-weight:bold">{{template "courseFor" .Params.CourseFor}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Best time to call</td><td style="padding:2px 0;font-weight:bold">{{template "callTime" .Params.CallTime}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Received</td><td style="padding:2px 0;font-weight:bold">{{template "receivedAt" .}}</td></tr>
+</table>
+<p>The full name and the phone number are in the Admin console. Open the request to call back:</p>
+<p><a href="{{.Link}}">Open the consultation request</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p>Sign in with an Admin account. This message does not hold the sender's phone number.</p>
+</body>
+</html>{{end}}

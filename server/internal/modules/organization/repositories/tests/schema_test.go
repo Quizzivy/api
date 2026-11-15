@@ -67,7 +67,7 @@ func TestTheMigrationSeedsTheCentreWithItsDocumentedDefaults(t *testing.T) {
 		seeded := readRawTable(t, tx, "seed_copy")
 		want := rawRow{
 			name: "Quizzivy", google: true, password: true, force: true, joinCodes: true,
-			domains: []string{}, keepFocus: 13, revision: 1, updatedAt: seeded.updatedAt,
+			domains: []string{}, recipients: []string{}, keepFocus: 13, revision: 1, updatedAt: seeded.updatedAt,
 		}
 		if !seeded.same(want) {
 			t.Errorf("seeded row = %+v, want %+v", seeded, want)

@@ -30,6 +30,8 @@ type AdminRepository interface {
 	Accounts(ctx context.Context, since time.Time) (Accounts, error)
 	// MustChangePassword counts the enabled accounts on a temporary password.
 	MustChangePassword(ctx context.Context) (int, error)
+	// NewLeads counts the consultation requests whose status is new.
+	NewLeads(ctx context.Context) (int, error)
 	// ActiveBetween counts the distinct accounts with an activity row on any
 	// day from..to.
 	ActiveBetween(ctx context.Context, from, to time.Time) (int, error)

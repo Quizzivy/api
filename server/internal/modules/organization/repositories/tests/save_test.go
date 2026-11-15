@@ -112,11 +112,16 @@ func TestSaveNamesOnlyTheFieldsThatChanged(t *testing.T) {
 		{"a limit set", func(d *domain.Settings) {
 			d.Limits = limits.Stored{limits.Seats: 400, limits.EmailsPerDay: 80, limits.WarnAtPercent: 90}
 		}, []string{"limits.warnAtPercent"}},
+		{"a lead recipient added", func(d *domain.Settings) {
+			d.LeadRecipients = append(slices.Clone(d.LeadRecipients), "giam-doc@hoamai.example")
+		}, []string{"leadRecipients"}},
+		{"lead recipients cleared", func(d *domain.Settings) { d.LeadRecipients = nil }, []string{"leadRecipients"}},
 		{"several, in the document's order", func(d *domain.Settings) {
+			d.LeadRecipients = []string{"le-tan@hoamai.example"}
 			d.Retention.KeepFocusEventsMonths = 12
 			d.SignIn.JoinCodes = true
 			d.Profile.Name = "Ba thay đổi"
-		}, []string{"organization.name", "signIn.joinCodes", "retention.keepFocusEventsMonths"}},
+		}, []string{"organization.name", "signIn.joinCodes", "retention.keepFocusEventsMonths", "leadRecipients"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -248,7 +253,8 @@ func TestTheFirstAuditRowNamesEveryFieldTheSaveSet(t *testing.T) {
 		       front_desk_hours = NULL, address = NULL, logo_sha256 = NULL, logo_type = NULL,
 		       logo_dark_sha256 = NULL, logo_dark_type = NULL, google_sign_in = true, password_sign_in = true,
 		       force_password_change = true, join_codes_enabled = true, allowed_google_domains = '{}',
-		       keep_answers_months = NULL, keep_focus_events_months = 13, anonymise_disabled_after_months = NULL`)
+		       keep_answers_months = NULL, keep_focus_events_months = 13, anonymise_disabled_after_months = NULL,
+		       lead_recipients = '{}'`)
 	before := s.stored()
 
 	if _, err := s.repo.Save(context.Background(), s.save(s.fullDocument(), before.Revision, actor)); err != nil {
@@ -265,7 +271,7 @@ func TestTheFirstAuditRowNamesEveryFieldTheSaveSet(t *testing.T) {
 		"organization.logo.light", "organization.logo.dark",
 		"signIn.forcePasswordChange", "signIn.joinCodes", "signIn.allowedGoogleDomains",
 		"retention.keepAnswersMonths", "retention.keepFocusEventsMonths", "retention.anonymiseDisabledAfterMonths",
-		"limits.seats", "limits.emailsPerDay",
+		"limits.seats", "limits.emailsPerDay", "leadRecipients",
 	}
 	got := decodeDiff(t, audits[0].diff)
 	if !slices.Equal(got.Fields, want) {
@@ -274,6 +280,44 @@ func TestTheFirstAuditRowNamesEveryFieldTheSaveSet(t *testing.T) {
 	if len(got.Limits) != 2 || got.Limits[0].Name != limits.Seats || got.Limits[0].Before != nil || *got.Limits[0].After != 400 ||
 		got.Limits[1].Name != limits.EmailsPerDay || got.Limits[1].Before != nil || *got.Limits[1].After != 80 {
 		t.Errorf("limits = %+v, want seats and emails per day from the default to 400 and 80", got.Limits)
+	}
+}
+
+// TestTheAuditRowOfASaveNamesTheLeadRecipientsFieldAndHoldsNoAddress fails when
+// the organization.updated row starts carrying the addresses told of a
+// consultation request, before or after: the log is append-only and names a
+// changed field, never a person's address. The field-name test above does not
+// read the row for values.
+func TestTheAuditRowOfASaveNamesTheLeadRecipientsFieldAndHoldsNoAddress(t *testing.T) {
+	s := lockedSession(t)
+	actor := s.coverAdmin()
+	ctx := context.Background()
+	first, err := s.repo.Save(ctx, s.save(s.fullDocument(), s.stored().Revision, actor))
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	next := first
+	next.LeadRecipients = []string{"giam-doc@hoamai.example", "le-tan@hoamai.example"}
+	saved, err := s.repo.Save(ctx, s.save(next, first.Revision, actor))
+	if err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	if !slices.Equal(saved.LeadRecipients, next.LeadRecipients) || !slices.Equal(s.raw().recipients, next.LeadRecipients) {
+		t.Fatalf("stored recipients = %v (row %v), want %v in the order given", saved.LeadRecipients, s.raw().recipients, next.LeadRecipients)
+	}
+	audits := s.audits()
+	if len(audits) != 2 {
+		t.Fatalf("audit rows = %d, want 2", len(audits))
+	}
+	if got := decodeDiff(t, audits[1].diff); !slices.Equal(got.Fields, []string{"leadRecipients"}) {
+		t.Errorf("fields = %v, want only leadRecipients", got.Fields)
+	}
+	for _, row := range audits {
+		for _, address := range []string{"tu-van@hoamai.example", "le-tan@hoamai.example", "giam-doc@hoamai.example", "@hoamai"} {
+			if strings.Contains(string(row.diff), address) {
+				t.Errorf("the audit row holds %q: %s", address, row.diff)
+			}
+		}
 	}
 }
 

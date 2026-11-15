@@ -13,7 +13,7 @@ const (
 	staffHost   = "https://portal.quizzivy.com"
 )
 
-var hostVariables = []string{"STUDENT_APP_URL", "STAFF_APP_URL", "APP_URL"}
+var hostVariables = []string{"STUDENT_APP_URL", "STAFF_APP_URL", "APP_URL", "LANDING_URL"}
 
 func productionHosts() map[string]string {
 	return map[string]string{

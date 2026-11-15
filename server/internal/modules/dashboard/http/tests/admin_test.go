@@ -31,6 +31,7 @@ func (centre) Accounts(context.Context, time.Time) (domain.Accounts, error) {
 	return domain.Accounts{Total: 10, Enabled: 9, Students: 7, Teachers: 2, TeachersDisabled: 1, MustChangePassword: 2}, nil
 }
 func (centre) MustChangePassword(context.Context) (int, error)                  { return 2, nil }
+func (centre) NewLeads(context.Context) (int, error)                            { return 4, nil }
 func (centre) ActiveBetween(context.Context, time.Time, time.Time) (int, error) { return 5, nil }
 func (centre) ActiveByDay(context.Context, time.Time, time.Time) ([]domain.ActiveDay, error) {
 	return nil, nil
@@ -192,5 +193,37 @@ func TestAnAppWithoutTheAdminPortsAnswersNotImplemented(t *testing.T) {
 	_, err := dashboardhttp.NewDashboard(application.New(centre{})).GetAdminOverview(ctx, openapi.GetAdminOverviewRequestObject{})
 	if !errors.Is(err, httpx.ErrNotImplemented) {
 		t.Errorf("error = %v, want httpx.ErrNotImplemented", err)
+	}
+}
+
+// TestTheSummaryCarriesNewLeadsOnlyWithTheLeadsKey fails when the transport
+// stops reading system.leads from the caller's keys, drops newLeads from the
+// answer (the contract requires the key, null when withheld), or answers the
+// count to a caller who holds another Admin key. The people-key test covers
+// mustChangePassword.
+func TestTheSummaryCarriesNewLeadsOnlyWithTheLeadsKey(t *testing.T) {
+	for name, c := range map[string]struct {
+		who                   access.Principal
+		newLeads, mustChanges string
+	}{
+		"an auditor who also holds system.leads": {holder(access.SystemAuditRead, access.SystemLeads), "4", "null"},
+		"a manager of people":                    {holder(access.PeopleUsersManage), "null", "2"},
+		"the keys of the Admin":                  {holder(access.All()...), "4", "2"},
+		"an auditor":                             {holder(access.SystemAuditRead), "null", "null"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := gatedBy(t, c.who, "GET /admin/summary", access.WorkspaceAdmin)
+			res, err := dashboardhttp.NewDashboard(adminApp()).GetAdminSummary(ctx, openapi.GetAdminSummaryRequestObject{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := asJSON(t, res)
+			if got, ok := body["newLeads"]; !ok || string(got) != c.newLeads {
+				t.Errorf("newLeads = %s (present %v), want %s", got, ok, c.newLeads)
+			}
+			if got := string(body["mustChangePassword"]); got != c.mustChanges {
+				t.Errorf("mustChangePassword = %s, want %s", got, c.mustChanges)
+			}
+		})
 	}
 }

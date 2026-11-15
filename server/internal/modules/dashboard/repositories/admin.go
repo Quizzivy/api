@@ -44,6 +44,15 @@ func (p *Postgres) MustChangePassword(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// NewLeads counts the consultation requests nobody has handled yet.
+func (p *Postgres) NewLeads(ctx context.Context) (int, error) {
+	var n int
+	if err := p.QueryRow(ctx, `SELECT count(*) FROM app.leads WHERE status = 'new'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("dashboard: count new consultation requests: %w", err)
+	}
+	return n, nil
+}
+
 // ActiveBetween counts the distinct accounts with an activity row on any day from..to, whether the account has been disabled since or not.
 func (p *Postgres) ActiveBetween(ctx context.Context, from, to time.Time) (int, error) {
 	var n int

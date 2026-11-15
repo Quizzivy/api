@@ -1,22 +1,17 @@
 package domain
 
-import (
-	"strings"
-	"unicode/utf8"
-
-	"quizzivy/internal/shared/validation"
-)
+import "quizzivy/internal/shared/validation"
 
 // FullNameFault says why CleanFullName refused a name.
-type FullNameFault int
+type FullNameFault = validation.NameFault
 
 // The faults, in the order they are looked for.
 const (
-	FullNameOK FullNameFault = iota
-	FullNameEmpty
-	FullNameTooLong
-	FullNameHidden
-	FullNameNoGlyph
+	FullNameOK      = validation.NameOK
+	FullNameEmpty   = validation.NameEmpty
+	FullNameTooLong = validation.NameTooLong
+	FullNameHidden  = validation.NameHidden
+	FullNameNoGlyph = validation.NameNoGlyph
 )
 
 // CleanFullName returns raw as the full name of an account: in Unicode NFC,
@@ -26,18 +21,5 @@ const (
 // hidden), or holds no letter, digit, punctuation mark or symbol. The one rule
 // serves a form and a file of accounts alike, so the two admit the same names.
 func CleanFullName(raw string) (name string, fault FullNameFault, hidden rune) {
-	name = validation.Tidy(strings.Join(strings.Fields(raw), " "))
-	switch {
-	case name == "":
-		return name, FullNameEmpty, 0
-	case utf8.RuneCountInString(name) > MaxFullNameLength:
-		return name, FullNameTooLong, 0
-	}
-	if r, found := validation.FirstHidden(name); found {
-		return name, FullNameHidden, r
-	}
-	if !validation.HasGlyph(name) {
-		return name, FullNameNoGlyph, 0
-	}
-	return name, FullNameOK, 0
+	return validation.CleanName(raw, MaxFullNameLength)
 }

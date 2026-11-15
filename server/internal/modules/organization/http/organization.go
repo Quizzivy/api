@@ -63,7 +63,7 @@ func (h Organization) UpdateOrganizationSettings(ctx context.Context, request op
 	}
 	saved, err := h.app.Commands.UpdateSettings.Handle(ctx, command.UpdateSettings{
 		Actor: who, Settings: settingsOf(*request.Body), ExpectedRevision: request.Body.ExpectedRevision,
-		KeepLimits: request.Body.Limits == nil,
+		KeepLimits: request.Body.Limits == nil, KeepLeadRecipients: request.Body.LeadRecipients == nil,
 	})
 	var invalid *validation.Error
 	var locked *domain.LockedOut

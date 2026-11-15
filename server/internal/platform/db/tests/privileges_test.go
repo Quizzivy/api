@@ -224,6 +224,19 @@ func TestTheAppRoleWritesRolesAndGrantsAndNothingElseOfTheAccessModel(t *testing
 	}
 }
 
+// TestTheAppRoleReadsWritesChangesAndRemovesLeads fails when a migration
+// narrows what quizzivy_app holds on app.leads: the form inserts, the console
+// reads and updates, and an Admin deletes on request.
+// TestAppRoleCanReadAndWriteEveryTable checks SELECT and INSERT only.
+func TestTheAppRoleReadsWritesChangesAndRemovesLeads(t *testing.T) {
+	conn := migrated(t)
+	for _, priv := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
+		if !hasTablePrivilege(t, conn, appRole, "app.leads", priv) {
+			t.Errorf("%s cannot %s app.leads", appRole, priv)
+		}
+	}
+}
+
 const maintenanceRole = "quizzivy_maintenance"
 
 var maintenanceGrants = map[string]map[string]string{
@@ -240,6 +253,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"audit_log":                    {"INSERT": "*"},
 	"class_join_codes":             {"SELECT": "class_id,code_ciphertext,id,key_id,lookup_scheme,revoked_at", "UPDATE": "code_ciphertext,code_hash,key_id"},
 	"classes":                      {"SELECT": "teacher_id"},
+	"leads":                        {"SELECT": "created_at,id", "DELETE": "*"},
 	"maintenance_windows":          {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
 	"media_assets":                 {"SELECT": "owner_id"},
 	"notification_preferences":     {"SELECT": "event,in_app,user_id"},

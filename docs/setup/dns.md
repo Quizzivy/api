@@ -87,7 +87,10 @@ below name it as it was then. Since spec §5.8 it is two custom domains of the
 one Pages project, and the API is told their origins in `STUDENT_APP_URL` and
 `STAFF_APP_URL`, lists both in `CORS_ALLOWED_ORIGINS` and both callbacks in
 `GOOGLE_REDIRECT_URI`. All three hosts share the registrable domain, which is
-what lets the API's `SameSite=Lax` refresh cookies reach it from either.
+what lets the API's `SameSite=Lax` refresh cookies reach it from either. The
+landing site at the apex is not one of them: its origin is `LANDING_URL`, which
+the API admits to two open operations without credentials and never lists in
+`CORS_ALLOWED_ORIGINS` (`operations.md`, "The landing site's origin").
 
 ### `my` and `portal` — Cloudflare Pages
 

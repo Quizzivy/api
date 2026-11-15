@@ -38,6 +38,7 @@ const (
 	TestVersionsFile   = "test_versions.csv"
 	AssignmentsFile    = "assignments.csv"
 	AttemptsFile       = "attempts.csv"
+	LeadsFile          = "leads.csv"
 	AnswersFile        = "answers.csv"
 	ReadmeFile         = "README.txt"
 	ArchiveContentType = "application/zip"
@@ -166,6 +167,24 @@ var catalogue = []File{
 		col("void_reason", "Lý do huỷ lượt làm bài, nếu có", "Reason the attempt was voided, if it was"),
 		col("teacher_note", "Ghi chú của giáo viên, nếu có", "Teacher's note, if any"),
 	}},
+	{LeadsFile, "Các yêu cầu tư vấn gửi từ trang giới thiệu, kèm sự đồng ý của người gửi. Mỗi yêu cầu bị xoá sau 12 tháng.",
+		"The consultation requests sent from the landing page, with the consent each carried. A request is deleted after 12 months.", []Column{
+			col("id", "Mã yêu cầu", "Request ID"),
+			col("full_name", "Họ và tên người gửi", "Sender's full name"),
+			col("phone", "Số điện thoại, chỉ gồm chữ số", "Phone number, digits only"),
+			col("interests", "Các khoá học quan tâm, cách nhau bằng dấu chấm phẩy", "The courses of interest, separated by semicolons"),
+			col("course_for", "Học cho ai (self, child hoặc company)", "Who the course is for (self, child or company)"),
+			col("call_time", "Nên gọi lúc nào (any, morning, afternoon hoặc evening)", "When to call (any, morning, afternoon or evening)"),
+			col("locale", "Ngôn ngữ của trang lúc gửi (vi hoặc en)", "Language of the page when it was sent (vi or en)"),
+			col("privacy_notice_version", "Phiên bản thông báo quyền riêng tư mà người gửi đã đồng ý", "Version of the privacy notice the sender agreed to"),
+			col("consented_at", "Lúc người gửi đồng ý", "When the sender consented"),
+			col("status", "Trạng thái (new, contacted hoặc closed)", "Status (new, contacted or closed)"),
+			col("note", "Ghi chú của trung tâm, nếu có", "The centre's note, if any"),
+			col("handled_by", "Mã tài khoản đổi trạng thái gần nhất (users.csv)", "ID of the account that last changed the status (users.csv)"),
+			col("handled_at", "Lần đổi trạng thái gần nhất", "Latest change of status"),
+			col("created_at", "Lúc gửi yêu cầu", "When the request was sent"),
+			col("updated_at", "Lần sửa gần nhất", "Latest change"),
+		}},
 }
 
 var answersFile = File{AnswersFile, "Mọi câu trả lời của mọi lượt làm bài. Chỉ có khi bạn chọn kèm câu trả lời.",

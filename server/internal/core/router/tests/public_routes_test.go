@@ -131,8 +131,8 @@ func TestEveryOpenOperationAnswers429PastItsAddressBudget(t *testing.T) {
 	limits := router.RateLimits()
 	params := regexp.MustCompile(`\{[^}]+\}`)
 	open := httpx.OpenRoutes(spec, "bearerAuth")
-	if len(open) != len(theOpenEleven) {
-		t.Fatalf("%d open operations, want the %d of theOpenEleven", len(open), len(theOpenEleven))
+	if len(open) != len(theOpenTwelve) {
+		t.Fatalf("%d open operations, want the %d of theOpenTwelve", len(open), len(theOpenTwelve))
 	}
 	for pattern := range open {
 		route, ok := limits.Lookup(pattern)

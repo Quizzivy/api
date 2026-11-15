@@ -111,17 +111,26 @@ func checkMailbox(name, raw string) error {
 }
 
 func parseAppOrigin(name, raw string, production bool) (string, error) {
+	origin, err := parseOrigin(name, raw, "https://my.quizzivy.com")
+	if err != nil {
+		return "", err
+	}
+	if production && !strings.HasPrefix(origin, schemeHTTPS+"://") {
+		return "", fmt.Errorf("%s must be https in production: a set-password link travels in it", name)
+	}
+	return origin, nil
+}
+
+func parseOrigin(name, raw, example string) (string, error) {
 	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) {
 		return "", fmt.Errorf("%s must not contain whitespace or a control character", name)
 	}
 	u, err := url.Parse(raw)
 	switch {
 	case err != nil || (u.Scheme != schemeHTTPS && u.Scheme != "http") || u.Host == "" || u.User != nil:
-		return "", fmt.Errorf("%s must be an origin such as https://my.quizzivy.com", name)
+		return "", fmt.Errorf("%s must be an origin such as %s", name, example)
 	case (u.Path != "" && u.Path != "/") || strings.ContainsAny(raw, "?#"):
-		return "", fmt.Errorf("%s must be an origin such as https://my.quizzivy.com, with no path, query or fragment", name)
-	case production && u.Scheme != schemeHTTPS:
-		return "", fmt.Errorf("%s must be https in production: a set-password link travels in it", name)
+		return "", fmt.Errorf("%s must be an origin such as %s, with no path, query or fragment", name, example)
 	}
 	return u.Scheme + "://" + strings.ToLower(u.Host), nil
 }

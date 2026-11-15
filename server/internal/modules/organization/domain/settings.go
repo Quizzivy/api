@@ -102,15 +102,17 @@ type Retention struct {
 // Settings is the whole document as stored: the fields an Admin writes, and
 // the revision, time and author of the last save. UpdatedBy is empty before
 // the first save and once that account is gone. Limits holds the usage limits
-// an Admin set; one it does not hold takes its default.
+// an Admin set; one it does not hold takes its default. LeadRecipients are the
+// addresses, lower-case and each once, told of every new consultation request.
 type Settings struct {
-	Profile   Profile
-	SignIn    SignIn
-	Retention Retention
-	Limits    limits.Stored
-	Revision  int64
-	UpdatedAt time.Time
-	UpdatedBy string
+	Profile        Profile
+	SignIn         SignIn
+	Retention      Retention
+	Limits         limits.Stored
+	LeadRecipients []string
+	Revision       int64
+	UpdatedAt      time.Time
+	UpdatedBy      string
 }
 
 // The bounds the stored document keeps, as the database checks them.
@@ -122,6 +124,7 @@ const (
 	MaxFrontDeskHours   = 120
 	MaxAddress          = 300
 	MaxAllowedDomains   = 50
+	MaxLeadRecipients   = 5
 	DefaultFocusMonths  = 13
 	logoDigestBytes     = 32
 	maxLocalPart        = 64
@@ -145,6 +148,7 @@ const (
 	ReasonLogoGone   = "logo_missing"
 	ReasonLogoStore  = "logo_store_off"
 	ReasonRange      = "range"
+	ReasonRecipients = "too_many_recipients"
 )
 
 var (
@@ -154,10 +158,11 @@ var (
 )
 
 // Normalised returns the document an Admin wrote as it would be stored: every
-// text trimmed, the domains lower-cased. It refuses, naming every field at
-// once as the contract's paths (organization.name, signIn.allowedGoogleDomains,
-// …) with a Reason* message, a document the database would refuse or that
-// breaks a rule of its own.
+// text trimmed, the domains and the lead recipients lower-cased, a recipient
+// named twice kept once. It refuses, naming every field at once as the
+// contract's paths (organization.name, signIn.allowedGoogleDomains, …) with a
+// Reason* message, a document the database would refuse or that breaks a rule
+// of its own.
 func (s Settings) Normalised() (Settings, error) {
 	var refused validation.Error
 	out := s
@@ -170,6 +175,7 @@ func (s Settings) Normalised() (Settings, error) {
 	if out.Limits == nil {
 		out.Limits = limits.Stored{}
 	}
+	out.LeadRecipients = normaliseRecipients(s.LeadRecipients, &refused)
 	if err := refused.OrNil(); err != nil {
 		return Settings{}, err
 	}
@@ -277,6 +283,23 @@ func normaliseSignIn(s SignIn, refused *validation.Error) SignIn {
 	return out
 }
 
+func normaliseRecipients(recipients []string, refused *validation.Error) []string {
+	out := make([]string, 0, len(recipients))
+	for _, raw := range recipients {
+		address := strings.ToLower(strings.TrimSpace(raw))
+		switch {
+		case utf8.RuneCountInString(address) > MaxContactEmail || !validEmail(address):
+			refused.Add("leadRecipients", ReasonEmail)
+		case !slices.Contains(out, address):
+			out = append(out, address)
+		}
+	}
+	if len(out) > MaxLeadRecipients {
+		refused.Add("leadRecipients", ReasonRecipients)
+	}
+	return out
+}
+
 func checkRetention(r Retention, refused *validation.Error) {
 	if m := r.KeepAnswersMonths; m != nil && *m != 12 && *m != 24 {
 		refused.Add("retention.keepAnswersMonths", ReasonMonths)
@@ -320,6 +343,7 @@ func (s Settings) ChangedFields(next Settings) []string {
 	for _, c := range s.Limits.Changes(next.Limits) {
 		out = append(out, "limits."+string(c.Name))
 	}
+	add("leadRecipients", !slices.Equal(s.LeadRecipients, next.LeadRecipients))
 	return out
 }
 

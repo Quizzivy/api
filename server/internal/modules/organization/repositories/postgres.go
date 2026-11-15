@@ -32,13 +32,13 @@ var columns = `
 	logo_sha256, logo_type, logo_dark_sha256, logo_dark_type,
 	google_sign_in, password_sign_in, force_password_change, join_codes_enabled, allowed_google_domains,
 	keep_answers_months, keep_focus_events_months, anonymise_disabled_after_months,
-	revision, updated_by, updated_at, ` + limits.SelectList()
+	revision, updated_by, updated_at, lead_recipients, ` + limits.SelectList()
 
 var limitAssignments = func() string {
 	names := limits.Names()
 	out := make([]string, len(names))
 	for i, n := range names {
-		out[i] = fmt.Sprintf("%s = $%d", limits.Column(n), 21+i)
+		out[i] = fmt.Sprintf("%s = $%d", limits.Column(n), 22+i)
 	}
 	return strings.Join(out, ", ")
 }()
@@ -90,6 +90,10 @@ func write(ctx context.Context, tx pgx.Tx, in domain.Save) (domain.Settings, err
 	if domains == nil {
 		domains = []string{}
 	}
+	recipients := s.LeadRecipients
+	if recipients == nil {
+		recipients = []string{}
+	}
 	light, lightType := logoColumns(s.Profile.LightLogo)
 	dark, darkType := logoColumns(s.Profile.DarkLogo)
 	args := []any{
@@ -98,7 +102,7 @@ func write(ctx context.Context, tx pgx.Tx, in domain.Save) (domain.Settings, err
 		light, lightType, dark, darkType,
 		s.SignIn.Google, s.SignIn.Password, s.SignIn.ForcePasswordChange, s.SignIn.JoinCodes, domains,
 		s.Retention.KeepAnswersMonths, s.Retention.KeepFocusEventsMonths, s.Retention.AnonymiseDisabledAfterMonths,
-		opt.String(in.ActorID),
+		opt.String(in.ActorID), recipients,
 	}
 	return scan(tx.QueryRow(ctx, `
 		UPDATE app.organization_settings
@@ -108,7 +112,7 @@ func write(ctx context.Context, tx pgx.Tx, in domain.Save) (domain.Settings, err
 		       google_sign_in = $12, password_sign_in = $13, force_password_change = $14,
 		       join_codes_enabled = $15, allowed_google_domains = $16,
 		       keep_answers_months = $17, keep_focus_events_months = $18, anonymise_disabled_after_months = $19,
-		       revision = revision + 1, updated_by = $20, `+limitAssignments+`
+		       revision = revision + 1, updated_by = $20, lead_recipients = $21, `+limitAssignments+`
 		RETURNING `+columns,
 		append(args, s.Limits.Arguments()...)...))
 }
@@ -226,7 +230,7 @@ func scan(row pgx.Row) (domain.Settings, error) {
 		&light, &lightType, &dark, &darkType,
 		&s.SignIn.Google, &s.SignIn.Password, &s.SignIn.ForcePasswordChange, &s.SignIn.JoinCodes, &s.SignIn.AllowedGoogleDomains,
 		&s.Retention.KeepAnswersMonths, &s.Retention.KeepFocusEventsMonths, &s.Retention.AnonymiseDisabledAfterMonths,
-		&s.Revision, &by, &s.UpdatedAt}, limitTargets...)...)
+		&s.Revision, &by, &s.UpdatedAt, &s.LeadRecipients}, limitTargets...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Settings{}, errors.New("organization: the settings row is missing")
 	}
@@ -241,6 +245,9 @@ func scan(row pgx.Row) (domain.Settings, error) {
 	s.Limits = gather()
 	if s.SignIn.AllowedGoogleDomains == nil {
 		s.SignIn.AllowedGoogleDomains = []string{}
+	}
+	if s.LeadRecipients == nil {
+		s.LeadRecipients = []string{}
 	}
 	return s, nil
 }
