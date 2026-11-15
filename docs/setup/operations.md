@@ -200,9 +200,13 @@ audit log, cannot touch `ai_usage_ledger`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
 more adds the grant in its own migration.
 
-**Never set `MAINTENANCE_DATABASE_URL` on the API or on Fly.** The credential lives in two
-places: the GitHub environment `production-maintenance` (as the secret
-`MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine.
+**Never set `MAINTENANCE_DATABASE_URL` on the API or on Fly.** Against a managed database the
+credential lives in two places: the GitHub environment `production-maintenance` (as the secret
+`MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine. On
+the server that production runs on since 2026-11-12 it lives in one: the role's password is in
+the database's own secret file there, and `Quizzivy/infra`'s `vps/scripts/maintenance` gives the
+connection string to the one-off container that runs the command and to nothing else ("Where
+the sweep runs" below).
 
 **What a leaked `MAINTENANCE_DATABASE_URL` costs.** The role is the operator role for every
 `cmd/maintenance` command, not only the sweep, so its reach is the sum of them. Whoever holds the
@@ -230,6 +234,28 @@ runs another command or a second consumer holds the connection string. To revoke
 run `ALTER ROLE quizzivy_maintenance NOLOGIN` as the owner. To rotate it, run
 `ALTER ROLE quizzivy_maintenance PASSWORD '<new random password>'` as the owner (step 1 below does
 the same), then replace the secret `MAINTENANCE_DATABASE_URL` with the new connection string.
+
+### Where the sweep runs
+
+Since 2026-11-12 production's database is on the server's private network, and nothing outside
+the server can connect to it: not a GitHub runner, not the operator's machine. The workflow
+below cannot reach it and is disabled in the Actions tab. The sweep runs on the server instead:
+
+- The image carries the command as `/app/maintenance`, beside `/app/api`, `/app/import-worker`
+  and `/app/migrate`. Nothing in the image starts it.
+- `Quizzivy/infra` runs it: `vps/scripts/maintenance <command> [flags]` starts a one-off
+  container of the image the API runs, on the stack's network, as `quizzivy_maintenance`. A
+  systemd timer runs `vps/scripts/maintenance sweep` at 20:00 UTC (03:00 in Ho Chi Minh City),
+  which is `maintenance retention-sweep -budget 5m`, and a failed run mails the operator.
+- The switch moved with it. The nightly run applies only while the server's
+  `/opt/quizzivy/compose.env` holds `RETENTION_SWEEP_ENABLED=true`; otherwise it is a dry run.
+  The repository variable of the same name is read by the workflow alone.
+- The report is the same JSON ("Reading the report" below), in the unit's journal.
+
+The order of the first time is the workflow's, steps 3 and 4 below: read a dry run, then set the
+switch. The runbook is `docs/vps.md` in `Quizzivy/infra`, "Maintenance commands and the
+retention sweep". What follows describes the workflow, which is still the way against a
+database a GitHub runner can reach.
 
 ### The nightly workflow
 
@@ -336,7 +362,9 @@ runs in a read-only transaction).
 ### By hand
 
 The same binary runs the sweep from the operator's machine, with `MAINTENANCE_DATABASE_URL` set
-to the role's connection string and nothing else changed:
+to the role's connection string and nothing else changed. On the server, the same commands go
+through `vps/scripts/maintenance` of `Quizzivy/infra`, run as the `deploy` user, for example
+`vps/scripts/maintenance retention-sweep -budget 5m`:
 
 ```sh
 maintenance retention-sweep -budget 5m
@@ -1079,6 +1107,7 @@ hold a student's words.
 - Maintenance dry-run review and first authorized production batch: pending.
 - Email (v0.12.0): one real message from `quizzivy.com` whose headers show SPF, DKIM
   and DMARC passing (`dns.md`, "Email (Resend)"): pending the release.
-- Retention sweep (v0.12.0): the first manual dry run of `retention-sweep.yml` on
-  production, read by the owner before `RETENTION_SWEEP_ENABLED` is set ("The
-  nightly workflow"): pending the release.
+- Retention sweep (v0.12.0): the first dry run on production, read by the owner
+  before `RETENTION_SWEEP_ENABLED` is set. Since the database moved onto the
+  server that is a run of `vps/scripts/maintenance sweep` there and the switch
+  in its `compose.env` ("Where the sweep runs"): pending.

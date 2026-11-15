@@ -12,7 +12,7 @@ rules require; it passes only when every job did what the plan asked of it.
 | Contract | `code` | `make gen-check`: fetch `@quizzivy/sdk` at the version `api/sdk-version` names, copy its contract, test data and catalogs into `api/`, regenerate `server/gen`, fail on drift |
 | Server lint | `server` | vet, staticcheck, golangci-lint, gofmt |
 | Server tests | `server` | unit, integration and end-to-end tiers, the Word converter tests; migrations up, down, up; the recovery verifier (`scripts/verify-recovery.mjs`) against the migrated database |
-| Production image | `image` | Builds the root `Dockerfile`; starts `/app/api` and `/app/import-worker` from it as `nonroot` |
+| Production image | `image` | Builds the root `Dockerfile`; runs a dry run of the retention sweep with `/app/maintenance` and starts `/app/api` and `/app/import-worker` from it as `nonroot` |
 | CI result | — | Fails unless each job above did what the plan said |
 | Sonar | everything | Pushes to `develop` only; not part of the result |
 
@@ -219,12 +219,16 @@ which does what a deploy does:
 1. Checks that the image's user is `nonroot:nonroot`.
 2. Runs `/app/migrate -dir /app/migrations up` from the image, as Fly's
    `release_command` does, against the job's `postgres:18` service.
-3. Starts `/app/api` and `/app/import-worker` from the image, each in its own
+3. Runs `/app/maintenance retention-sweep` from the image as
+   `quizzivy_maintenance`, with no `-apply`, and fails unless the report says
+   it wrote nothing and names that role. The server starts the nightly sweep
+   from this image (`docs/setup/operations.md`, "Where the sweep runs").
+4. Starts `/app/api` and `/app/import-worker` from the image, each in its own
    container on the host network and with no `--user`, so they run as the
    image's. The environment is `fly.toml`'s `[env]` read by the script, plus
    throwaway values for the secrets `docs/setup/dns.md` lists, and the worker's
    wake address and URL moved from `fly-local-6pn` to `localhost`.
-4. Waits up to 60 seconds for `GET /livez` to answer and for the worker to log
+5. Waits up to 60 seconds for `GET /livez` to answer and for the worker to log
    `import worker started`, and fails, printing both logs, when either
    container exits first or the time runs out.
 
