@@ -200,14 +200,14 @@ func TestAMatchingItemKeyedToAnotherChoiceIsAnAnswer(t *testing.T) {
 	changes := onlyChange(t, matchingQuestion(0, 1, 2), matchingQuestion(0, 2, 1))
 	wantFields(t, "rekeyed", changes)
 	answer := answerOf(t, changes)
-	if !slices.Equal(answer.AnswerFrom, []string{"A → i", "B → ii", "C → iii"}) || !slices.Equal(answer.AnswerTo, []string{"A → i", "B → iii", "C → ii"}) {
+	if !slices.Equal(answer.AnswerFrom, []string{"A: i", "B: ii", "C: iii"}) || !slices.Equal(answer.AnswerTo, []string{"A: i", "B: iii", "C: ii"}) {
 		t.Errorf("answer = %v to %v, want each item with its choice", answer.AnswerFrom, answer.AnswerTo)
 	}
 }
 
 func TestAMatchingItemKeyedToNoChoiceIsLabelledWithADash(t *testing.T) {
 	answer := answerOf(t, onlyChange(t, matchingQuestion(0, 1), matchingQuestion(0, -1)))
-	if !slices.Equal(answer.AnswerTo, []string{"A → i", "B → –"}) {
+	if !slices.Equal(answer.AnswerTo, []string{"A: i", "B: –"}) {
 		t.Errorf("answerTo = %v, want the unkeyed item with a dash", answer.AnswerTo)
 	}
 }
