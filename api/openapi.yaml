@@ -2480,6 +2480,7 @@ components:
         options: { type: array, items: { $ref: '#/components/schemas/AdminQuestionOption' } }
         blanks: { type: array, items: { $ref: '#/components/schemas/AdminQuestionBlank' } }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         rubric:
           type: array
           maxItems: 6
@@ -4342,6 +4343,16 @@ components:
         engine counts words and flags "too many", the server stores whatever
         was typed, and the grader sees an over-limit badge.
 
+    EssayMaxWords:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 1000
+      description: |
+        `essay` only: the word limit, as `maxWords` is a short answer's. Advice,
+        never truncation: the engine counts words and flags "too many", the
+        server stores whatever was typed, and the grader sees an over-limit
+        badge. Null is no limit.
+
     MatchAllowReuse:
       type: [boolean, 'null']
       description: '`matching` only, where it is required: whether one choice may answer more than one item. Null on every other type.'
@@ -4442,8 +4453,14 @@ components:
         id: { type: integer, format: int64, minimum: 1 }
         occurredAt: { type: string, format: date-time }
         actor:
-          description: Who did it; `null` is the system itself, or an account since removed.
+          description: Who did it; `null` is the system itself, or an account since removed (`actorRemoved`).
           oneOf: [{ $ref: '#/components/schemas/AuditActor' }, { type: 'null' }]
+        actorRemoved:
+          type: boolean
+          description: |
+            Present and true when the entry was made by an account that has
+            since been removed: `actor` is then `null`. An entry with `actor:
+            null` and no `actorRemoved` is the system's own work.
         action:
           type: string
           description: |
@@ -4889,6 +4906,7 @@ components:
             appears in any `/app/*` schema, including the result endpoint.
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -5031,6 +5049,9 @@ components:
         maxWords:
           $ref: '#/components/schemas/MaxWords'
           description: '`short_answer` only. A rule the student is told; the engine counts words and never cuts text.'
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: '`essay` only. A rule the student is told; the engine counts words and never cuts text.'
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -5142,7 +5163,12 @@ components:
             content is sent. Scores and the grader's comment are unchanged.
         earned:
           oneOf: [{ $ref: '#/components/schemas/Points' }, { type: 'null' }]
-          description: Present only when `review.showScore`. `null` while awaiting manual grading.
+          description: |
+            Present only when `review.showScore`. `null` while awaiting manual
+            grading, and `null` for an answer removed under the retention policy
+            before anyone marked it (`answerRemoved`): it was not answered wrong,
+            and it is never marked now. A removed answer that was marked keeps
+            its mark.
         pendingManual: { type: boolean }
         graderComment: { type: [string, 'null'] }
         correctOptionIds:
@@ -5729,7 +5755,7 @@ components:
         policy and transcript. `items` is the text of a matching question's
         items in their order, `rubric` an essay's criterion labels in their
         order, and `rules` the rules a student is told: a multiple choice's
-        `selectCount`, a short answer's `maxWords` and a matching question's
+        `selectCount`, a short answer's `maxWords`, an essay's `essayMaxWords` and a matching question's
         `matchAllowReuse`. `context` is the shared material of the group
         the question belongs to, or its being in a group at all, and `section`
         the part of the paper it sits in. The correct options, the accepted
@@ -5761,9 +5787,10 @@ components:
             For a TFNG question, the value of the correct option instead:
             `true`, `false` or `not_given`, which the reader names in its own
             language. For a matching question, one label per item in order:
-            the item's key, an arrow and the key of the choice it is keyed to,
-            as the editor draws them (D-063, `A → iii`), or `–` in place of
-            the choice when it is keyed to none.
+            the item's key, a colon, a space and the key of the choice it is
+            keyed to (D-063, `A: iii`), or `–` in place of the choice when it
+            is keyed to none (`A: –`). The editor draws an arrow between the
+            two; the label has none, since the arrow is outside the app's font.
         answerTo:
           type: array
           items: { type: string, minLength: 1, maxLength: 16 }
@@ -6664,6 +6691,24 @@ components:
         level: { type: string, enum: [b1, b2, c1] }
         explanations: { type: boolean, description: Write an explanation for each question. }
         language: { $ref: '#/components/schemas/AiLanguage' }
+        chooseN:
+          type: boolean
+          description: |
+            Write each `multiple_choice` question as "Choose N": its prompt
+            says how many to choose, and the draft carries `selectCount`, the
+            number of its correct options (2 to 7). Off when absent.
+        maxWords:
+          $ref: '#/components/schemas/MaxWords'
+          description: |
+            A word limit for the `short_answer` questions: each is written to be
+            answered within it, and its draft carries it. Absent or `null`, the
+            drafts carry none.
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: |
+            A word limit for the `essay` questions: each task is written for an
+            answer within it, and its draft carries it. Absent or `null`, the
+            drafts carry none.
 
     AiGeneratedQuestion:
       type: object
@@ -6701,6 +6746,15 @@ components:
           maxItems: 8
           items: { type: string, minLength: 1, maxLength: 500 }
         explanation: { type: string, maxLength: 2000, description: Empty when the request did not ask for explanations. }
+        selectCount:
+          $ref: '#/components/schemas/SelectCount'
+          description: '`multiple_choice` only, present when the request asked for `chooseN`: the number of correct options, which the question is saved with.'
+        maxWords:
+          $ref: '#/components/schemas/MaxWords'
+          description: '`short_answer` only, present when the request set `maxWords`: the limit the question is saved with.'
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: '`essay` only, present when the request set `essayMaxWords`: the limit the question is saved with.'
 
     AiGeneratedMatchItem:
       type: object
@@ -6849,13 +6903,27 @@ components:
 
     AiVariantResult:
       type: object
-      required: [changes, usage]
+      required: [changes, questions, changedQuestions, capped, usage]
       additionalProperties: false
       properties:
         changes:
           type: array
           maxItems: 300
           items: { $ref: '#/components/schemas/AiVariantChange' }
+        questions:
+          type: integer
+          minimum: 1
+          description: The questions of the draft the pass read, group members included.
+        changedQuestions:
+          type: integer
+          minimum: 0
+          description: |
+            The questions with at least one change in `changes`. The others are
+            left as they are: the model proposed nothing safe for them, or their
+            request failed or ran out of time.
+        capped:
+          type: boolean
+          description: True when the pass proposed more than 300 changes and those past the 300th, in paper order, were left out.
         usage: { $ref: '#/components/schemas/AiUsage' }
 
     AiExplanationRequest:
@@ -7449,7 +7517,7 @@ components:
         `{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,
         `matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,
         `selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for
-        `short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
+        `short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
         `essay`, an audio policy requires an audio asset and alt text an image — are validated by the
         server and again at publish (§8). Failing them returns
         `VALIDATION_FAILED` with per-field `details`.
@@ -7531,6 +7599,7 @@ components:
           description: '`short_answer` and `essay` only. Rejected on any other type.'
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -7580,7 +7649,7 @@ components:
         `{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,
         `matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,
         `selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for
-        `short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
+        `short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
         `essay`, an audio policy requires an audio asset and alt text an image — are validated by the
         server and again at publish (§8). Failing them returns
         `VALIDATION_FAILED` with per-field `details`.
@@ -7661,6 +7730,7 @@ components:
           description: '`short_answer` and `essay` only. Rejected on any other type.'
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -13786,8 +13856,11 @@ paths:
 
         **Search.** `q` matches, without regard to case or accents, the actor's
         name or email, the sentence that words the action in either language,
-        and the label of the user, class, test, assignment, attempt, media file,
-        import or question group an entry is about.
+        the label of the user, class, test, assignment, attempt, media file,
+        import, question group or role an entry is about, and the names the
+        list gives an entry with no actor: "Hệ thống" / "System" for the
+        system's own entries, "Người dùng đã xoá" / "Deleted user" for those of
+        an account since removed.
 
         **Categories.** An entry's category follows from the kind of thing it
         is about. Entries about the organization, exports, maintenance,

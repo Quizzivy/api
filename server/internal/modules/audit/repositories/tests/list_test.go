@@ -122,16 +122,27 @@ func TestTheSystemHasNoActor(t *testing.T) {
 	}
 }
 
-func TestAnActorSinceRemovedIsTheSystemToo(t *testing.T) {
+// AO-11: an entry whose account has since been removed has no actor and says
+// so; the system's own entries do not.
+func TestAnActorSinceRemovedIsToldApartFromTheSystem(t *testing.T) {
 	w := newWorld(t)
 	actor := w.user("teacher", "Người đã xoá "+w.nonce, "")
-	w.write(entry{actor: actor, at: march(12, 9, 0)})
+	removed := w.write(entry{actor: actor, at: march(12, 9, 0), ip: "203.0.113.7", userAgent: "Mozilla/5.0"})
+	system := w.write(entry{action: "maintenance.scheduled", entity: "maintenance_window", at: march(12, 10, 0)})
 	w.exec(`DELETE FROM app.users WHERE id = $1::uuid`, actor)
 
 	got := w.list(inMarch())
 
-	if len(got.Entries) != 1 || got.Entries[0].Actor != nil {
-		t.Errorf("entries %+v, want one with no actor", got.Entries)
+	if len(got.Entries) != 2 {
+		t.Fatalf("%d entries, want 2", len(got.Entries))
+	}
+	for _, e := range got.Entries {
+		if e.Actor != nil {
+			t.Errorf("%d has actor %+v, want none", e.ID, e.Actor)
+		}
+		if want := e.ID == removed; e.ActorRemoved != want {
+			t.Errorf("%d reads actorRemoved %v, want %v (removed %d, system %d)", e.ID, e.ActorRemoved, want, removed, system)
+		}
 	}
 }
 

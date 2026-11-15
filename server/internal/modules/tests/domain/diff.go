@@ -178,8 +178,9 @@ func keyedByOption(t questionsdomain.Type) bool {
 }
 
 // matchLabels names each item by its key and the key of the choice it is
-// matched to, as the editor draws them (D-063): "A → iii", or "A → –" when
-// the item is keyed to none.
+// matched to (D-063): "A: iii", or "A: –" when the item is keyed to none.
+// The editor draws an arrow between the two as an icon; a label has none,
+// since the arrow is outside the app's font (Quizzivy/docs#5).
 func matchLabels(keys []int) []string {
 	labels := make([]string, len(keys))
 	for i, key := range keys {
@@ -187,7 +188,7 @@ func matchLabels(keys []int) []string {
 		if key >= 0 {
 			option = matchkey.Option(key)
 		}
-		labels[i] = matchkey.Item(i) + " → " + option
+		labels[i] = matchkey.Item(i) + ": " + option
 	}
 	return labels
 }

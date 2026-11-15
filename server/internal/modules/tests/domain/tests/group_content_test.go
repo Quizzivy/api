@@ -207,6 +207,8 @@ func TestEveryFieldOfAQuestionIsEitherComparedOrAnIdentity(t *testing.T) {
 			"MediaAlt": true, "Audio": true, "Transcript": true, "Options": true, "Blanks": true, "Points": true, "Explanation": true,
 			"SampleAnswer": true, "Tags": true, "SelectCount": true, "MaxWords": true, "MatchAllowReuse": true,
 			"MatchItems": true, "Rubric": true,
+			// A request's note of a field sent on the wrong type, never stored.
+			"MisplacedWordLimit": false,
 		},
 		reflect.TypeFor[questions.MatchItemInput]():       {"ID": false, "Text": true, "CorrectOption": true},
 		reflect.TypeFor[questions.RubricCriterionInput](): {"ID": false, "Label": true},

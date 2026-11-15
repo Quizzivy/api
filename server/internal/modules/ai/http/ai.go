@@ -98,6 +98,15 @@ func (h AI) GenerateAiQuestions(ctx context.Context, request openapi.GenerateAiQ
 	if body.Standalone != nil {
 		q.Standalone = *body.Standalone
 	}
+	if body.ChooseN != nil {
+		q.ChooseN = *body.ChooseN
+	}
+	if body.MaxWords != nil {
+		q.MaxWords = *body.MaxWords
+	}
+	if body.EssayMaxWords != nil {
+		q.EssayMaxWords = *body.EssayMaxWords
+	}
 	got, err := h.app.Queries.Generate.Handle(ctx, q)
 	if err != nil {
 		return failed[openapi.GenerateAiQuestionsResponseObject](ctx, err)
@@ -114,6 +123,8 @@ func generatedOf(item prompts.Question) openapi.AiGeneratedQuestion {
 	if len(item.Options) > 0 {
 		out.Options = &item.Options
 	}
+	out.SelectCount = item.SelectCount
+	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(item.Type == "essay", item.MaxWords)
 	if len(item.MatchItems) > 0 {
 		pairs := make([]openapi.AiGeneratedMatchItem, len(item.MatchItems))
 		for k, pair := range item.MatchItems {
@@ -180,7 +191,10 @@ func (h AI) MakeTestVariant(ctx context.Context, request openapi.MakeTestVariant
 	if err != nil {
 		return failed[openapi.MakeTestVariantResponseObject](ctx, err)
 	}
-	out := openapi.MakeTestVariant200JSONResponse{Changes: make([]openapi.AiVariantChange, len(got.Changes)), Usage: usageOf(got.Usage)}
+	out := openapi.MakeTestVariant200JSONResponse{
+		Changes: make([]openapi.AiVariantChange, len(got.Changes)), Usage: usageOf(got.Usage),
+		Questions: got.Questions, ChangedQuestions: got.ChangedQuestions, Capped: got.Capped,
+	}
 	for i, c := range got.Changes {
 		out.Changes[i] = openapi.AiVariantChange{
 			QuestionId: httpapi.ParseUUID(c.QuestionID), Number: c.Number, Kind: openapi.AiVariantKind(c.Kind),

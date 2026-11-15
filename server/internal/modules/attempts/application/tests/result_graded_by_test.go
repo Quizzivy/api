@@ -327,3 +327,48 @@ func teacherAccount(t *testing.T, pool *pgxpool.Pool, name string) string {
 	t.Cleanup(func() { cleanUp(t, pool, `DELETE FROM app.users WHERE id = $1::uuid`, id) })
 	return id
 }
+
+// RM-1: an answer the retention policy removed before anyone marked it reads
+// as removed, with no mark, not as a settled 0; one removed after it was
+// marked keeps its mark.
+func TestARemovedAnswerNobodyMarkedHasNoMarkOnTheResult(t *testing.T) {
+	pool := newPool(t)
+	p := seedEssayPaper(t, pool)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `UPDATE app.attempt_answers SET requires_manual = true, auto_score = NULL WHERE attempt_id = $1::uuid`, p.attempt); err != nil {
+		t.Fatal(err)
+	}
+	var assignment string
+	if err := pool.QueryRow(ctx, `SELECT assignment_id::text FROM app.attempts WHERE id = $1::uuid`, p.attempt).Scan(&assignment); err != nil {
+		t.Fatal(err)
+	}
+	setReview(t, pool, world{assignment: assignment}, true, false, false)
+	grade(t, p.attempt, p.admin, domain.GradeItem{QuestionID: p.plain, Band: pts(7)})
+	if _, err := pool.Exec(ctx, `UPDATE app.attempt_answers SET payload = '`+retention.RemovedAnswer+`'::jsonb WHERE attempt_id = $1::uuid`, p.attempt); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := newService(t, pool).Queries.Result.Handle(ctx, query.Result{AttemptID: p.attempt, StudentID: p.student})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range result.Questions {
+		switch q.ID {
+		case p.rubric:
+			if q.Earned != nil || q.PendingManual || !domain.AnswerRemoved(q.Answer) {
+				t.Errorf("the unmarked removed essay reads earned %v, pending %v; want no mark and not pending", derefF(q.Earned), q.PendingManual)
+			}
+		case p.plain:
+			if q.Earned == nil {
+				t.Error("the marked removed essay lost its mark")
+			}
+		}
+	}
+}
+
+func derefF(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}

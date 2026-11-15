@@ -165,3 +165,28 @@ func DerefString(v *string) string {
 	}
 	return *v
 }
+
+// WordLimits splits a question's one stored word limit into the contract's
+// two fields: an essay's is `essayMaxWords`, every other type's `maxWords`.
+func WordLimits(essay bool, limit *int) (maxWords, essayMaxWords *int) {
+	if essay {
+		return nil, limit
+	}
+	return limit, nil
+}
+
+// WordLimitIn reads the contract's two word-limit fields into a question's
+// one: an essay's from `essayMaxWords`, every other type's from `maxWords`.
+// misplaced names the field sent for the wrong type, empty when none was.
+func WordLimitIn(essay bool, maxWords, essayMaxWords *int) (limit *int, misplaced string) {
+	if essay {
+		if maxWords != nil {
+			misplaced = "maxWords"
+		}
+		return essayMaxWords, misplaced
+	}
+	if essayMaxWords != nil {
+		misplaced = "essayMaxWords"
+	}
+	return maxWords, misplaced
+}

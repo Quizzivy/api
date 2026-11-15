@@ -87,7 +87,8 @@ func (p *provider) Complete(_ context.Context, req aiports.Request) (aiports.Res
 		if p.after[page] > 0 {
 			p.done.Wait()
 		}
-		return aiports.Response{}, err
+		// As the provider's client does: a failed call keeps its request id.
+		return aiports.Response{RequestID: fmt.Sprintf("req_failed_%d", page)}, err
 	}
 	if p.after != nil {
 		defer p.done.Done()
@@ -321,5 +322,21 @@ func TestACancelledReadStillEndsItsReservationOnAContextThatIsNotCancelled(t *te
 	}
 	if len(r.settlements.got) != 1 || r.settlements.cancelled {
 		t.Fatalf("finishes %d, run on a cancelled context: %v", len(r.settlements.got), r.settlements.cancelled)
+	}
+}
+
+// A failed call carries the provider's request id for the logs (VR-8); the
+// settlement names what was billed, so it never takes that id.
+func TestTheSettlementNamesNoRequestOfACallThatBilledNothing(t *testing.T) {
+	r := newRig(map[int]string{1: twoPages[1]})
+	r.provider.fail[1] = fmt.Errorf("%w: 529", aiports.ErrUnavailable)
+	if _, err := r.reader.Read(context.Background(), scanpdf.Build(1), "teacher-1"); !errors.Is(err, reader.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if len(r.settlements.got) != 1 {
+		t.Fatalf("%d settlements, want 1", len(r.settlements.got))
+	}
+	if got := r.settlements.got[0].Response; got.RequestID != "" || got.Usage != (aiports.Usage{}) {
+		t.Errorf("settled %+v, want no usage and no request id", got)
 	}
 }

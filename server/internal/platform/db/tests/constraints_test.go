@@ -1160,8 +1160,8 @@ func TestAWordLimitOfZeroIsRefused(t *testing.T) {
 	})
 }
 
-func TestAWordLimitIsForShortAnswersOnly(t *testing.T) {
-	for _, qtype := range []string{"essay", "fill_blank"} {
+func TestAWordLimitIsForShortAnswersAndEssaysOnly(t *testing.T) {
+	for _, qtype := range []string{"fill_blank", "single_choice"} {
 		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
 			rejectsWith(t, tx, "questions_max_words_check",
 				`INSERT INTO app.questions (type, prompt, points, created_by, owner_id, max_words)
@@ -1176,6 +1176,24 @@ func TestAWordLimitStopsAtAHundred(t *testing.T) {
 			`INSERT INTO app.questions (type, prompt, points, created_by, owner_id, max_words)
 			 VALUES ('short_answer', 'Không quá 101 từ', 1.0, $1, $1, 101)`, f.adminID)
 	})
+}
+
+// An essay takes a word limit of 1 to 1000 (00158); a short answer keeps 100.
+func TestAnEssayTakesAWordLimitUpToAThousand(t *testing.T) {
+	for _, c := range []struct {
+		value int
+		ok    bool
+	}{{250, true}, {1000, true}, {0, false}, {1001, false}} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			insert := `INSERT INTO app.questions (type, prompt, points, created_by, owner_id, max_words)
+			 VALUES ('essay', 'Viết không quá N từ', 1.0, $1, $1, $2)`
+			if c.ok {
+				mustExec(t, tx, insert, f.adminID, c.value)
+				return
+			}
+			rejectsWith(t, tx, "questions_max_words_check", insert, f.adminID, c.value)
+		})
+	}
 }
 
 func TestAShortAnswerOfThreeWordsIsAccepted(t *testing.T) {
@@ -1197,6 +1215,7 @@ func TestAVersionQuestionKeepsTheSameRules(t *testing.T) {
 		{"word limit on a multiple choice", "test_version_questions_max_words_check", "max_words", "multiple_choice", 3},
 		{"word limit of zero", "test_version_questions_max_words_check", "max_words", "short_answer", 0},
 		{"word limit of 101", "test_version_questions_max_words_check", "max_words", "short_answer", 101},
+		{"essay word limit of 1001", "test_version_questions_max_words_check", "max_words", "essay", 1001},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
