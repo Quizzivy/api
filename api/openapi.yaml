@@ -1119,6 +1119,8 @@ components:
           type: [string, 'null']
           maxLength: 1000
           description: Trimmed; empty after trimming, or `null`, removes the note.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
 
     MaintenanceWindow:
       type: object

@@ -321,33 +321,51 @@ func patch(t *testing.T, h leadshttp.Leads, id, raw string) written {
 	return write(t, res.VisitUpdateLeadResponse)
 }
 
-// TestAPatchChangesOnlyWhatItsBodyNames fails when a body with a status alone
-// wipes the note, when an empty note is read as no note at all, or when the
-// caller is not carried to the store. The application test covers the tidying
-// of the note.
-func TestAPatchChangesOnlyWhatItsBodyNames(t *testing.T) {
+// TestAPatchTellsNoNoteFromANullOneAndFromAnEmptyOne fails when a body with a
+// status alone wipes the note, when "note": null is read as no note at all and
+// so keeps what is stored, when an empty note is, or when the caller is not
+// carried to the store. The contract's three cases reach the handler as raw
+// JSON, and this is the only test that decodes them as the router does. The
+// application test covers the tidying of the note.
+func TestAPatchTellsNoNoteFromANullOneAndFromAnEmptyOne(t *testing.T) {
 	repo := newRepo()
 	h := handler(repo)
-	for _, raw := range []string{`{"status":"contacted"}`, `{"note":""}`, `{"note":"  Đã gọi  ","status":"closed"}`} {
+	bodies := []string{`{"status":"contacted"}`, `{"note":null}`, `{"note":""}`, `{"note":"  Đã gọi  ","status":"closed"}`, `{"status":"new","note":null}`}
+	for _, raw := range bodies {
 		if got := patch(t, h, leadID, raw); got.status != http.StatusOK {
 			t.Fatalf("%s answered %d %s", raw, got.status, got.body)
 		}
 	}
-	if len(repo.updates) != 3 {
-		t.Fatalf("%d updates reached the store", len(repo.updates))
+	if len(repo.updates) != len(bodies) {
+		t.Fatalf("%d updates reached the store, want %d", len(repo.updates), len(bodies))
 	}
-	statusOnly, noteCleared, both := repo.updates[0], repo.updates[1], repo.updates[2]
+	statusOnly, noteNull, noteEmpty, both, statusAndNull := repo.updates[0], repo.updates[1], repo.updates[2], repo.updates[3], repo.updates[4]
 	if statusOnly.Change.NoteSet || statusOnly.Change.Status == nil || *statusOnly.Change.Status != domain.StatusContacted {
 		t.Errorf("a status alone = %+v, want the note kept", statusOnly.Change)
 	}
-	if !noteCleared.Change.NoteSet || noteCleared.Change.Note != "" || noteCleared.Change.Status != nil {
-		t.Errorf("an empty note = %+v, want the note removed and the status kept", noteCleared.Change)
+	if !noteNull.Change.NoteSet || noteNull.Change.Note != "" || noteNull.Change.Status != nil {
+		t.Errorf("a null note = %+v, want the note removed and the status kept", noteNull.Change)
+	}
+	if !noteEmpty.Change.NoteSet || noteEmpty.Change.Note != "" || noteEmpty.Change.Status != nil {
+		t.Errorf("an empty note = %+v, want the note removed and the status kept", noteEmpty.Change)
 	}
 	if !both.Change.NoteSet || both.Change.Note != "Đã gọi" || *both.Change.Status != domain.StatusClosed {
 		t.Errorf("a note and a status = %+v", both.Change)
 	}
+	if !statusAndNull.Change.NoteSet || statusAndNull.Change.Note != "" || *statusAndNull.Change.Status != domain.StatusNew {
+		t.Errorf("a status and a null note = %+v, want both carried", statusAndNull.Change)
+	}
 	if both.ActorID != actorID || both.IP != "203.0.113.9" || !both.Now.Equal(now) {
 		t.Errorf("the update names %q from %q at %v", both.ActorID, both.IP, both.Now)
+	}
+
+	wrong := openapi.LeadUpdate{Note: json.RawMessage(`7`)}
+	res, err := h.UpdateLead(contextAs(t, true, "en"), openapi.UpdateLeadRequestObject{Id: uuidOf(leadID), Body: &wrong})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := write(t, res.VisitUpdateLeadResponse); got.status != http.StatusBadRequest || !strings.Contains(got.body, `"note":"The note must be text."`) || len(repo.updates) != len(bodies) {
+		t.Errorf("a note that is no text: %d %s with %d updates at the store, want 400 naming note and nothing stored", got.status, got.body, len(repo.updates))
 	}
 }
 

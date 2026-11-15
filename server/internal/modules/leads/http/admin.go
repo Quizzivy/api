@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"quizzivy/gen/openapi"
@@ -59,14 +60,19 @@ func (h Leads) GetLead(ctx context.Context, request openapi.GetLeadRequestObject
 	}, nil
 }
 
-// UpdateLead implements PATCH /admin/leads/{id}. A note the body names is
-// stored, and an empty one removes the note; a body without one keeps it.
+// UpdateLead implements PATCH /admin/leads/{id}. A body without a note keeps
+// the stored one, a null or a blank one removes it, and any other is stored
+// trimmed.
 func (h Leads) UpdateLead(ctx context.Context, request openapi.UpdateLeadRequestObject) (openapi.UpdateLeadResponseObject, error) {
 	who, ok := httpapi.ActorFromContext(ctx)
 	if h.app == nil || !ok || request.Body == nil {
 		return nil, httpx.ErrNotImplemented
 	}
-	lead, err := h.app.Commands.Update.Handle(ctx, command.Update{Actor: who, ID: request.Id.String(), Change: changeOf(*request.Body)})
+	var lead domain.Lead
+	change, err := changeOf(*request.Body)
+	if err == nil {
+		lead, err = h.app.Commands.Update.Handle(ctx, command.Update{Actor: who, ID: request.Id.String(), Change: change})
+	}
 	var invalid *validation.Error
 	switch {
 	case errors.As(err, &invalid):
@@ -80,16 +86,23 @@ func (h Leads) UpdateLead(ctx context.Context, request openapi.UpdateLeadRequest
 	return openapi.UpdateLead200JSONResponse(leadBody(lead)), nil
 }
 
-func changeOf(in openapi.LeadUpdate) domain.Change {
+func changeOf(in openapi.LeadUpdate) (domain.Change, error) {
 	var change domain.Change
 	if in.Status != nil {
 		status := domain.Status(*in.Status)
 		change.Status = &status
 	}
-	if in.Note != nil {
-		change.NoteSet, change.Note = true, *in.Note
+	if len(in.Note) > 0 {
+		var note *string
+		if err := json.Unmarshal(in.Note, &note); err != nil {
+			return domain.Change{}, validation.Refuse(domain.FieldNote, "Ghi chú phải là văn bản.", "The note must be text.")
+		}
+		change.NoteSet = true
+		if note != nil {
+			change.Note = *note
+		}
 	}
-	return change
+	return change, nil
 }
 
 // DeleteLead implements DELETE /admin/leads/{id}.

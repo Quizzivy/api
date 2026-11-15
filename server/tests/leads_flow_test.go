@@ -220,6 +220,93 @@ func TestAConsultationRequestTravelsFromTheLandingFormToTheAdminWhoHandlesAndRem
 	}
 }
 
+// TestANullNoteRemovesAStoredNoteAndIsAuditedWithoutIt fails when the body
+// {"note": null} is decoded as a body that names no note and so keeps what
+// is stored, when the removal is not audited as noteChanged alone or its
+// entry holds the note, and when the same body on a request without a note
+// writes anything. The handler's test decodes the three cases against a fake
+// store; this one sends the bytes through the validator and the real store.
+func TestANullNoteRemovesAStoredNoteAndIsAuditedWithoutIt(t *testing.T) {
+	w := bootForLeads(t)
+	ctx := context.Background()
+	email, password := w.createStaff("admin")
+	admin := w.signedIn(email, password)
+	if got := w.sendForm(leadForm("0944 555 666", nil), ""); got.status != http.StatusAccepted {
+		t.Fatalf("the form answered %d %s", got.status, got.body)
+	}
+	listed := admin.must(http.StatusOK, http.MethodGet, "/admin/leads?q=0944555666", nil)
+	leadID := id(listed["items"].([]any)[0].(map[string]any))
+	const note = "Hẹn gọi lại thứ Bảy, sau 18 giờ"
+	audited := func() []string {
+		t.Helper()
+		rows, err := w.pool.Query(ctx, `SELECT coalesce(diff::text, '') FROM app.audit_log WHERE entity_id = $1::uuid ORDER BY id`, leadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var diffs []string
+		for rows.Next() {
+			var diff string
+			if err := rows.Scan(&diff); err != nil {
+				t.Fatal(err)
+			}
+			diffs = append(diffs, diff)
+		}
+		return diffs
+	}
+	updatedAt := func() string {
+		t.Helper()
+		var at string
+		if err := w.pool.QueryRow(ctx, `SELECT updated_at::text FROM app.leads WHERE id = $1::uuid`, leadID).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+
+	unchanged := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"note": nil})
+	if unchanged["note"] != nil || len(audited()) != 0 {
+		t.Fatalf("a null note on a request without one: note %v and %d audit entries, want nothing written", unchanged["note"], len(audited()))
+	}
+
+	if set := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"note": note}); set["note"] != note {
+		t.Fatalf("the note was stored as %v", set["note"])
+	}
+	kept := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"status": "contacted"})
+	if kept["note"] != note {
+		t.Fatalf("a body without a note left %v, want the note kept", kept["note"])
+	}
+
+	removed := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"note": nil})
+	if removed["note"] != nil || removed["status"] != "contacted" || removed["handledAt"] != kept["handledAt"] {
+		t.Errorf("after a null note = %v, want the note gone and the handling as it stood", removed)
+	}
+	if read := admin.must(http.StatusOK, http.MethodGet, "/admin/leads/"+leadID, nil); read["note"] != nil {
+		t.Errorf("the request reads back with the note %v", read["note"])
+	}
+	diffs := audited()
+	if len(diffs) != 3 {
+		t.Fatalf("%d audit entries, want the note, the status and the removal: %v", len(diffs), diffs)
+	}
+	var last map[string]any
+	if err := json.Unmarshal([]byte(diffs[2]), &last); err != nil || len(last) != 1 || last["noteChanged"] != true {
+		t.Errorf("the removal's diff = %s, want only noteChanged: true", diffs[2])
+	}
+	for _, diff := range diffs {
+		if strings.Contains(diff, "Hẹn gọi") || strings.Contains(diff, "18 giờ") {
+			t.Errorf("an audit entry holds the note: %s", diff)
+		}
+	}
+
+	stamp := updatedAt()
+	again := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"note": nil})
+	if again["note"] != nil || len(audited()) != 3 || updatedAt() != stamp {
+		t.Errorf("a second null note wrote something: %d audit entries, updated_at %s then %s", len(audited()), stamp, updatedAt())
+	}
+	if blank := admin.must(http.StatusOK, http.MethodPatch, "/admin/leads/"+leadID, map[string]any{"note": "   "}); blank["note"] != nil || len(audited()) != 3 {
+		t.Errorf("a blank note on a request without one wrote something: %v, %d audit entries", blank["note"], len(audited()))
+	}
+}
+
 // TestTheFormRefusesWhatTheContractForbidsAndStoresNothingForARefusalOrAHoneypot
 // fails when a request without consent, with a notice version this server
 // does not know, with an unknown choice or property, or over 4 KiB reaches

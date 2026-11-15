@@ -334,6 +334,54 @@ func TestAnUpdateThatChangesNothingWritesNothing(t *testing.T) {
 	}
 }
 
+// TestRemovingANoteIsAuditedOnlyWhenTheRequestHadOne fails when removing the
+// note of a request that has none touches the row or leaves an audit entry,
+// and when removing a stored note is not audited, is audited with a status it
+// did not move, or names a handler. The status-change test removes a note
+// together with a status; none removes one alone.
+func TestRemovingANoteIsAuditedOnlyWhenTheRequestHadOne(t *testing.T) {
+	w := newWorld(t)
+	id := w.lead(typedName, randomPhone(t), "new", w.now.Add(-time.Hour))
+	w.exec(`UPDATE app.leads SET updated_at = $2 WHERE id = $1::uuid`, id, w.now.Add(-time.Minute))
+	var before time.Time
+	if err := w.tx.QueryRow(w.ctx, `SELECT updated_at FROM app.leads WHERE id = $1::uuid`, id).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	bare := w.update(id, domain.Change{NoteSet: true})
+	var after time.Time
+	if err := w.tx.QueryRow(w.ctx, `SELECT updated_at FROM app.leads WHERE id = $1::uuid`, id).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if bare.Note != "" || bare.Status != domain.StatusNew || !after.Equal(before) || len(w.audits(id)) != 0 {
+		t.Fatalf("removing a note that was never there: request %+v, updated_at %v then %v, %d audit entries; want nothing written",
+			bare, before, after, len(w.audits(id)))
+	}
+
+	w.update(id, domain.Change{NoteSet: true, Note: leadNote})
+	removed := w.update(id, domain.Change{NoteSet: true})
+	if removed.Note != "" || removed.Status != domain.StatusNew || removed.HandledBy != nil || removed.HandledAt != nil {
+		t.Fatalf("after removing the note = %+v, want no note and nobody named as handler", removed)
+	}
+	var stored *string
+	if err := w.tx.QueryRow(w.ctx, `SELECT note FROM app.leads WHERE id = $1::uuid`, id).Scan(&stored); err != nil || stored != nil {
+		t.Errorf("the stored note = %v (%v), want NULL", stored, err)
+	}
+	entries := w.audits(id)
+	if len(entries) != 2 {
+		t.Fatalf("%d audit entries, want one for the note and one for its removal", len(entries))
+	}
+	got, _ := json.Marshal(diffOf(t, entries[1]))
+	if string(got) != `{"noteChanged":true}` {
+		t.Errorf("the removal's diff = %s, want only noteChanged", got)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.whole, leadNote) || strings.Contains(entry.whole, "IELTS") {
+			t.Errorf("the %s entry holds the note: %s", entry.action, entry.whole)
+		}
+	}
+}
+
 // TestADeleteRemovesTheRequestAndNoAuditEntryEverHeldWhatItSaid fails when the
 // delete leaves the row, writes no lead.deleted entry or one with a diff, and
 // when any audit entry about the request, from its changes or its removal,
