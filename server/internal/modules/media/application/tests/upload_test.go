@@ -62,9 +62,27 @@ func makeUploader(t *testing.T, pool *pgxpool.Pool) string {
 	}
 	t.Cleanup(func() {
 		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM app.audit_log WHERE actor_user_id = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.media_assets WHERE uploaded_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.users WHERE id = $1`, id)
+		for _, sql := range []string{
+			// The versions a test published with the uploader's assets name
+			// them, so they go first.
+			`DELETE FROM app.test_versions WHERE test_id IN (SELECT id FROM app.tests WHERE created_by = $1)`,
+			`DELETE FROM app.tests WHERE created_by = $1`,
+			`DELETE FROM app.audit_log WHERE actor_user_id = $1`,
+			`DELETE FROM app.media_assets WHERE uploaded_by = $1`,
+		} {
+			if _, err := pool.Exec(c, sql, id); err != nil {
+				t.Errorf("clean up %q: %v", sql, err)
+			}
+		}
+		// The uploader is an Admin: on a fresh database the users_last_admin
+		// guard keeps the only active one, which is logged, not a failure.
+		_, err := pool.Exec(c, `DELETE FROM app.users WHERE id = $1`, id)
+		switch {
+		case db.IsCheckViolation(err, "users_last_admin"):
+			t.Logf("kept the Admin %s: it is the only active Admin, which the users_last_admin guard never lets go", id)
+		case err != nil:
+			t.Errorf("clean up: %v", err)
+		}
 	})
 	return id
 }
