@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,6 +45,13 @@ func bootForLeads(t *testing.T) *world {
 		}
 	})
 	return w
+}
+
+func (w *world) recipientsForLeads(addresses ...string) {
+	w.t.Helper()
+	if _, err := w.pool.Exec(context.Background(), `UPDATE app.organization_settings SET lead_recipients = $1`, addresses); err != nil {
+		w.t.Fatal(err)
+	}
 }
 
 type formAnswer struct {
@@ -337,7 +345,6 @@ func TestTheFormRefusesWhatTheContractForbidsAndStoresNothingForARefusalOrAHoney
 		"a name with a hidden mark":  {func(f map[string]any) { f["fullName"] = "Mai\u200bLan" }, http.StatusBadRequest, "fullName"},
 		"a property nobody declared": {func(f map[string]any) { f["ip"] = "203.0.113.1" }, http.StatusBadRequest, ""},
 		"a body over four kibibytes": {func(f map[string]any) { f["website"] = strings.Repeat("x", 5000) }, http.StatusRequestEntityTooLarge, ""},
-		"a honeypot over its length": {func(f map[string]any) { f["website"] = strings.Repeat("x", 201) }, http.StatusBadRequest, "website"},
 	} {
 		got := w.sendForm(leadForm(typed, c.change), "")
 		if got.status != c.status {
@@ -373,6 +380,82 @@ func TestTheFormRefusesWhatTheContractForbidsAndStoresNothingForARefusalOrAHoney
 	}
 	if n := w.leadsOf(digits); n != 2 {
 		t.Errorf("%d requests stored for one number in a day, want 2", n)
+	}
+}
+
+// TestWhateverFillsTheHoneypotIsAnsweredAsAStoredRequestAndNeverStored fails
+// when a value of website is answered otherwise than a stored request is: a
+// length the schema refuses (it had one, of 200), a shape the handler reads
+// as empty, or anything that reaches the store. It also fails when an empty
+// website, which a form sends for a field nobody touched, is taken for a
+// filled one and the request is lost. The contract test above sends one
+// short honeypot; the handler's test never passes the validator.
+func TestWhateverFillsTheHoneypotIsAnsweredAsAStoredRequestAndNeverStored(t *testing.T) {
+	w := bootForLeads(t)
+	w.recipientsForLeads("le-tan-" + nonce(t) + "@example.com")
+	stored := w.sendForm(leadForm("0966 000 000", nil), "")
+	if stored.status != http.StatusAccepted || stored.body != `{"received":true}` || w.leadsOf("0966000000") != 1 {
+		t.Fatalf("a request with no website answered %d %s and stored %d", stored.status, stored.body, w.leadsOf("0966000000"))
+	}
+	queued := func() int {
+		t.Helper()
+		var n int
+		if err := w.pool.QueryRow(context.Background(), `SELECT count(*) FROM app.email_outbox WHERE template = 'lead_received'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	told := queued()
+	if told != 1 {
+		t.Fatalf("%d notices queued for the stored request, want 1", told)
+	}
+
+	for i, c := range []struct{ name, website string }{
+		{"one character", "x"},
+		{"one space", " "},
+		{"a thousand characters", strings.Repeat("x", 1000)},
+		{"as much as the body limit leaves room for", strings.Repeat("x", 3700)},
+		{"an address", "https://spam.example/buy?now=1"},
+		{"a phone number", "0903123456"},
+		{"markup", `<script>alert("x")</script>`},
+		{"the word null", "null"},
+		{"the word false", "false"},
+		{"lines and tabs", "a\n\tb\r\n"},
+		{"text outside ASCII", "Mua ngay 🎁 giá rẻ"},
+	} {
+		digits := fmt.Sprintf("09770000%02d", i)
+		got := w.sendForm(leadForm(digits, func(f map[string]any) { f["website"] = c.website }), "")
+		if got.status != stored.status || got.body != stored.body || got.header.Get("Content-Type") != stored.header.Get("Content-Type") ||
+			got.header.Get("Content-Length") != stored.header.Get("Content-Length") {
+			t.Errorf("website of %s: answered %d %s (%s, %s bytes); a stored request answers %d %s (%s, %s bytes)", c.name,
+				got.status, got.body, got.header.Get("Content-Type"), got.header.Get("Content-Length"),
+				stored.status, stored.body, stored.header.Get("Content-Type"), stored.header.Get("Content-Length"))
+		}
+		if n := w.leadsOf(digits); n != 0 {
+			t.Errorf("website of %s: %d requests stored, want none", c.name, n)
+		}
+	}
+	if after := queued(); after != told {
+		t.Errorf("%d notices were queued for requests that filled website", after-told)
+	}
+
+	untouched := w.sendForm(leadForm("0988 000 000", func(f map[string]any) { f["website"] = "" }), "")
+	if untouched.status != stored.status || untouched.body != stored.body || w.leadsOf("0988000000") != 1 {
+		t.Errorf("an empty website: answered %d %s and stored %d, want the request kept as one that left the field out",
+			untouched.status, untouched.body, w.leadsOf("0988000000"))
+	}
+
+	nulSentence := regexp.MustCompile(`"(website|fullName)":"([^"]*)"`)
+	inWebsite := w.sendForm(leadForm("0999 000 000", func(f map[string]any) { f["website"] = "a\x00b" }), "")
+	inName := w.sendForm(leadForm("0999 000 000", func(f map[string]any) { f["fullName"] = "Ma\x00i" }), "")
+	website, name := nulSentence.FindStringSubmatch(inWebsite.body), nulSentence.FindStringSubmatch(inName.body)
+	if inWebsite.status != http.StatusBadRequest || inName.status != inWebsite.status || website == nil || name == nil ||
+		website[1] != "website" || name[1] != "fullName" || website[2] != name[2] {
+		t.Errorf("U+0000 in website answered %d %s and in fullName %d %s; the API refuses it in every string alike, and website gets no answer of its own",
+			inWebsite.status, inWebsite.body, inName.status, inName.body)
+	}
+	if n := w.leadsOf("0999000000"); n != 0 {
+		t.Errorf("%d requests stored from bodies holding U+0000", n)
 	}
 }
 

@@ -1684,8 +1684,7 @@
           },
           "website": {
             "type": "string",
-            "maxLength": 200,
-            "description": "A field no person sees or fills. A request that fills it is\nanswered as any other and is not stored.\n"
+            "description": "A field no person sees or fills. A request that fills it, with\nanything at all, is answered as any other and is not stored. It\nhas no length of its own, so that no value put in it is answered\ndifferently; the 4 KiB body limit bounds it.\n"
           }
         }
       },
