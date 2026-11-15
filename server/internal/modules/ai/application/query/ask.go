@@ -40,6 +40,16 @@ type outcome struct {
 	Err      error
 }
 
+// loggedRequestID is a call's entry in a pass's list of request ids: the
+// provider's id, or "-" for a call the provider never answered (a timeout, a
+// dropped connection), so the list keeps one entry per call in order.
+func loggedRequestID(response ports.Response) string {
+	if response.RequestID == "" {
+		return "-"
+	}
+	return response.RequestID
+}
+
 func (a asker) ask(ctx context.Context, who actor.Actor, p prompts.Prompt) (answer, error) {
 	if a.Completer == nil {
 		return answer{}, domain.ErrOff

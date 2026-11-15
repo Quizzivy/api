@@ -15,7 +15,7 @@ import (
 // VariantCallsInFlight is the most requests one variant has with the provider at the same time.
 const VariantCallsInFlight = 5
 
-// Variant proposes rewordings, reorderings and new wrong options for the questions of the draft of TestID, standalone ones and the members of its groups alike, which the caller copies with the existing duplicate write and applies to the copy: a standalone question through a duplicate of it, a member through the copy's own group. A member's options are not reordered when its group fixes their order, and a member that answers a gap of its group's material is not reworded. It changes no answer, point or passage and writes nothing. It answers domain.ErrNotFound for a test the caller does not reach. One variant is one bounded pass, however long the draft: it asks about prompts.VariantChunkSize questions in each request, at most VariantCallsInFlight at the same time, within Service.CleanupBudget, under one reservation of the feature's ceiling that ends with one Finish of what all of them were billed. The changes of every request that answered usably are returned in paper order, so a request that failed or ran out of time leaves its questions as they are. The pass answers domain.ErrUnavailable only when no request gave a usable change.
+// Variant proposes rewordings, reorderings and new wrong options for the questions of the draft of TestID, standalone ones and the members of its groups alike, which the caller copies with the existing duplicate write and applies to the copy: a standalone question through a duplicate of it, a member through the copy's own group. A member's options are not reordered when its group fixes their order, and a member that answers a gap of its group's material is not reworded. It changes no answer, point or passage and writes nothing. It answers domain.ErrNotFound for a test the caller does not reach. One variant is one bounded pass, however long the draft: it asks about at most prompts.VariantChunkSize questions in each request, fewer when their prompts are long (prompts.VariantAnswerBudget), at most VariantCallsInFlight at the same time, within Service.CleanupBudget, under one reservation of the feature's ceiling that ends with one Finish of what all of them were billed. The changes of every request that answered usably are returned in paper order, so a request that failed or ran out of time leaves its questions as they are. The pass answers domain.ErrUnavailable only when no request gave a usable change.
 type Variant struct {
 	Actor      actor.Actor
 	TestID     string
@@ -66,7 +66,7 @@ func (h VariantHandler) run(ctx context.Context, s *session, calls []prompts.Pro
 	usable, requestIDs := 0, make([]string, 0, len(outcomes))
 	var firstFailure error
 	for i, o := range outcomes {
-		requestIDs = append(requestIDs, o.Response.RequestID)
+		requestIDs = append(requestIDs, loggedRequestID(o.Response))
 		var failure error
 		if o.Err != nil {
 			failure = asker(h).failure(ctx, domain.FeatureVariant, o.Response.RequestID, o.Err)

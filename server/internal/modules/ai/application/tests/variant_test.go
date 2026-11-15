@@ -323,3 +323,87 @@ func TestAVariantThatCostsMoreThanItsCeilingIsChargedWhatWasHeldAndSaysSo(t *tes
 		}
 	}
 }
+
+// VR-8: the pass's log line lists one request id per call, in order: the id
+// of an answered call, the id the provider gave a failed one, and "-" for a
+// call it never answered.
+func TestAVariantLogsARequestIDForEveryCallItMade(t *testing.T) {
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+		switch askedNumbers(req)[0] {
+		case 9:
+			return ports.Response{RequestID: "req_overloaded"}, fmt.Errorf("%w: overloaded", ports.ErrUnavailable)
+		case 17:
+			return ports.Response{}, fmt.Errorf("%w: %w", ports.ErrUnavailable, context.DeadlineExceeded)
+		}
+		return rewordEach(req)
+	}}
+	o := variantOps(t, completer, 0, 20)
+
+	if _, err := o.app.Queries.Variant.Handle(context.Background(), reword()); err != nil {
+		t.Fatal(err)
+	}
+	if want := "request_ids=req_1,req_overloaded,-"; !strings.Contains(o.logs.String(), want) {
+		t.Errorf("the log lacks %s:\n%s", want, o.logs.String())
+	}
+}
+
+// VR-6: a request is sized by the answer its questions call for, not by their
+// count alone. Eight prompts of 1,500 characters reworded are an answer of
+// about 3,500 tokens, past the request's max_tokens: the answer's JSON would
+// be cut off and every change of the request lost.
+func TestAVariantOfLongPromptsAsksAboutFewerQuestionsAtATime(t *testing.T) {
+	paper := longPaper(20)
+	for i := range paper.Questions {
+		if i%2 == 0 {
+			paper.Questions[i].Prompt = strings.Repeat("Đọc kỹ đoạn văn rồi chọn đáp án đúng nhất. ", 35)[:1500]
+		}
+	}
+	every := []string{prompts.VariantReword, prompts.VariantReorder, prompts.VariantDistract}
+	calls, parts, err := prompts.VariantCalls(prompts.VariantInput{Questions: paper.Questions, Changes: every, Difficulty: prompts.DifficultySame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != len(parts) || len(calls) <= 3 {
+		t.Fatalf("%d requests for 20 questions, half of them long, want more than the 3 of eight each", len(calls))
+	}
+	next := 1
+	for i, part := range parts {
+		tokens := 0
+		for _, q := range part.Questions {
+			if q.Number != next {
+				t.Fatalf("request %d asks about question %d, want %d: the requests keep paper order and lose none", i, q.Number, next)
+			}
+			next++
+			tokens += prompts.VariantAnswerTokens(q, every)
+		}
+		if len(part.Questions) > prompts.VariantChunkSize || tokens > prompts.VariantAnswerBudget {
+			t.Errorf("request %d asks about %d questions, an answer of about %d tokens; want at most %d and %d", i, len(part.Questions), tokens, prompts.VariantChunkSize, prompts.VariantAnswerBudget)
+		}
+		if calls[i].MaxTokens <= prompts.VariantAnswerBudget {
+			t.Errorf("request %d may answer %d tokens, no more than the budget it was cut to", i, calls[i].MaxTokens)
+		}
+	}
+	if next != 21 {
+		t.Fatalf("the requests ask about %d questions, want 20", next-1)
+	}
+}
+
+// A short test is cut as before: eight questions a request.
+func TestAVariantOfShortQuestionsStillAsksAboutEightAtATime(t *testing.T) {
+	every := []string{prompts.VariantReword, prompts.VariantReorder, prompts.VariantDistract}
+	_, parts, err := prompts.VariantCalls(prompts.VariantInput{Questions: longPaper(20).Questions, Changes: every, Difficulty: prompts.DifficultySame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 3 || len(parts[0].Questions) != 8 || len(parts[1].Questions) != 8 || len(parts[2].Questions) != 4 {
+		t.Fatalf("requests of %d, want 8, 8 and 4", sizes(parts))
+	}
+}
+
+func sizes(parts []prompts.VariantInput) []int {
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		out[i] = len(p.Questions)
+	}
+	return out
+}

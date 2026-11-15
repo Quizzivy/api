@@ -181,7 +181,7 @@ func (h CleanupHandler) run(ctx context.Context, s *session, plan cleanupPlan) (
 	usable, requestIDs := 0, make([]string, 0, len(outcomes))
 	var firstFailure error
 	for i, o := range outcomes {
-		requestIDs = append(requestIDs, o.Response.RequestID)
+		requestIDs = append(requestIDs, loggedRequestID(o.Response))
 		var failure error
 		if o.Err != nil {
 			failure = asker(h).failure(ctx, domain.FeatureCleanup, o.Response.RequestID, o.Err)

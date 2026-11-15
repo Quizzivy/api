@@ -20,6 +20,9 @@ type exchange struct {
 	header map[string]string
 	body   string
 	delay  time.Duration
+	// stall holds the body back after the headers are sent, as a provider
+	// does that has answered and then goes quiet mid-stream.
+	stall time.Duration
 }
 
 type recorded struct {
@@ -65,6 +68,14 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.WriteHeader(next.status)
+	if next.stall > 0 {
+		w.(http.Flusher).Flush()
+		select {
+		case <-time.After(next.stall):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	_, _ = io.WriteString(w, next.body)
 }
 

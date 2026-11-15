@@ -62,14 +62,14 @@ type Usage struct {
 	CacheWriteTokens int64
 }
 
-// Response is a completed answer: Object is one valid JSON object that the caller decodes strictly, Usage is what to meter and RequestID is the provider's id for the call, for the ledger.
+// Response is a completed answer: Object is one valid JSON object that the caller decodes strictly, Usage is what to meter and RequestID is the provider's id for the call, for the ledger and the logs.
 type Response struct {
 	Object    json.RawMessage
 	Usage     Usage
 	RequestID string
 }
 
-// Completer asks the provider for one structured completion; a nil Completer means the assistant is off, so every AI operation answers 501 and nothing is metered. It returns the errors below, each joined with the provider's own detail, which never holds the API key, and context.Canceled for a cancelled ctx. With ErrRefused and ErrInvalidResponse the Response still carries Usage and RequestID, because the provider billed those tokens; with any other error it is the zero value.
+// Completer asks the provider for one structured completion; a nil Completer means the assistant is off, so every AI operation answers 501 and nothing is metered. It returns the errors below, each joined with the provider's own detail, which never holds the API key, and context.Canceled for a cancelled ctx. With ErrRefused and ErrInvalidResponse the Response still carries Usage, because the provider billed those tokens; with any other error its Usage is zero. Whatever the error, the Response carries the RequestID of the last attempt the provider answered, so a failed call can be found in the provider's logs; it is empty when no attempt got an answer. A caller that keeps request ids for what was billed keeps them only for a billed call.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
