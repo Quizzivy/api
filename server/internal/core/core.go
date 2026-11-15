@@ -78,7 +78,7 @@ func (a *App) Close() {
 // Handler is the assembled HTTP surface, for the server and for tests that
 // drive the whole application in-process.
 func (a *App) Handler() (http.Handler, error) {
-	deps := router.Deps{Modules: a.assembly.Modules, DB: a.pool, Tokens: a.assembly.Tokens, Docs: a.assembly.Docs, DocsPublic: a.cfg.DocsPublic, Maintenance: a.assembly.Maintenance, Principals: adapters.Principals{Query: a.assembly.Principals.Queries.ResolvePrincipal, Activity: a.assembly.Identity.Commands.StampActivity}}
+	deps := router.Deps{Modules: a.assembly.Modules, DB: a.pool, Tokens: a.assembly.Tokens, Docs: a.assembly.Docs, DocsPublic: a.cfg.DocsPublic, Maintenance: a.assembly.Maintenance, Principals: adapters.Principals{Query: a.assembly.Principals.Queries.ResolvePrincipal, Activity: a.assembly.Identity.Commands.StampActivity}, LandingOrigin: a.cfg.LandingOrigin}
 	return router.New(deps, a.logger, a.cfg.AllowedOrigins, a.cfg.ClientIPHeader)
 }
 

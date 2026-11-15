@@ -22,7 +22,10 @@ type Config struct {
 	// Hosts are the origins of the student and the staff web host
 	// (STUDENT_APP_URL and STAFF_APP_URL): what a request's Origin is read
 	// against to decide whose session it is, and where an email's link points.
-	Hosts                       access.Hosts
+	Hosts access.Hosts
+	// LandingOrigin is the origin of the landing site (LANDING_URL), whose
+	// pages call two open operations without credentials; empty when unset.
+	LandingOrigin               string
 	ClientIPHeader              string
 	GoogleClientID              string
 	GoogleClientSecret          string
@@ -136,6 +139,9 @@ func Load() (Config, error) {
 	}
 	cfg.AllowedOrigins = origins
 	if err := loadHosts(&cfg); err != nil {
+		return cfg, err
+	}
+	if err := loadLanding(&cfg); err != nil {
 		return cfg, err
 	}
 
@@ -276,6 +282,29 @@ func loadHosts(cfg *Config) error {
 			return fmt.Errorf("%s must be listed in CORS_ALLOWED_ORIGINS, or its pages cannot call the API", name)
 		}
 	}
+	return nil
+}
+
+func loadLanding(cfg *Config) error {
+	raw := strings.TrimSpace(os.Getenv("LANDING_URL"))
+	if raw == "" {
+		return nil
+	}
+	origin, err := parseOrigin("LANDING_URL", raw, "https://quizzivy.com")
+	if err != nil {
+		return err
+	}
+	switch {
+	case cfg.Env == productionEnv && !strings.HasPrefix(origin, schemeHTTPS+"://"):
+		return fmt.Errorf("LANDING_URL must be https in production: the form sends a name and a phone number from it")
+	case origin == cfg.Hosts.Student:
+		return fmt.Errorf("LANDING_URL must not be STUDENT_APP_URL: the landing site calls two open operations without a session, and a web host signs people in")
+	case origin == cfg.Hosts.Staff:
+		return fmt.Errorf("LANDING_URL must not be STAFF_APP_URL: the landing site calls two open operations without a session, and a web host signs people in")
+	case slices.Contains(cfg.AllowedOrigins, origin):
+		return fmt.Errorf("LANDING_URL must not be listed in CORS_ALLOWED_ORIGINS: an origin listed there calls every operation with credentials")
+	}
+	cfg.LandingOrigin = origin
 	return nil
 }
 
