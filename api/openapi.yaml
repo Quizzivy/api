@@ -5772,9 +5772,10 @@ components:
             For a TFNG question, the value of the correct option instead:
             `true`, `false` or `not_given`, which the reader names in its own
             language. For a matching question, one label per item in order:
-            the item's key, an arrow and the key of the choice it is keyed to,
-            as the editor draws them (D-063, `A → iii`), or `–` in place of
-            the choice when it is keyed to none.
+            the item's key, a colon, a space and the key of the choice it is
+            keyed to (D-063, `A: iii`), or `–` in place of the choice when it
+            is keyed to none (`A: –`). The editor draws an arrow between the
+            two; the label has none, since the arrow is outside the app's font.
         answerTo:
           type: array
           items: { type: string, minLength: 1, maxLength: 16 }

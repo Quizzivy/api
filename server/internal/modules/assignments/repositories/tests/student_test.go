@@ -314,9 +314,7 @@ func TestTheIntroReportsTheStrictestAudioCap(t *testing.T) {
 		  (kind, storage_key, mime_type, bytes, duration_ms, original_filename, checksum_sha256, uploaded_by, owner_id)
 		VALUES ('audio', $1, 'audio/mpeg', 1000, 1000, 'a.mp3', sha256(convert_to($1, 'UTF8')), $2::uuid, $2::uuid)
 		RETURNING id::text`, "audio/asg-"+id+".mp3", w.admin).Scan(&asset))
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM app.media_assets WHERE id = $1::uuid`, asset)
-	})
+	// The world removes the asset, after the version that names it.
 	listening := func(ordinal int, maxPlays *int) {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO app.test_version_questions
@@ -486,11 +484,7 @@ func TestTheClassNameIsOmittedUnlessThereIsExactlyOne(t *testing.T) {
 		"Lớp hai "+nonce(t), w.admin).Scan(&second); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM app.class_members WHERE class_id = $1::uuid`, second)
-		_, _ = pool.Exec(c, `DELETE FROM app.classes WHERE id = $1::uuid`, second)
-	})
+	// The world removes the class, after the assignments that name it.
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO app.class_members (class_id, user_id, joined_via, added_by)
 		 VALUES ($1::uuid, $2::uuid, 'admin', $3::uuid)`, second, w.student, w.admin); err != nil {

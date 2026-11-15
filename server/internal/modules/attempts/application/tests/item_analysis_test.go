@@ -251,3 +251,30 @@ func TestTheItemAnalysisRangesOverTheStudentsTheReaderReaches(t *testing.T) {
 		t.Errorf("a missing assignment got %v, want ErrNotFound", err)
 	}
 }
+
+// RM-2: an answer the retention sweep removed keeps no content, and still
+// counts as answered; its mark stands.
+func TestARemovedAnswerStillCountsAsAnsweredInTheItemAnalysis(t *testing.T) {
+	pool := newPool(t)
+	w := seedWorld(t, pool, openAssignment())
+	people := enrol(t, pool, w, 2)
+	removed := map[string]any{"removed": true}
+
+	first := handIn(t, pool, w, people[0], 1, "submitted")
+	saved(t, pool, first, w.choice, removed, mark(5), nil, false)
+	saved(t, pool, first, w.essay, removed, nil, mark(2.5), true)
+	second := handIn(t, pool, w, people[1], 1, "submitted")
+	saved(t, pool, second, w.choice, picked("x"), mark(0), nil, false)
+
+	got, err := analysisOf(t, pool, everyone, w.assignment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered := map[string]int{}
+	for _, item := range got.Items {
+		answered[item.QuestionID] = item.Answered
+	}
+	if answered[w.choice] != 2 || answered[w.essay] != 1 {
+		t.Errorf("answered: choice %d, essay %d; want 2 and 1, the removed answers counted", answered[w.choice], answered[w.essay])
+	}
+}

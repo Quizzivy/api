@@ -296,3 +296,40 @@ func TestAFullyGradedEssayPaperShowsItsBandOnTheMonitor(t *testing.T) {
 	}
 	t.Fatalf("no monitor row for the attempt in %+v", monitor.Rows)
 }
+
+// RM-2: the monitor counts an answer the retention sweep removed as answered.
+func TestTheMonitorCountsARemovedAnswerAsAnswered(t *testing.T) {
+	pool := newPool(t)
+	svc, w, session := started(t, pool)
+	ctx := context.Background()
+	in := domain.SaveInput{
+		AttemptID: session.Attempt.ID, StudentID: w.student, SessionID: session.SessionID,
+		Answers: []domain.Answer{{QuestionID: w.essay, Payload: []byte(`{"type":"text","value":"Tôi dậy sớm."}`)}},
+	}
+	if _, err := svc.Commands.Save.Handle(ctx, command.Save{Input: in}); err != nil {
+		t.Fatalf("save answers: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE app.attempt_answers SET payload = '{"removed": true}'::jsonb WHERE attempt_id = $1::uuid`, session.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor, err := svc.Queries.Monitor.Handle(ctx, query.Monitor{Scope: everyone, AssignmentID: w.assignment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range monitor.Rows {
+		if r.StudentID != w.student {
+			continue
+		}
+		if r.AnsweredCount == nil || *r.AnsweredCount != 1 {
+			t.Errorf("the monitor counts %v answered, want 1: the sweep removed the content, not the answer", deref32(r.AnsweredCount))
+		}
+	}
+}
+
+func deref32(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
