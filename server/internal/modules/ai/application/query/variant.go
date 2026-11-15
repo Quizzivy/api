@@ -32,10 +32,16 @@ type Variant struct {
 	Difficulty string
 }
 
-// Varied is the proposed changes in paper order and what the call cost.
+// Varied is the proposed changes in paper order and what the call cost, with
+// what the panel says of a partial pass (VR-1, VR-5): how many questions the
+// pass read, how many have a change, and whether changes past
+// prompts.MaxChanges were left out.
 type Varied struct {
-	Changes []prompts.Change
-	Usage   domain.Usage
+	Changes          []prompts.Change
+	Questions        int
+	ChangedQuestions int
+	Capped           bool
+	Usage            domain.Usage
 }
 
 type VariantHandler struct{ *support.Service }
@@ -53,23 +59,33 @@ func (h VariantHandler) Handle(ctx context.Context, q Variant) (Varied, error) {
 		return Varied{}, err
 	}
 	var changes []prompts.Change
+	var capped bool
 	usage, err := asker(h).sessionHolding(ctx, q.Actor, domain.FeatureVariant, ports.Tier(calls[0].Tier), VariantCeiling(len(calls)), func(s *session) error {
 		var runErr error
-		changes, runErr = h.run(ctx, s, calls, parts)
+		changes, capped, runErr = h.run(ctx, s, calls, parts)
 		return runErr
 	})
 	if err != nil {
 		return Varied{}, err
 	}
-	return Varied{Changes: changes, Usage: usage}, nil
+	return Varied{Changes: changes, Questions: len(paper.Questions), ChangedQuestions: questionsIn(changes), Capped: capped, Usage: usage}, nil
 }
 
-func (h VariantHandler) run(ctx context.Context, s *session, calls []prompts.Prompt, parts []prompts.VariantInput) ([]prompts.Change, error) {
+// questionsIn is how many questions the changes touch.
+func questionsIn(changes []prompts.Change) int {
+	seen := map[string]bool{}
+	for _, c := range changes {
+		seen[c.QuestionID] = true
+	}
+	return len(seen)
+}
+
+func (h VariantHandler) run(ctx context.Context, s *session, calls []prompts.Prompt, parts []prompts.VariantInput) ([]prompts.Change, bool, error) {
 	passCtx, cancel := context.WithTimeout(ctx, h.CleanupBudget)
 	defer cancel()
 	outcomes := s.callEach(passCtx, calls, VariantCallsInFlight)
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 	var changes []prompts.Change
 	usable, requestIDs := 0, make([]string, 0, len(outcomes))
@@ -92,11 +108,12 @@ func (h VariantHandler) run(ctx context.Context, s *session, calls []prompts.Pro
 	}
 	h.Logger.InfoContext(ctx, "ai variant", "calls", len(outcomes), "usable", usable, "spent_the_budget", passCtx.Err() != nil, "request_ids", strings.Join(requestIDs, ","))
 	if usable == 0 {
-		return nil, firstFailure
+		return nil, false, firstFailure
 	}
 	slices.SortStableFunc(changes, func(a, b prompts.Change) int { return a.Number - b.Number })
-	if len(changes) > prompts.MaxChanges {
+	capped := len(changes) > prompts.MaxChanges
+	if capped {
 		changes = changes[:prompts.MaxChanges]
 	}
-	return changes, nil
+	return changes, capped, nil
 }

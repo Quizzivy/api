@@ -441,3 +441,32 @@ func sizes(parts []prompts.VariantInput) []int {
 	}
 	return out
 }
+
+// VR-1 and VR-5: the answer says how many questions the pass read and changed,
+// so the panel can say which were left as they are, and whether changes past
+// the 300th were left out.
+func TestAVariantSaysHowManyQuestionsItChangedAndWhetherItWasCapped(t *testing.T) {
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+		if askedNumbers(req)[0] == 9 {
+			return ports.Response{}, fmt.Errorf("%w: overloaded", ports.ErrUnavailable)
+		}
+		return rewordEach(req)
+	}}
+	o := variantOps(t, completer, 0, 20)
+	got, err := o.app.Queries.Variant.Handle(context.Background(), reword())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Questions != 20 || got.ChangedQuestions != 12 || got.Capped {
+		t.Errorf("questions %d, changed %d, capped %v; want 20, 12 (the failed request's 8 left as they are) and not capped", got.Questions, got.ChangedQuestions, got.Capped)
+	}
+
+	many := variantOps(t, &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) { return rewordEach(req) }}, 0, prompts.MaxChanges+1)
+	capped, err := many.app.Queries.Variant.Handle(context.Background(), reword())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped.Changes) != prompts.MaxChanges || !capped.Capped || capped.ChangedQuestions != prompts.MaxChanges || capped.Questions != prompts.MaxChanges+1 {
+		t.Errorf("%d changes, capped %v, changed %d of %d; want %d, capped, %d of %d", len(capped.Changes), capped.Capped, capped.ChangedQuestions, capped.Questions, prompts.MaxChanges, prompts.MaxChanges, prompts.MaxChanges+1)
+	}
+}
