@@ -535,6 +535,8 @@ func TestGenerateNeedsExactlyOneSourceOfAFewSentences(t *testing.T) {
 		"both sources":           {func(q *query.Generate) { q.Source, q.TestID, q.StimulusID = sourceText, "t", "s" }, []string{"source"}},
 		"a test with no passage": {func(q *query.Generate) { q.TestID = "t" }, []string{"stimulusId"}},
 		"a short source":         {func(q *query.Generate) { q.Source = "Too short." }, []string{"source"}},
+		// A short answer's limit is at most 100, whatever reaches the query.
+		"a short answer limit of 101": {func(q *query.Generate) { q.Source, q.MaxWords = sourceText, 101 }, []string{"maxWords"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			o := newOps(t, true)

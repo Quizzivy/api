@@ -34,6 +34,11 @@ func shortWithLimit() domain.Input {
 	return domain.Input{Type: domain.ShortAnswer, Prompt: "No more than two words.", Points: "1", MaxWords: intp(2)}
 }
 
+func fillWithLimit() domain.Input {
+	return domain.Input{Type: domain.FillBlank, Prompt: "She ___ here.", Points: "1",
+		Blanks: []domain.BlankInput{{Ordinal: 1, AcceptedAnswers: []string{"lives"}}}}
+}
+
 func essayWithRubric() domain.Input {
 	return domain.Input{Type: domain.Essay, Prompt: "Write about a city.", Points: "9", SampleAnswer: text("A sample"),
 		Rubric: []domain.RubricCriterionInput{{Label: "Task response"}, {Label: "Coherence"}}}
@@ -49,7 +54,9 @@ func TestEachNewTypeAcceptsItsOwnFields(t *testing.T) {
 	for name, in := range map[string]domain.Input{
 		"tfng": tfng(), "choose two": chooseTwo(), "short answer with a word limit": shortWithLimit(),
 		"essay with a rubric and a sample": essayWithRubric(), "matching": matchingHeadings(),
-		"essay with no rubric": {Type: domain.Essay, Prompt: "Write.", Points: "9"},
+		"essay with no rubric":      {Type: domain.Essay, Prompt: "Write.", Points: "9"},
+		"essay with a word limit":   {Type: domain.Essay, Prompt: "Write no more than 250 words.", Points: "9", MaxWords: intp(250)},
+		"essay with the most words": {Type: domain.Essay, Prompt: "Write.", Points: "9", MaxWords: intp(1000)},
 	} {
 		if err := in.Validate(nil); err != nil {
 			t.Errorf("%s was refused: %v", name, fields(t, err))
@@ -76,7 +83,11 @@ func TestEachTypeRefusesTheRules(t *testing.T) {
 		{"selectCount on a single choice", chooseTwo, func(in *domain.Input) { in.Type = domain.SingleChoice }, "selectCount"},
 		{"word limit of 0", shortWithLimit, func(in *domain.Input) { in.MaxWords = intp(0) }, "maxWords"},
 		{"word limit of 101", shortWithLimit, func(in *domain.Input) { in.MaxWords = intp(101) }, "maxWords"},
-		{"word limit on an essay", essayWithRubric, func(in *domain.Input) { in.MaxWords = intp(250) }, "maxWords"},
+		{"essay word limit of 0", essayWithRubric, func(in *domain.Input) { in.MaxWords = intp(0) }, "essayMaxWords"},
+		{"essay word limit of 1001", essayWithRubric, func(in *domain.Input) { in.MaxWords = intp(1001) }, "essayMaxWords"},
+		{"maxWords sent on an essay", essayWithRubric, func(in *domain.Input) { in.MisplacedWordLimit = "maxWords" }, "maxWords"},
+		{"essayMaxWords sent on a short answer", shortWithLimit, func(in *domain.Input) { in.MisplacedWordLimit = "essayMaxWords" }, "essayMaxWords"},
+		{"word limit on a fill in the blank", fillWithLimit, func(in *domain.Input) { in.MaxWords = intp(3) }, "maxWords"},
 		{"essay with options", essayWithRubric, func(in *domain.Input) { in.Options = opts(true, false) }, "options"},
 		{"essay with blanks", essayWithRubric, func(in *domain.Input) {
 			in.Blanks = []domain.BlankInput{{Ordinal: 1, AcceptedAnswers: []string{"a"}}}

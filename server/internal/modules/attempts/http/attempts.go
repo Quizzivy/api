@@ -194,9 +194,9 @@ func (h Attempts) toAPIStudentQuestion(ctx context.Context, studentID string, q 
 		MediaAlt:        q.MediaAlt,
 		Points:          q.Points,
 		SelectCount:     q.SelectCount,
-		MaxWords:        q.MaxWords,
 		MatchAllowReuse: q.MatchAllowReuse,
 	}
+	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == "essay", q.MaxWords)
 	if len(q.Options) > 0 {
 		options := make([]openapi.StudentOption, len(q.Options))
 		for i, o := range q.Options {

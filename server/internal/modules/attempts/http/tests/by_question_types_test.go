@@ -63,8 +63,8 @@ func TestTheByQuestionReadCarriesAnEssaysRubricBandAndCriteria(t *testing.T) {
 	if body.Question.Rubric == nil || len(*body.Question.Rubric) != 1 || (*body.Question.Rubric)[0].Id.String() != criterion {
 		t.Errorf("rubric %+v", body.Question.Rubric)
 	}
-	if body.Question.MaxWords == nil || *body.Question.MaxWords != 2 || body.Question.MatchItems != nil {
-		t.Errorf("maxWords %v matchItems %v", body.Question.MaxWords, body.Question.MatchItems)
+	if body.Question.EssayMaxWords == nil || *body.Question.EssayMaxWords != 2 || body.Question.MaxWords != nil || body.Question.MatchItems != nil {
+		t.Errorf("essayMaxWords %v maxWords %v matchItems %v; want an essay's limit as essayMaxWords", body.Question.EssayMaxWords, body.Question.MaxWords, body.Question.MatchItems)
 	}
 	row := body.Items[0]
 	if row.Band == nil || *row.Band != 6.5 || row.Criteria == nil || len(*row.Criteria) != 1 || (*row.Criteria)[0].CriterionId.String() != criterion {

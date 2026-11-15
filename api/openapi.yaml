@@ -2480,6 +2480,7 @@ components:
         options: { type: array, items: { $ref: '#/components/schemas/AdminQuestionOption' } }
         blanks: { type: array, items: { $ref: '#/components/schemas/AdminQuestionBlank' } }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         rubric:
           type: array
           maxItems: 6
@@ -4342,6 +4343,16 @@ components:
         engine counts words and flags "too many", the server stores whatever
         was typed, and the grader sees an over-limit badge.
 
+    EssayMaxWords:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 1000
+      description: |
+        `essay` only: the word limit, as `maxWords` is a short answer's. Advice,
+        never truncation: the engine counts words and flags "too many", the
+        server stores whatever was typed, and the grader sees an over-limit
+        badge. Null is no limit.
+
     MatchAllowReuse:
       type: [boolean, 'null']
       description: '`matching` only, where it is required: whether one choice may answer more than one item. Null on every other type.'
@@ -4895,6 +4906,7 @@ components:
             appears in any `/app/*` schema, including the result endpoint.
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -5037,6 +5049,9 @@ components:
         maxWords:
           $ref: '#/components/schemas/MaxWords'
           description: '`short_answer` only. A rule the student is told; the engine counts words and never cuts text.'
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: '`essay` only. A rule the student is told; the engine counts words and never cuts text.'
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -5740,7 +5755,7 @@ components:
         policy and transcript. `items` is the text of a matching question's
         items in their order, `rubric` an essay's criterion labels in their
         order, and `rules` the rules a student is told: a multiple choice's
-        `selectCount`, a short answer's `maxWords` and a matching question's
+        `selectCount`, a short answer's `maxWords`, an essay's `essayMaxWords` and a matching question's
         `matchAllowReuse`. `context` is the shared material of the group
         the question belongs to, or its being in a group at all, and `section`
         the part of the paper it sits in. The correct options, the accepted
@@ -6688,6 +6703,12 @@ components:
             A word limit for the `short_answer` questions: each is written to be
             answered within it, and its draft carries it. Absent or `null`, the
             drafts carry none.
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: |
+            A word limit for the `essay` questions: each task is written for an
+            answer within it, and its draft carries it. Absent or `null`, the
+            drafts carry none.
 
     AiGeneratedQuestion:
       type: object
@@ -6731,6 +6752,9 @@ components:
         maxWords:
           $ref: '#/components/schemas/MaxWords'
           description: '`short_answer` only, present when the request set `maxWords`: the limit the question is saved with.'
+        essayMaxWords:
+          $ref: '#/components/schemas/EssayMaxWords'
+          description: '`essay` only, present when the request set `essayMaxWords`: the limit the question is saved with.'
 
     AiGeneratedMatchItem:
       type: object
@@ -7493,7 +7517,7 @@ components:
         `{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,
         `matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,
         `selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for
-        `short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
+        `short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
         `essay`, an audio policy requires an audio asset and alt text an image — are validated by the
         server and again at publish (§8). Failing them returns
         `VALIDATION_FAILED` with per-field `details`.
@@ -7575,6 +7599,7 @@ components:
           description: '`short_answer` and `essay` only. Rejected on any other type.'
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
@@ -7624,7 +7649,7 @@ components:
         `{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,
         `matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,
         `selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for
-        `short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
+        `short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for
         `essay`, an audio policy requires an audio asset and alt text an image — are validated by the
         server and again at publish (§8). Failing them returns
         `VALIDATION_FAILED` with per-field `details`.
@@ -7705,6 +7730,7 @@ components:
           description: '`short_answer` and `essay` only. Rejected on any other type.'
         selectCount: { $ref: '#/components/schemas/SelectCount' }
         maxWords: { $ref: '#/components/schemas/MaxWords' }
+        essayMaxWords: { $ref: '#/components/schemas/EssayMaxWords' }
         matchAllowReuse: { $ref: '#/components/schemas/MatchAllowReuse' }
         matchItems:
           type: array
