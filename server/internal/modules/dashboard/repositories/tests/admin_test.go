@@ -420,3 +420,31 @@ func nullable(s string) *string {
 	}
 	return &s
 }
+
+// TestNewLeadsCountsTheRequestsNobodyHasHandled fails when the nav's count of
+// consultation requests includes one that was contacted or closed, or misses
+// one that is new. It reads a difference inside one transaction, so requests
+// other tests hold do not move it.
+func TestNewLeadsCountsTheRequestsNobodyHasHandled(t *testing.T) {
+	tx := isolated(t, newPool(t))
+	store := repositories.NewPostgres(db.NewContext(tx))
+	ctx := context.Background()
+	before, err := store.NewLeads(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"new", "new", "contacted", "closed", "new"} {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO app.leads (full_name, phone_digits, course_for, call_time, locale, privacy_notice_version, consented_at, status)
+			VALUES ('Trần Thị Mai', '0903123456', 'self', 'any', 'vi', '2026-11', now(), $1)`, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := store.NewLeads(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after-before != 3 {
+		t.Errorf("new requests grew by %d after three new, one contacted and one closed; want 3", after-before)
+	}
+}

@@ -659,3 +659,69 @@ func TestASaveCarriesTheLimitsAndAnswersEachDefaultWithItsSource(t *testing.T) {
 		t.Errorf("a save without limits stored %v, want the earlier limits kept", kept)
 	}
 }
+
+// TestTheSettingsCarryTheLeadRecipientsAndASaveWithoutThemKeepsThem fails when
+// the settings stop answering leadRecipients (the contract requires the key,
+// as a list even when empty), when a PUT that leaves the property out clears
+// the stored addresses, when one that sends it does not replace them, and
+// when an address is answered as typed rather than as stored. The limits'
+// test covers the same absence for its own property.
+func TestTheSettingsCarryTheLeadRecipientsAndASaveWithoutThemKeepsThem(t *testing.T) {
+	r := &repo{settings: stored(), impact: domain.Impact{ActiveAdmins: 2}}
+	h := handler(t, r, nil, checker{})
+	recipientsOf := func(v any) string {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		return string(body["leadRecipients"])
+	}
+	put := func(in openapi.OrganizationSettingsInput) openapi.UpdateOrganizationSettings200JSONResponse {
+		t.Helper()
+		out, err := h.UpdateOrganizationSettings(contextAs(t, ""), openapi.UpdateOrganizationSettingsRequestObject{Body: &in})
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, ok := out.(openapi.UpdateOrganizationSettings200JSONResponse)
+		if !ok {
+			t.Fatalf("answered %T", out)
+		}
+		return saved
+	}
+
+	if got := recipientsOf(put(input(1))); got != "[]" {
+		t.Errorf("settings with no recipient answer leadRecipients = %s, want []", got)
+	}
+
+	with := input(2)
+	var sent openapi.LeadRecipients
+	if err := json.Unmarshal([]byte(`["Tu.Van@Quizzivy.com","le-tan@quizzivy.com","tu.van@quizzivy.com"]`), &sent); err != nil {
+		t.Fatal(err)
+	}
+	with.LeadRecipients = &sent
+	if got := recipientsOf(put(with)); got != `["tu.van@quizzivy.com","le-tan@quizzivy.com"]` {
+		t.Errorf("after a save with recipients, leadRecipients = %s, want each once and lower-case", got)
+	}
+
+	if got := recipientsOf(put(input(3))); got != `["tu.van@quizzivy.com","le-tan@quizzivy.com"]` {
+		t.Errorf("after a save without the property, leadRecipients = %s, want the stored addresses kept", got)
+	}
+	read, err := h.GetOrganizationSettings(contextAs(t, ""), openapi.GetOrganizationSettingsRequestObject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := recipientsOf(read.(openapi.GetOrganizationSettings200JSONResponse).Body); got != `["tu.van@quizzivy.com","le-tan@quizzivy.com"]` {
+		t.Errorf("GET answers leadRecipients = %s", got)
+	}
+
+	cleared := input(4)
+	cleared.LeadRecipients = &openapi.LeadRecipients{}
+	if got := recipientsOf(put(cleared)); got != "[]" {
+		t.Errorf("after a save with an empty list, leadRecipients = %s, want []", got)
+	}
+}

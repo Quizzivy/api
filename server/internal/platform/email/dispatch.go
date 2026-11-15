@@ -33,8 +33,8 @@ const commitBudget = 10 * time.Second
 // workspace or the Admin console, and into the student host otherwise. DailyLimit and
 // MonthlyLimit are the most messages sent in one local day and one local month
 // of Location; one that is zero is read, in each batch, from the usage limits
-// resolved under Limits. Interval is the pause between two sends. Now is the
-// clock, time.Now when nil.
+// resolved under Limits. A message that names a time writes it in Location.
+// Interval is the pause between two sends. Now is the clock, time.Now when nil.
 type Dispatcher struct {
 	DB           db.Context
 	Sealer       *secrets.Sealer
@@ -251,7 +251,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row pending, org string) outco
 	if row.staff || StaffOnly(Template(row.template)) {
 		home = access.AudienceStaff
 	}
-	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.Hosts.URL(home), Params: params, Secret: secret})
+	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.Hosts.URL(home), Params: params, Secret: secret, Zone: d.Location})
 	if err != nil {
 		return outcome{kind: ErrPermanent, code: "render_failed"}
 	}

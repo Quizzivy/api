@@ -54,8 +54,8 @@ info:
         operation serves two matrix rows, and the server narrows the check
         when the body decides which row applies.
 
-      An operation that does not require the bearer token (the nine open
-      operations) declares none. The server refuses to start when an
+      An operation that does not require the bearer token (the open
+      operations, `security: []`) declares none. The server refuses to start when an
       operation breaks this, and a hidden key (`scope.all`,
       `system.api_reference`, `system.data_export`, `system.leads`) may appear
       only under `/admin/`.
@@ -175,6 +175,12 @@ tags:
       The centre's own settings: who it is and how it is reached, its logos,
       how people sign in, and how long it keeps answers, focus events and
       disabled accounts. One document for the whole installation.
+  - name: admin-leads
+    description: |
+      The consultation requests the public form sends (`submitLead`): the
+      list, one request, how it was handled, and its removal. A request holds
+      a name and a phone number given with consent. It is deleted 12 months
+      after it was sent, and sooner when the person asks.
   - name: student
     description: The student console, with its classes, assigned tests, results and settings.
   - name: take-test
@@ -858,7 +864,7 @@ components:
     OrganizationSettings:
       type: object
       description: The whole settings document, as stored, and each usage limit's default.
-      required: [organization, signIn, retention, limits, limitDefaults, revision, updatedAt, updatedBy]
+      required: [organization, signIn, retention, limits, limitDefaults, leadRecipients, revision, updatedAt, updatedBy]
       additionalProperties: false
       properties:
         organization: { $ref: '#/components/schemas/OrganizationProfile' }
@@ -866,6 +872,7 @@ components:
         retention: { $ref: '#/components/schemas/RetentionPolicy' }
         limits: { $ref: '#/components/schemas/UsageLimits' }
         limitDefaults: { $ref: '#/components/schemas/UsageLimitDefaults' }
+        leadRecipients: { $ref: '#/components/schemas/LeadRecipients' }
         revision:
           type: integer
           format: int64
@@ -881,7 +888,7 @@ components:
       description: |
         The whole document to store, and the revision it was read at. Without
         `limits` the stored limits are kept, so a client that predates them
-        changes none.
+        changes none; the same holds for `leadRecipients`.
       required: [organization, signIn, retention, expectedRevision]
       additionalProperties: false
       properties:
@@ -889,6 +896,7 @@ components:
         signIn: { $ref: '#/components/schemas/SignInPolicy' }
         retention: { $ref: '#/components/schemas/RetentionPolicy' }
         limits: { $ref: '#/components/schemas/UsageLimits' }
+        leadRecipients: { $ref: '#/components/schemas/LeadRecipients' }
         expectedRevision: { type: integer, format: int64, minimum: 1 }
 
     SignInImpact:
@@ -955,6 +963,162 @@ components:
         type: { type: string, enum: [image/png] }
         width: { type: integer, minimum: 1 }
         height: { type: integer, minimum: 1 }
+
+    # ---------------------------------------------------------------- leads
+
+    LeadRecipients:
+      type: array
+      maxItems: 5
+      uniqueItems: true
+      description: |
+        The addresses told of each new consultation request, at most five,
+        stored lower-case. Each gets an email without the phone number and the
+        full name, and a link to the request in the Admin console. Empty sends
+        none.
+      items: { type: string, format: email, maxLength: 254 }
+
+    PrivacyNoticeVersion:
+      type: string
+      enum: ['2026-11']
+      description: |
+        A version of the privacy notice at `/privacy` on the landing site. The
+        form sends the version it showed, and the request is stored with it,
+        so it says what each person agreed to. A changed notice adds a value.
+
+    LeadInterest:
+      type: string
+      enum: [ielts, toeic, communication, kids, business]
+      description: A course the form offers.
+
+    LeadCourseFor:
+      type: string
+      enum: [self, child, company]
+      description: Who the course is for.
+
+    LeadCallTime:
+      type: string
+      enum: [any, morning, afternoon, evening]
+      description: |
+        When to call: any time, 8:00 to 12:00, 13:00 to 17:00, or 18:00 to
+        20:00, in the centre's time zone.
+
+    LeadStatus:
+      type: string
+      enum: [new, contacted, closed]
+
+    LeadInput:
+      type: object
+      description: |
+        What the consultation form sends. Nothing about the caller is added to
+        it: the stored request holds no IP address and nothing about the
+        device.
+      required: [fullName, phone, interests, courseFor, callTime, locale, consent, privacyNoticeVersion]
+      additionalProperties: false
+      properties:
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: |
+            Composed to NFC and trimmed, each run of white space made one
+            space. A name that is then empty, or holds a control or an
+            invisible character, is refused with `VALIDATION_FAILED` naming
+            `fullName`.
+        phone:
+          type: string
+          minLength: 9
+          maxLength: 20
+          pattern: '^[0-9 +().-]{9,20}$'
+          description: |
+            As typed. The server keeps its digits only, and refuses fewer
+            than 9 or more than 15 of them with `VALIDATION_FAILED` naming
+            `phone`.
+        interests:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LeadInterest' }
+        courseFor: { $ref: '#/components/schemas/LeadCourseFor' }
+        callTime: { $ref: '#/components/schemas/LeadCallTime' }
+        locale:
+          type: string
+          enum: [vi, en]
+          description: The language of the page when the form was sent.
+        consent:
+          type: boolean
+          enum: [true]
+          description: The box the person ticked. Anything but `true` is refused.
+        privacyNoticeVersion: { $ref: '#/components/schemas/PrivacyNoticeVersion' }
+        website:
+          type: string
+          maxLength: 200
+          description: |
+            A field no person sees or fills. A request that fills it is
+            answered as any other and is not stored.
+
+    LeadReceipt:
+      type: object
+      description: The one answer `submitLead` gives a request it accepts.
+      required: [received]
+      additionalProperties: false
+      properties:
+        received: { type: boolean, enum: [true] }
+
+    Lead:
+      type: object
+      description: A consultation request as the Admin console reads it.
+      required: [id, fullName, phone, interests, courseFor, callTime, locale, privacyNoticeVersion, consentedAt, status, note, handledBy, handledAt, createdAt]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        fullName: { type: string, minLength: 1, maxLength: 120 }
+        phone:
+          type: string
+          pattern: '^[0-9]{9,15}$'
+          description: The digits of the number the person typed.
+        interests:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LeadInterest' }
+        courseFor: { $ref: '#/components/schemas/LeadCourseFor' }
+        callTime: { $ref: '#/components/schemas/LeadCallTime' }
+        locale: { type: string, enum: [vi, en] }
+        privacyNoticeVersion:
+          type: string
+          description: The version of the privacy notice the person agreed to.
+        consentedAt: { $ref: '#/components/schemas/Timestamp' }
+        status: { $ref: '#/components/schemas/LeadStatus' }
+        note:
+          type: [string, 'null']
+          maxLength: 1000
+          description: The centre's own note on the request, or `null`.
+        handledBy:
+          description: Who last changed the status, or `null` while nobody has, and once that account is gone.
+          oneOf:
+            - type: object
+              required: [id, name]
+              additionalProperties: false
+              properties:
+                id: { $ref: '#/components/schemas/Uuid' }
+                name: { type: string }
+            - { type: 'null' }
+        handledAt:
+          description: When the status last changed, or `null`.
+          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+
+    LeadUpdate:
+      type: object
+      description: The fields to change. A field left out keeps its value.
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        status: { $ref: '#/components/schemas/LeadStatus' }
+        note:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Trimmed; empty after trimming, or `null`, removes the note.
 
     MaintenanceWindow:
       type: object
@@ -4484,13 +4648,17 @@ components:
 
     AdminSummary:
       type: object
-      required: [mustChangePassword]
+      required: [mustChangePassword, newLeads]
       additionalProperties: false
       properties:
         mustChangePassword:
           type: [integer, 'null']
           minimum: 0
           description: Enabled accounts on a temporary password; `null` without `people.users.manage`.
+        newLeads:
+          type: [integer, 'null']
+          minimum: 0
+          description: Consultation requests whose status is `new`; `null` without `system.leads`.
 
     Usage:
       type: object
@@ -7815,6 +7983,67 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
       x-rate-limit:
         perIp: { perMinute: 300 }
+
+  /public/leads:
+    post:
+      operationId: submitLead
+      tags: [public]
+      security: []
+      summary: Ask the centre to call back about its courses
+      description: |
+        The consultation form of the landing site. A request that passes
+        validation is stored with the consent it carries (`consent`, the
+        notice's version and the time), and one email per address in the
+        settings' `leadRecipients` is queued in the same transaction. The email
+        gives the given name, the interests, who the course is for, the best
+        time to call and a link to the request in the Admin console; it never
+        holds the phone number or the full name. The given name is the last
+        word of the name for a request sent in Vietnamese and the first for one
+        sent in English.
+
+        Two requests are answered `202` and not stored: one that fills
+        `website`, and one whose phone number already has two stored requests
+        from the last 24 hours. Neither is told apart from a stored one.
+
+        The landing site calls this from its own origin, without credentials:
+        the server answers that origin's preflight for this operation and for
+        `getPublicStatus`, and for no other.
+
+        **Leak review (§6.5).** The answer is the same body for every request
+        that passes validation, stored or not: nothing is echoed, and nothing
+        says whether a number was seen before, whether anyone is told, or that
+        `website` was read. A stored and an unstored request do the same phone
+        lookup and differ by one insert. A validation error names the field and
+        the rule, never a value. The limits are per address: 3 a minute and 10
+        an hour.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadInput' }
+      responses:
+        '202':
+          description: Received.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadReceipt' }
+        '400':
+          description: |
+            The body fails its schema (`consent` other than `true`, a
+            `privacyNoticeVersion` this server does not know, an unknown
+            interest), or `VALIDATION_FAILED` naming `fullName` or `phone`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '413':
+          description: The body is over 4 KiB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+      x-max-body-bytes: 4096
+      x-rate-limit:
+        perIp: { perMinute: 3, perHour: 10 }
 
   /auth/login:
     post:
@@ -13303,6 +13532,117 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/leads:
+    get:
+      operationId: listLeads
+      x-permission: system.leads
+      tags: [admin-leads]
+      summary: The consultation requests
+      description: |
+        The requests the public form stored, newest first. `status` narrows to
+        one status. `q` matches the name, ignoring case and accents (D-11), or
+        the phone number by its digits: any other character of `q` is dropped
+        before the number is compared.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/LeadStatus' }
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, enum: [10, 20, 50], default: 20 }
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageInfo'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Lead' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/leads/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getLead
+      x-permission: system.leads
+      tags: [admin-leads]
+      summary: One consultation request
+      description: |
+        The request the notification email links to, with the consent it was
+        sent with.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Lead' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateLead
+      x-permission: system.leads
+      tags: [admin-leads]
+      summary: Record how a consultation request was handled
+      description: |
+        Changes the status, the note, or both. A status that differs from the
+        stored one records the caller and the time as `handledBy` and
+        `handledAt`. One audit row, `lead.updated`, names the caller and holds
+        the status before and after and whether the note changed: never the
+        note, the name or the phone number, because the audit log outlives the
+        request. A body that changes nothing writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadUpdate' }
+      responses:
+        '200':
+          description: The request as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Lead' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteLead
+      x-permission: system.leads
+      tags: [admin-leads]
+      summary: Remove a consultation request
+      description: |
+        Deletes the request for good, as when the person asks the centre to
+        remove their details. One audit row, `lead.deleted`, names the caller
+        and the request's id and nothing of what it held.
+      responses:
+        '204': { description: Deleted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /admin/summary:
     get:
       operationId: getAdminSummary
@@ -13310,11 +13650,12 @@ paths:
       tags: [admin-overview]
       summary: The Admin console's nav counts
       description: |
-        The one count the Admin sidebar draws as a badge: the accounts that
-        must change their password (DG-54). It is the number the Overview's
-        `must_change_password` attention row carries, counted by the same rule.
-        `mustChangePassword` is `null` without `people.users.manage`, when the
-        count is not run.
+        The counts the Admin sidebar draws as badges. `mustChangePassword` is
+        the accounts that must change their password (DG-54): the number the
+        Overview's `must_change_password` attention row carries, counted by the
+        same rule, and `null` without `people.users.manage`, when the count is
+        not run. `newLeads` is the consultation requests nobody has handled
+        yet, and `null` without `system.leads`.
       responses:
         '200':
           description: OK

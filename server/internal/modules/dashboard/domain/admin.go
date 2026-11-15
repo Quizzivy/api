@@ -23,13 +23,14 @@ const ActiveWeekDays = 7
 // RecentChanges is how many audit entries the Overview quotes.
 const RecentChanges = 5
 
-// AdminViewer says which parts of the Admin readings a caller's keys open: Users is people.users.manage, Audit system.audit.read, Settings system.settings.write, Credits ai.credits.manage and All scope.all.
+// AdminViewer says which parts of the Admin readings a caller's keys open: Users is people.users.manage, Audit system.audit.read, Settings system.settings.write, Credits ai.credits.manage, Leads system.leads and All scope.all.
 type AdminViewer struct {
 	UserID   string
 	Users    bool
 	Audit    bool
 	Settings bool
 	Credits  bool
+	Leads    bool
 	All      bool
 }
 
@@ -179,8 +180,11 @@ type AdminOverview struct {
 	Storage          *Usage
 }
 
-// AdminSummary is the Admin sidebar's counts. MustChangePassword is nil without people.users.manage.
-type AdminSummary struct{ MustChangePassword *int }
+// AdminSummary is the Admin sidebar's counts. MustChangePassword is nil without people.users.manage, and NewLeads, the consultation requests nobody has handled yet, without system.leads.
+type AdminSummary struct {
+	MustChangePassword *int
+	NewLeads           *int
+}
 
 // EmailWindow is the local day and month the email counts read, and now.
 type EmailWindow struct {

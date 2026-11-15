@@ -236,6 +236,16 @@
       "en": "Deleted integrity events past their retention"
     },
     {
+      "key": "lead.deleted",
+      "vi": "Đã xoá yêu cầu tư vấn",
+      "en": "Deleted a consultation request"
+    },
+    {
+      "key": "lead.updated",
+      "vi": "Đã cập nhật yêu cầu tư vấn",
+      "en": "Updated a consultation request"
+    },
+    {
       "key": "maintenance.cancelled",
       "vi": "Đã huỷ lịch bảo trì",
       "en": "Cancelled a maintenance window"
@@ -334,6 +344,11 @@
       "key": "retention.answers_removed",
       "vi": "Đã xoá câu trả lời quá hạn lưu",
       "en": "Removed answers past their retention"
+    },
+    {
+      "key": "retention.leads_removed",
+      "vi": "Đã xoá yêu cầu tư vấn quá hạn lưu",
+      "en": "Removed consultation requests past their retention"
     },
     {
       "key": "role.created",

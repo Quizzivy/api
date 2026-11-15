@@ -290,3 +290,38 @@ func TestASaveThatChangesTheLimitsWakesMailAndOneThatKeepsThemDoesNot(t *testing
 		t.Errorf("a stale save: err = %v, woken = %d; want ErrStale and mail left asleep", err, mail.woken)
 	}
 }
+
+// TestASaveWithoutLeadRecipientsKeepsTheStoredOnesAndOneWithThemReplacesThem
+// fails when a client that predates the field wipes the addresses the centre
+// set (the save hands the store an empty list), and when a client that sends
+// the field cannot remove them. The limits have their own test of the same
+// kind for their own flag.
+func TestASaveWithoutLeadRecipientsKeepsTheStoredOnesAndOneWithThemReplacesThem(t *testing.T) {
+	repo := &fakeRepo{settings: stored()}
+	repo.settings.LeadRecipients = []string{"tu-van@quizzivy.com"}
+	app, _ := build(t, repo)
+	next := stored()
+	if _, err := app.Commands.UpdateSettings.Handle(context.Background(), command.UpdateSettings{Actor: admin, Settings: next, ExpectedRevision: 1, KeepLeadRecipients: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.saves[0].Settings.LeadRecipients; len(got) != 1 || got[0] != "tu-van@quizzivy.com" {
+		t.Errorf("a client that sends no recipients handed the store %v, want the stored address kept", got)
+	}
+
+	next = stored()
+	next.LeadRecipients = []string{"Le-Tan@Quizzivy.com"}
+	if _, err := app.Commands.UpdateSettings.Handle(context.Background(), command.UpdateSettings{Actor: admin, Settings: next, ExpectedRevision: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.saves[1].Settings.LeadRecipients; len(got) != 1 || got[0] != "le-tan@quizzivy.com" {
+		t.Errorf("recipients sent = %v, want exactly the one sent, lower-case", got)
+	}
+
+	next = stored()
+	if _, err := app.Commands.UpdateSettings.Handle(context.Background(), command.UpdateSettings{Actor: admin, Settings: next, ExpectedRevision: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.saves[2].Settings.LeadRecipients; len(got) != 0 {
+		t.Errorf("an empty list sent = %v, want every recipient removed", got)
+	}
+}

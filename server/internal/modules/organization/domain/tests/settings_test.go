@@ -324,3 +324,88 @@ func TestANameIsCountedAfterItIsComposed(t *testing.T) {
 		t.Fatalf("name = %q, want %q", got.Profile.Name, want)
 	}
 }
+
+// TestLeadRecipientsAreStoredLowerCaseAndOnceEach fails when Normalised keeps
+// an address as typed, keeps one named twice in two spellings, or reorders the
+// list. The allowed-domains test covers that list's own rule, which refuses a
+// repeat instead of folding it.
+func TestLeadRecipientsAreStoredLowerCaseAndOnceEach(t *testing.T) {
+	s := valid()
+	s.LeadRecipients = []string{" Tu.Van@Quizzivy.COM ", "le-tan@quizzivy.com", "tu.van@quizzivy.com", "LE-TAN@quizzivy.com"}
+	got, err := s.Normalised()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.LeadRecipients, ",") != "tu.van@quizzivy.com,le-tan@quizzivy.com" {
+		t.Errorf("recipients = %v, want each once, lower-case, in the order first named", got.LeadRecipients)
+	}
+	none, err := valid().Normalised()
+	if err != nil || none.LeadRecipients == nil || len(none.LeadRecipients) != 0 {
+		t.Errorf("a document with no recipients = %#v, %v; want an empty list the column takes", none.LeadRecipients, err)
+	}
+}
+
+// TestALeadRecipientThatIsNoAddressOrASixthOneIsRefusedByName fails when a
+// value that is not one bare email address reaches the store, where the
+// outbox would later refuse it and lose the request, or when a sixth distinct
+// address does: the column's CHECK would answer that as a 500.
+func TestALeadRecipientThatIsNoAddressOrASixthOneIsRefusedByName(t *testing.T) {
+	for name, recipients := range map[string][]string{
+		"no at sign":          {"tu-van.quizzivy.com"},
+		"a display name":      {"Tu Van <tu-van@quizzivy.com>"},
+		"two in one":          {"a@quizzivy.com, b@quizzivy.com"},
+		"an empty string":     {""},
+		"a host of one label": {"tu-van@localhost"},
+	} {
+		s := valid()
+		s.LeadRecipients = recipients
+		if got := refusedFields(t, s); got["leadRecipients"] != domain.ReasonEmail || len(got) != 1 {
+			t.Errorf("%s: refused %v, want leadRecipients as not an email", name, got)
+		}
+	}
+	six := valid()
+	six.LeadRecipients = []string{"a@q.example", "b@q.example", "c@q.example", "d@q.example", "e@q.example", "f@q.example"}
+	if got := refusedFields(t, six); got["leadRecipients"] != domain.ReasonRecipients {
+		t.Errorf("six recipients: refused %v, want leadRecipients as too many", got)
+	}
+	five := valid()
+	five.LeadRecipients = append(six.LeadRecipients[:5:5], "A@q.example")
+	if got, err := five.Normalised(); err != nil || len(got.LeadRecipients) != 5 {
+		t.Errorf("five recipients, one named twice: %v, %v; want the five kept", got.LeadRecipients, err)
+	}
+}
+
+// TestAChangeOfLeadRecipientsIsNamedLastAndOnlyWhenTheListDiffers fails when
+// ChangedFields misses a recipient added, removed or reordered, or reports a
+// change between no list and an empty one, which would bump the revision on a
+// save that changed nothing.
+func TestAChangeOfLeadRecipientsIsNamedLastAndOnlyWhenTheListDiffers(t *testing.T) {
+	before := valid()
+	before.LeadRecipients = []string{"a@q.example", "b@q.example"}
+	for name, c := range map[string]struct {
+		next []string
+		want string
+	}{
+		"the same list": {[]string{"a@q.example", "b@q.example"}, ""},
+		"one added":     {[]string{"a@q.example", "b@q.example", "c@q.example"}, "leadRecipients"},
+		"one removed":   {[]string{"a@q.example"}, "leadRecipients"},
+		"another order": {[]string{"b@q.example", "a@q.example"}, "leadRecipients"},
+		"all removed":   {nil, "leadRecipients"},
+	} {
+		after := before
+		after.LeadRecipients = c.next
+		if got := strings.Join(before.ChangedFields(after), ","); got != c.want {
+			t.Errorf("%s: changed fields = %q, want %q", name, got, c.want)
+		}
+	}
+	empty, none := valid(), valid()
+	empty.LeadRecipients = []string{}
+	if got := none.ChangedFields(empty); len(got) != 0 {
+		t.Errorf("no list against an empty one: changed fields = %v, want none", got)
+	}
+	renamed := before
+	renamed.Profile.Name, renamed.LeadRecipients = "Tên khác", nil
+	if got := strings.Join(before.ChangedFields(renamed), ","); got != "organization.name,leadRecipients" {
+		t.Errorf("a name and the recipients: %q, want the recipients named after the document's other fields", got)
+	}
+}

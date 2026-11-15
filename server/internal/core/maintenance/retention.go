@@ -65,13 +65,23 @@ type AccountsStep struct {
 	Failed            int64      `json:"failedAccounts"`
 }
 
+// LeadRetentionMonths is how long a consultation request is kept after it was sent: the privacy notice's promise to the person who sent it, not a setting.
+const LeadRetentionMonths = 12
+
+// LeadsStep is the consultation requests step of a sweep: the requests created before Cutoff, which is LeadRetentionMonths back, counted the way AnswersStep is.
+type LeadsStep struct {
+	Cutoff  time.Time `json:"cutoff"`
+	Leads   int64     `json:"leads"`
+	Batches int       `json:"batches"`
+}
+
 // StepFailure names a step of the sweep that failed and the error it ended with.
 type StepFailure struct {
 	Step  string `json:"step"`
 	Error string `json:"error"`
 }
 
-// SweepReport is what retention-sweep printed: the settings it read, one step each for answers, focus-loss events and accounts, and whether it finished. Complete is false when the budget ended a step or a step failed, and the next run goes on.
+// SweepReport is what retention-sweep printed: the settings it read, one step each for answers, focus-loss events, accounts and consultation requests, and whether it finished. Complete is false when the budget ended a step or a step failed, and the next run goes on.
 type SweepReport struct {
 	Applied      bool          `json:"applied"`
 	DatabaseRole string        `json:"databaseRole"`
@@ -79,6 +89,7 @@ type SweepReport struct {
 	Answers      AnswersStep   `json:"answers"`
 	FocusEvents  EventsStep    `json:"focusEvents"`
 	Accounts     AccountsStep  `json:"accounts"`
+	Leads        LeadsStep     `json:"leads"`
 	Complete     bool          `json:"complete"`
 	Failed       []StepFailure `json:"failed,omitempty"`
 }
@@ -111,7 +122,7 @@ func (s *sweeper) timed(ctx context.Context, batch func(context.Context) (bool, 
 	return more, err
 }
 
-// RetentionSweep applies the organization's retention settings in bounded batches until each step is done or the budget ends. A dry run, which runs in a read-only transaction, counts what each step would do.
+// RetentionSweep applies the organization's retention settings, and the fixed LeadRetentionMonths of the consultation requests, in bounded batches until each step is done or the budget ends. A dry run, which runs in a read-only transaction, counts what each step would do.
 // A batch commits on its own, so a run the budget ends, or a step that fails, loses nothing and the next run goes on. A step that fails does not stop the others: it is named in Failed and RetentionSweep returns the report with an error.
 func RetentionSweep(ctx context.Context, conn db.Conn, opts SweepOptions) (SweepReport, error) {
 	report := SweepReport{Applied: opts.Apply}
@@ -137,6 +148,7 @@ func RetentionSweep(ctx context.Context, conn db.Conn, opts SweepOptions) (Sweep
 		{"answers", func() error { return s.answers(ctx, report.Retention.KeepAnswersMonths, &report.Answers) }},
 		{"focusEvents", func() error { return s.events(ctx, report.Retention.KeepFocusEventsMonths, &report.FocusEvents) }},
 		{"accounts", func() error { return s.accounts(ctx, report.Retention.AnonymiseDisabledAfterMonths, &report.Accounts) }},
+		{"leads", func() error { return s.leads(ctx, &report.Leads) }},
 	}
 	var failures []error
 	for _, step := range steps {
@@ -385,6 +397,48 @@ func (s *sweeper) anonymiseBatch(ctx context.Context, cutoff time.Time, after st
 		}
 	}
 	return batch, tx.Commit(ctx)
+}
+
+const removeLeads = `
+	WITH due AS (
+	  SELECT l.id FROM app.leads l WHERE l.created_at < $1 ORDER BY l.created_at, l.id LIMIT $2
+	), removed AS (
+	  DELETE FROM app.leads l USING due WHERE l.id = due.id RETURNING l.id
+	), logged AS (
+	  INSERT INTO app.audit_log (action, entity, diff)
+	  SELECT 'retention.leads_removed', 'leads',
+	         jsonb_build_object('cutoff', $1::timestamptz, 'leads', count(id), 'databaseRole', current_user)
+	    FROM removed HAVING count(id) > 0
+	)
+	SELECT (SELECT count(id) FROM due), (SELECT count(id) FROM removed)`
+
+func (s *sweeper) leads(ctx context.Context, step *LeadsStep) error {
+	cutoff, err := cutoffBefore(ctx, s.conn, LeadRetentionMonths)
+	if err != nil {
+		return err
+	}
+	step.Cutoff = cutoff
+	if !s.opts.Apply {
+		return s.readOnly(ctx, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(id) FROM app.leads WHERE created_at < $1`, cutoff).Scan(&step.Leads)
+		})
+	}
+	for {
+		var picked int
+		var removed int64
+		more, err := s.timed(ctx, func(ctx context.Context) (bool, error) {
+			err := s.conn.QueryRow(ctx, removeLeads, cutoff, s.opts.Batch).Scan(&picked, &removed)
+			return picked == s.opts.Batch, err
+		})
+		if err != nil {
+			return err
+		}
+		step.Batches++
+		step.Leads += removed
+		if !more {
+			return nil
+		}
+	}
 }
 
 func (s *sweeper) readOnly(ctx context.Context, read func(pgx.Tx) error) error {

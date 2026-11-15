@@ -1,0 +1,45 @@
+{{define "subject"}}{{.Org}}: Yêu cầu tư vấn mới · {{.Params.GivenName}}{{end}}
+
+{{define "interest"}}{{if eq . "ielts"}}IELTS{{else if eq . "toeic"}}TOEIC{{else if eq . "communication"}}Tiếng Anh giao tiếp{{else if eq . "kids"}}Tiếng Anh thiếu nhi{{else if eq . "business"}}Tiếng Anh doanh nghiệp{{else}}{{.}}{{end}}{{end}}
+
+{{define "interests"}}{{range $i, $interest := .}}{{if $i}}, {{end}}{{template "interest" $interest}}{{else}}Chưa chọn khoá học nào{{end}}{{end}}
+
+{{define "courseFor"}}{{if eq . "self"}}Bản thân người gửi{{else if eq . "child"}}Con của người gửi{{else if eq . "company"}}Công ty của người gửi{{else}}{{.}}{{end}}{{end}}
+
+{{define "callTime"}}{{if eq . "any"}}Lúc nào cũng được{{else if eq . "morning"}}Buổi sáng, 8:00 đến 12:00{{else if eq . "afternoon"}}Buổi chiều, 13:00 đến 17:00{{else if eq . "evening"}}Buổi tối, 18:00 đến 20:00{{else}}{{.}}{{end}}{{end}}
+
+{{define "receivedAt"}}{{(.Params.ReceivedAt.In .Zone).Format "15:04 02/01/2006 (GMT-07:00)"}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{.Params.GivenName}} vừa gửi yêu cầu tư vấn từ trang giới thiệu.
+
+Quan tâm: {{template "interests" .Params.Interests}}
+Học cho: {{template "courseFor" .Params.CourseFor}}
+Nên gọi: {{template "callTime" .Params.CallTime}}
+Nhận lúc: {{template "receivedAt" .}}
+
+Họ tên đầy đủ và số điện thoại nằm trong trang quản trị. Hãy mở yêu cầu để gọi lại:
+
+{{.Link}}
+
+Bạn cần đăng nhập bằng tài khoản quản trị. Thư này không chứa số điện thoại của người gửi.{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{.Params.GivenName}} vừa gửi yêu cầu tư vấn từ trang giới thiệu.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;border-collapse:collapse">
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Quan tâm</td><td style="padding:2px 0;font-weight:bold">{{template "interests" .Params.Interests}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Học cho</td><td style="padding:2px 0;font-weight:bold">{{template "courseFor" .Params.CourseFor}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Nên gọi</td><td style="padding:2px 0;font-weight:bold">{{template "callTime" .Params.CallTime}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Nhận lúc</td><td style="padding:2px 0;font-weight:bold">{{template "receivedAt" .}}</td></tr>
+</table>
+<p>Họ tên đầy đủ và số điện thoại nằm trong trang quản trị. Hãy mở yêu cầu để gọi lại:</p>
+<p><a href="{{.Link}}">Mở yêu cầu tư vấn</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p>Bạn cần đăng nhập bằng tài khoản quản trị. Thư này không chứa số điện thoại của người gửi.</p>
+</body>
+</html>{{end}}

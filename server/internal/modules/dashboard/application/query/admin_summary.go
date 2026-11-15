@@ -7,7 +7,7 @@ import (
 	"quizzivy/internal/modules/dashboard/domain"
 )
 
-// AdminSummary reads the Admin sidebar's counts for Viewer: the accounts on a temporary password, counted as the Overview's attention row counts them, and only for a viewer who holds people.users.manage.
+// AdminSummary reads the Admin sidebar's counts for Viewer, each only for a viewer whose keys open it: the accounts on a temporary password, counted as the Overview's attention row counts them, with people.users.manage, and the consultation requests nobody has handled yet with system.leads.
 type AdminSummary struct {
 	Viewer domain.AdminViewer
 }
@@ -15,12 +15,20 @@ type AdminSummary struct {
 type AdminSummaryHandler struct{ *support.Service }
 
 func (s AdminSummaryHandler) Handle(ctx context.Context, q AdminSummary) (domain.AdminSummary, error) {
-	if !q.Viewer.Users {
-		return domain.AdminSummary{}, nil
+	var out domain.AdminSummary
+	if q.Viewer.Users {
+		n, err := s.Repo.MustChangePassword(ctx)
+		if err != nil {
+			return domain.AdminSummary{}, err
+		}
+		out.MustChangePassword = &n
 	}
-	n, err := s.Repo.MustChangePassword(ctx)
-	if err != nil {
-		return domain.AdminSummary{}, err
+	if q.Viewer.Leads {
+		n, err := s.Repo.NewLeads(ctx)
+		if err != nil {
+			return domain.AdminSummary{}, err
+		}
+		out.NewLeads = &n
 	}
-	return domain.AdminSummary{MustChangePassword: &n}, nil
+	return out, nil
 }
