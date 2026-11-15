@@ -191,7 +191,8 @@ func (s *Postgres) classAverageOf(ctx context.Context, assignmentID string, stor
 
 // resultQuestion is one line of the paper as the student may see it. The
 // second result is what the line adds to the score: nil while the answer is
-// unmarked, or while the policy hides scores altogether.
+// unmarked, when it was removed under the retention policy before it was
+// marked, or while the policy hides scores altogether.
 func resultQuestion(q domain.Question, extras map[string]resultExtra, plays map[string]int,
 	answers map[string]gradedAnswer, showScore, withheld bool) (domain.ResultQuestion, *float64) {
 	rq := domain.ResultQuestion{Question: q}
@@ -215,6 +216,11 @@ func resultQuestion(q domain.Question, extras map[string]resultExtra, plays map[
 		rq.PendingManual = ans.requiresManual && ans.manual == nil && !domain.AnswerRemoved(ans.payload)
 	}
 	if rq.PendingManual || !showScore {
+		return rq, nil
+	}
+	// An answer the retention policy removed before anyone marked it has no
+	// mark and never will: it reads as removed, not as a settled 0 (RM-1).
+	if answered && ans.final == nil && domain.AnswerRemoved(ans.payload) {
 		return rq, nil
 	}
 	if answered && ans.band != nil {
