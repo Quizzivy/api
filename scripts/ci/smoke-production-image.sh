@@ -3,6 +3,9 @@
 # image's own user, with fly.toml's [env] and throwaway secrets, against a
 # migrated Postgres on localhost. Fails unless the API answers /livez and the
 # worker logs that it started, and prints both logs when either exits first.
+# Before that it runs /app/maintenance once, a dry run of the retention sweep
+# as the maintenance role, because the server starts the nightly sweep from
+# this image.
 # SMOKE_DATABASE names the database, quizzivy by default.
 # Usage: smoke-production-image.sh IMAGE
 set -euo pipefail
@@ -65,6 +68,16 @@ docker run --rm --network host \
   --env "MIGRATE_DATABASE_URL=postgres://quizzivy_migrate:migrate@localhost:5432/$SMOKE_DATABASE?sslmode=disable" \
   "$image" /app/migrate -dir /app/migrations up
 
+# No -apply: the sweep counts in a read-only transaction and writes nothing.
+report="$(docker run --rm --network host \
+  --env "MAINTENANCE_DATABASE_URL=postgres://quizzivy_maintenance:maintenance@localhost:5432/$SMOKE_DATABASE?sslmode=disable" \
+  "$image" /app/maintenance retention-sweep)" \
+  || fail "the image's /app/maintenance could not run a dry run of the retention sweep"
+case "$report" in
+  *'"applied":false'*'"databaseRole":"quizzivy_maintenance"'*) ;;
+  *) fail "the dry run of the retention sweep did not report as the maintenance role: $report" ;;
+esac
+
 docker run --detach --name smoke-api --network host --env-file "$env_file" "$image" /app/api >/dev/null
 docker run --detach --name smoke-worker --network host --env-file "$env_file" "$image" /app/import-worker >/dev/null
 
@@ -95,4 +108,4 @@ done
 for name in "${containers[@]}"; do
   running "$name" || fail "$name exited after it was ready"
 done
-echo "The production image's API answered /livez and its import worker started, as $user."
+echo "The production image's maintenance command ran a dry-run sweep, its API answered /livez and its import worker started, as $user."

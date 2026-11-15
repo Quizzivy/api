@@ -20,7 +20,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cd server && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o /out/api ./cmd/api && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o /out/import-worker ./cmd/import-worker && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o /out/migrate ./cmd/migrate
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o /out/migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o /out/maintenance ./cmd/maintenance
 
 # The API and the worker refuse an IMPORT_WORK_DIR that is not mode 0700, and a
 # fresh Docker volume copies its owner and mode from the image path it mounts
@@ -37,6 +38,12 @@ WORKDIR /app
 COPY --from=build /out/api /app/api
 COPY --from=build /out/import-worker /app/import-worker
 COPY --from=build /out/migrate /app/migrate
+# The operator command. Production's database is on the server's private
+# network, so the nightly retention sweep and what the operator runs by hand
+# start from this image, on the server (docs/setup/operations.md). Nothing in
+# the image starts it, and it reads MAINTENANCE_DATABASE_URL, which the API
+# and the worker are never given.
+COPY --from=build /out/maintenance /app/maintenance
 COPY --from=build --chown=65532:65532 /out/imports /home/nonroot/imports
 COPY migrations /app/migrations
 
