@@ -44,15 +44,15 @@ func (c cleaning) vary(ctx context.Context) (query.Varied, error) {
 }
 
 // The overshoot of VR-10, against the tables: three requests the provider
-// meters far above the variant's ceiling move exactly the ceiling from held to
-// used, on the pool and on the teacher, in one ledger row that keeps the real
+// meters far above what the pass held, the variant's ceiling for each of them
+// (VR-4), move exactly what was held to used, on the pool and on the teacher, in one ledger row that keeps the real
 // token counts; nothing stays held, and the overrun is logged.
 func TestAVariantMeteredAboveItsCeilingMovesOnlyWhatWasHeld(t *testing.T) {
 	w := newWorld(t)
 	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) { return rewordEach(req) }}
 	logs := &strings.Builder{}
 	c := w.varying(completer, 24, 100_000, logs)
-	ceiling := domain.FeatureVariant.Ceiling()
+	ceiling := query.VariantCeiling(3)
 
 	got, err := c.vary(context.Background())
 	if err != nil {

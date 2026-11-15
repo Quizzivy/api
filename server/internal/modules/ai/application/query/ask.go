@@ -40,6 +40,16 @@ type outcome struct {
 	Err      error
 }
 
+// loggedRequestID is a call's entry in a pass's list of request ids: the
+// provider's id, or "-" for a call the provider never answered (a timeout, a
+// dropped connection), so the list keeps one entry per call in order.
+func loggedRequestID(response ports.Response) string {
+	if response.RequestID == "" {
+		return "-"
+	}
+	return response.RequestID
+}
+
 func (a asker) ask(ctx context.Context, who actor.Actor, p prompts.Prompt) (answer, error) {
 	if a.Completer == nil {
 		return answer{}, domain.ErrOff
@@ -60,7 +70,13 @@ func (a asker) ask(ctx context.Context, who actor.Actor, p prompts.Prompt) (answ
 }
 
 func (a asker) session(ctx context.Context, who actor.Actor, feature domain.Feature, tier ports.Tier, body func(*session) error) (usage domain.Usage, err error) {
-	reservation, err := command.ReserveHandler{Service: a.Service}.Handle(ctx, command.Reserve{Actor: who, Feature: feature, Ceiling: feature.Ceiling()})
+	return a.sessionHolding(ctx, who, feature, tier, feature.Ceiling(), body)
+}
+
+// sessionHolding is session with a reservation of ceiling credits instead of
+// the feature's own, for a feature whose one request makes several calls.
+func (a asker) sessionHolding(ctx context.Context, who actor.Actor, feature domain.Feature, tier ports.Tier, ceiling int64, body func(*session) error) (usage domain.Usage, err error) {
+	reservation, err := command.ReserveHandler{Service: a.Service}.Handle(ctx, command.Reserve{Actor: who, Feature: feature, Ceiling: ceiling})
 	if err != nil {
 		return domain.Usage{}, err
 	}

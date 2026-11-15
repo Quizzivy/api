@@ -467,3 +467,45 @@ func TestNewRefusesWhatCannotWork(t *testing.T) {
 		}
 	}
 }
+
+// VR-8: a failed or timed-out call keeps the provider's request id, so the
+// pass logs that list one id per call can name it.
+
+func TestAFailedCallKeepsTheProvidersRequestIDOnTheResponse(t *testing.T) {
+	api := newAPI(t, failure(http.StatusBadGateway, "api_error", "upstream failed"))
+	response, err := complete(t, api.client(t, nil), request())
+	requireKind(t, err, anthropic.ErrUnavailable)
+	if response.RequestID != "req_fixture_failed" {
+		t.Errorf("response request id = %q, want the failed attempt's", response.RequestID)
+	}
+	if response.Usage != (anthropic.Usage{}) {
+		t.Errorf("usage = %+v, want none for a call that billed nothing", response.Usage)
+	}
+}
+
+func TestATimeoutAfterAFailedAttemptNamesThatAttempt(t *testing.T) {
+	api := newAPI(t, failure(http.StatusServiceUnavailable, "overloaded_error", "overloaded"), exchange{status: http.StatusOK, body: message(`{}`, "end_turn"), delay: 5 * time.Second})
+	client := api.client(t, func(c *anthropic.Config) { c.Timeout = 300 * time.Millisecond })
+	response, err := complete(t, client, request())
+	typed := errorOfKind(t, err, anthropic.ErrTimeout)
+	if typed.RequestID != "req_fixture_failed" || response.RequestID != "req_fixture_failed" {
+		t.Errorf("error request id %q, response request id %q, want the overloaded attempt's", typed.RequestID, response.RequestID)
+	}
+	if n := len(api.calls()); n != 2 {
+		t.Errorf("requests = %d, want 2", n)
+	}
+}
+
+func TestAStreamThatGoesQuietPastTheBudgetKeepsItsRequestID(t *testing.T) {
+	quiet := streamOf(`{"items":[]}`)
+	quiet.stall = 5 * time.Second
+	api := newAPI(t, quiet)
+	client := api.client(t, func(c *anthropic.Config) { c.Timeout = 300 * time.Millisecond })
+	req := request()
+	req.MaxTokens = anthropic.StreamingThreshold + 1
+	response, err := complete(t, client, req)
+	typed := errorOfKind(t, err, anthropic.ErrTimeout)
+	if typed.RequestID != "req_fixture_stream" || response.RequestID != "req_fixture_stream" {
+		t.Errorf("error request id %q, response request id %q, want the stream's", typed.RequestID, response.RequestID)
+	}
+}

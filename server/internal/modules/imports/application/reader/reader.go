@@ -177,7 +177,7 @@ func (r Reader) readPage(ctx context.Context, page Page, total int, spent *meter
 		Schema:    prompt.Schema,
 		MaxTokens: prompt.MaxTokens,
 	})
-	spent.add(response)
+	spent.add(response, err)
 	switch {
 	case err == nil:
 		text, decodeErr := prompts.DecodePage(response.Object)
@@ -220,14 +220,17 @@ type meter struct {
 	requestID string
 }
 
-func (m *meter) add(response aiports.Response) {
+// add counts a call's usage, which is zero unless the provider billed it, and
+// keeps the first request id of a billed call: a failed call carries its id
+// too, for the logs, but the ledger names what was charged.
+func (m *meter) add(response aiports.Response, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.usage.InputTokens += response.Usage.InputTokens
 	m.usage.OutputTokens += response.Usage.OutputTokens
 	m.usage.CacheReadTokens += response.Usage.CacheReadTokens
 	m.usage.CacheWriteTokens += response.Usage.CacheWriteTokens
-	if m.requestID == "" {
+	if m.requestID == "" && (err == nil || errors.Is(err, aiports.ErrRefused) || errors.Is(err, aiports.ErrInvalidResponse)) {
 		m.requestID = response.RequestID
 	}
 }

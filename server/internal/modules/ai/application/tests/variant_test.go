@@ -284,20 +284,54 @@ func TestACancelledVariantSettlesWhatWasBilledOnceAndReleasesTheRest(t *testing.
 	}
 }
 
-// One reservation of the feature's ceiling covers every request of the pass
-// (VR-4 describes the rule; this pins it). A pass that the provider metered
-// above it is settled once with everything metered, the teacher is charged
-// what was held, the overrun is logged, and no change is lost to it.
-func TestAVariantThatCostsMoreThanItsCeilingIsChargedWhatWasHeldAndSaysSo(t *testing.T) {
-	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) { return rewordEach(req) }}
+// VR-4: a variant holds the variant's ceiling once for each request it makes,
+// so a pass is charged what it meters.
+func TestAVariantHoldsItsCeilingForEachRequestAndIsChargedWhatItMeters(t *testing.T) {
+	cheap := ports.Usage{InputTokens: 50, OutputTokens: 50}
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+		response, err := rewordEach(req)
+		response.Usage = cheap
+		return response, err
+	}}
 	o := variantOps(t, completer, 0, 40)
 	ceiling := domain.FeatureVariant.Ceiling()
 	// testPrices: one credit an input token and two an output token on the capable tier.
-	metered := 5 * (perCall.InputTokens + 2*perCall.OutputTokens)
-	if metered <= ceiling {
-		t.Fatalf("five requests meter %d credits, which is within the ceiling of %d: the fixture proves nothing", metered, ceiling)
+	metered := 5 * (cheap.InputTokens + 2*cheap.OutputTokens)
+	if metered <= ceiling || metered > 5*ceiling {
+		t.Fatalf("five requests meter %d credits: the fixture wants more than one ceiling (%d) and no more than five", metered, ceiling)
 	}
-	o.repo.settleOut = domain.Settled{Charged: ceiling, Metered: metered}
+
+	got, err := o.app.Queries.Variant.Handle(context.Background(), reword())
+	if err != nil {
+		t.Fatal(err)
+	}
+	onlyEnded(t, o, 1)
+	if held := o.repo.reserved[0]; held.Feature != domain.FeatureVariant || held.Credits != 5*ceiling || query.VariantCeiling(5) != 5*ceiling {
+		t.Errorf("reserved %+v, want the variant's ceiling of %d for each of the five requests", held, ceiling)
+	}
+	if s := o.repo.settled[0]; s.Metered != metered || s.Reservation.Credits != 5*ceiling {
+		t.Errorf("settlement %+v, want the %d metered against the %d held", s, metered, 5*ceiling)
+	}
+	if got.Usage.Credits != metered {
+		t.Errorf("the answer says the call cost %d credits, want the %d metered", got.Usage.Credits, metered)
+	}
+	if strings.Contains(o.logs.String(), "ai call cost more than its ceiling") {
+		t.Errorf("a pass within what it held logged an overrun:\n%s", o.logs.String())
+	}
+}
+
+// A pass the provider metered above what it held, every request above the
+// variant's ceiling, is settled once with everything metered, the teacher is
+// charged what was held, the overrun is logged, and no change is lost to it.
+func TestAVariantThatCostsMoreThanItHeldIsChargedWhatWasHeldAndSaysSo(t *testing.T) {
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) { return rewordEach(req) }}
+	o := variantOps(t, completer, 0, 40)
+	held := query.VariantCeiling(5)
+	metered := 5 * (perCall.InputTokens + 2*perCall.OutputTokens)
+	if metered <= held {
+		t.Fatalf("five requests meter %d credits, which is within the %d held: the fixture proves nothing", metered, held)
+	}
+	o.repo.settleOut = domain.Settled{Charged: held, Metered: metered}
 
 	got, err := o.app.Queries.Variant.Handle(context.Background(), reword())
 	if err != nil {
@@ -307,19 +341,103 @@ func TestAVariantThatCostsMoreThanItsCeilingIsChargedWhatWasHeldAndSaysSo(t *tes
 		t.Errorf("%d changes, want all 40: the overrun is the centre's cost, not the teacher's loss", len(got.Changes))
 	}
 	onlyEnded(t, o, 1)
-	if held := o.repo.reserved[0]; held.Feature != domain.FeatureVariant || held.Credits != ceiling {
-		t.Errorf("reserved %+v, want the variant's ceiling of %d once for the whole pass", held, ceiling)
+	if r := o.repo.reserved[0]; r.Feature != domain.FeatureVariant || r.Credits != held {
+		t.Errorf("reserved %+v, want %d once for the whole pass", r, held)
 	}
-	if s := o.repo.settled[0]; s.Metered != metered || s.Tokens != totalTokens(5) || s.Reservation.Credits != ceiling {
-		t.Errorf("settlement %+v, want the %d credits and the tokens of all five requests against the %d held", s, metered, ceiling)
+	if s := o.repo.settled[0]; s.Metered != metered || s.Tokens != totalTokens(5) || s.Reservation.Credits != held {
+		t.Errorf("settlement %+v, want the %d credits and the tokens of all five requests against the %d held", s, metered, held)
 	}
-	if got.Usage.Credits != ceiling {
-		t.Errorf("the answer says the call cost %d credits, want the %d that were charged", got.Usage.Credits, ceiling)
+	if got.Usage.Credits != held {
+		t.Errorf("the answer says the call cost %d credits, want the %d that were charged", got.Usage.Credits, held)
 	}
 	logs := o.logs.String()
-	for _, want := range []string{"level=WARN", `msg="ai call cost more than its ceiling"`, "feature=variant", fmt.Sprintf("ceiling=%d", ceiling), fmt.Sprintf("metered=%d", metered)} {
+	for _, want := range []string{"level=WARN", `msg="ai call cost more than its ceiling"`, "feature=variant", fmt.Sprintf("ceiling=%d", held), fmt.Sprintf("metered=%d", metered)} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("the log lacks %s:\n%s", want, logs)
 		}
 	}
+}
+
+// VR-8: the pass's log line lists one request id per call, in order: the id
+// of an answered call, the id the provider gave a failed one, and "-" for a
+// call it never answered.
+func TestAVariantLogsARequestIDForEveryCallItMade(t *testing.T) {
+	completer := &scripted{respond: func(_ context.Context, req ports.Request) (ports.Response, error) {
+		switch askedNumbers(req)[0] {
+		case 9:
+			return ports.Response{RequestID: "req_overloaded"}, fmt.Errorf("%w: overloaded", ports.ErrUnavailable)
+		case 17:
+			return ports.Response{}, fmt.Errorf("%w: %w", ports.ErrUnavailable, context.DeadlineExceeded)
+		}
+		return rewordEach(req)
+	}}
+	o := variantOps(t, completer, 0, 20)
+
+	if _, err := o.app.Queries.Variant.Handle(context.Background(), reword()); err != nil {
+		t.Fatal(err)
+	}
+	if want := "request_ids=req_1,req_overloaded,-"; !strings.Contains(o.logs.String(), want) {
+		t.Errorf("the log lacks %s:\n%s", want, o.logs.String())
+	}
+}
+
+// VR-6: a request is sized by the answer its questions call for, not by their
+// count alone. Eight prompts of 1,500 characters reworded are an answer of
+// about 3,500 tokens, past the request's max_tokens: the answer's JSON would
+// be cut off and every change of the request lost.
+func TestAVariantOfLongPromptsAsksAboutFewerQuestionsAtATime(t *testing.T) {
+	paper := longPaper(20)
+	for i := range paper.Questions {
+		if i%2 == 0 {
+			paper.Questions[i].Prompt = strings.Repeat("Đọc kỹ đoạn văn rồi chọn đáp án đúng nhất. ", 35)[:1500]
+		}
+	}
+	every := []string{prompts.VariantReword, prompts.VariantReorder, prompts.VariantDistract}
+	calls, parts, err := prompts.VariantCalls(prompts.VariantInput{Questions: paper.Questions, Changes: every, Difficulty: prompts.DifficultySame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != len(parts) || len(calls) <= 3 {
+		t.Fatalf("%d requests for 20 questions, half of them long, want more than the 3 of eight each", len(calls))
+	}
+	next := 1
+	for i, part := range parts {
+		tokens := 0
+		for _, q := range part.Questions {
+			if q.Number != next {
+				t.Fatalf("request %d asks about question %d, want %d: the requests keep paper order and lose none", i, q.Number, next)
+			}
+			next++
+			tokens += prompts.VariantAnswerTokens(q, every)
+		}
+		if len(part.Questions) > prompts.VariantChunkSize || tokens > prompts.VariantAnswerBudget {
+			t.Errorf("request %d asks about %d questions, an answer of about %d tokens; want at most %d and %d", i, len(part.Questions), tokens, prompts.VariantChunkSize, prompts.VariantAnswerBudget)
+		}
+		if calls[i].MaxTokens <= prompts.VariantAnswerBudget {
+			t.Errorf("request %d may answer %d tokens, no more than the budget it was cut to", i, calls[i].MaxTokens)
+		}
+	}
+	if next != 21 {
+		t.Fatalf("the requests ask about %d questions, want 20", next-1)
+	}
+}
+
+// A short test is cut as before: eight questions a request.
+func TestAVariantOfShortQuestionsStillAsksAboutEightAtATime(t *testing.T) {
+	every := []string{prompts.VariantReword, prompts.VariantReorder, prompts.VariantDistract}
+	_, parts, err := prompts.VariantCalls(prompts.VariantInput{Questions: longPaper(20).Questions, Changes: every, Difficulty: prompts.DifficultySame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 3 || len(parts[0].Questions) != 8 || len(parts[1].Questions) != 8 || len(parts[2].Questions) != 4 {
+		t.Fatalf("requests of %d, want 8, 8 and 4", sizes(parts))
+	}
+}
+
+func sizes(parts []prompts.VariantInput) []int {
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		out[i] = len(p.Questions)
+	}
+	return out
 }
