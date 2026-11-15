@@ -21,10 +21,13 @@ type Filter struct {
 	Query string
 	// Actions are the keys of the actions whose sentence Query matches.
 	Actions []string
-	// System is set when Query names the system (NamesSystem): an entry with
-	// no actor, which is shown under that name, then matches the search.
+	// System is set when Query names the system (NamesSystem): the system's
+	// own entries, which are shown under that name, then match the search.
 	System bool
-	Window Window
+	// Removed is set when Query names an account since removed
+	// (NamesRemoved): the entries of such accounts then match the search.
+	Removed bool
+	Window  Window
 	// Through, when above zero, leaves out the entries written after the one
 	// with this id, so an export reads the log as it stood when it began.
 	Through int64
