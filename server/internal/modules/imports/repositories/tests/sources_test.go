@@ -54,6 +54,9 @@ func setup(t *testing.T) harness {
 	}
 	t.Cleanup(func() {
 		for _, sql := range []string{
+			// The imports' audit rows, and any the teacher wrote, go while the
+			// imports can still be found.
+			`DELETE FROM app.audit_log WHERE actor_user_id=$1 OR entity_id IN (` + fixtureImports + `)`,
 			`UPDATE app.word_imports SET source_revision=NULL WHERE id IN (` + fixtureImports + `)`,
 			`DELETE FROM app.word_import_commits WHERE import_id IN (` + fixtureImports + `)`,
 			`DELETE FROM app.word_import_drafts WHERE import_id IN (` + fixtureImports + `)`,

@@ -10688,7 +10688,7 @@
               "minLength": 1,
               "maxLength": 16
             },
-            "description": "The labels (`A`, `B`, …) of the correct options in `from`, in order.\nFor a TFNG question, the value of the correct option instead:\n`true`, `false` or `not_given`, which the reader names in its own\nlanguage. For a matching question, one label per item in order:\nthe item's key, an arrow and the key of the choice it is keyed to,\nas the editor draws them (D-063, `A → iii`), or `–` in place of\nthe choice when it is keyed to none.\n"
+            "description": "The labels (`A`, `B`, …) of the correct options in `from`, in order.\nFor a TFNG question, the value of the correct option instead:\n`true`, `false` or `not_given`, which the reader names in its own\nlanguage. For a matching question, one label per item in order:\nthe item's key, a colon, a space and the key of the choice it is\nkeyed to (D-063, `A: iii`), or `–` in place of the choice when it\nis keyed to none (`A: –`). The editor draws an arrow between the\ntwo; the label has none, since the arrow is outside the app's font.\n"
           },
           "answerTo": {
             "type": "array",

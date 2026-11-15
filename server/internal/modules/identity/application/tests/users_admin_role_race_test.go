@@ -45,7 +45,8 @@ func (w *usersWorld) customRole(t *testing.T, grants ...access.Key) string {
 	}
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM app.audit_log WHERE entity_id IN (SELECT id FROM app.users WHERE role_id = $1::uuid)`,
+			`DELETE FROM app.audit_log WHERE entity_id IN (SELECT id FROM app.users WHERE role_id = $1::uuid)
+			    OR actor_user_id IN (SELECT id FROM app.users WHERE role_id = $1::uuid)`,
 			`DELETE FROM app.users WHERE role_id = $1::uuid`,
 			`DELETE FROM app.roles WHERE id = $1::uuid`,
 		} {

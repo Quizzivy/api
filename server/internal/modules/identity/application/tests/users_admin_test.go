@@ -76,13 +76,14 @@ func newUsersWorldOn(t *testing.T, admin, appdb *pgxpool.Pool, withOutbox, clean
 	if cleanUp {
 		t.Cleanup(func() {
 			ctx := context.Background()
-			owned := `SELECT id FROM app.users WHERE email LIKE '%@' || $1`
+			// lower(): a test may store an address of the world in capitals.
+			owned := `SELECT id FROM app.users WHERE lower(email) LIKE '%@' || $1`
 			for _, stmt := range []string{
 				`DELETE FROM app.email_outbox WHERE to_address LIKE '%@' || $1`,
 				`DELETE FROM app.class_members WHERE user_id IN (` + owned + `)`,
 				`DELETE FROM app.classes WHERE teacher_id IN (` + owned + `)`,
 				`DELETE FROM app.audit_log WHERE entity_id IN (` + owned + `) OR actor_user_id IN (` + owned + `)`,
-				`DELETE FROM app.users WHERE email LIKE '%@' || $1`,
+				`DELETE FROM app.users WHERE lower(email) LIKE '%@' || $1`,
 			} {
 				if _, err := admin.Exec(ctx, stmt, w.marker); err != nil {
 					t.Errorf("cleanup %q: %v", stmt, err)
