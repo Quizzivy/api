@@ -316,7 +316,7 @@ runs in a read-only transaction).
   "answers": {"enabled": true, "cutoff": "2024-10-14T20:00:07Z", "attempts": 12, "answers": 310, "batches": 1, "overdueInProgress": 0},
   "focusEvents": {"cutoff": "2025-09-14T20:00:07Z", "events": 4200, "batches": 9},
   "accounts": {"enabled": false, "anonymise": 0, "skippedOwners": 0, "skippedInProgress": 0, "notices": 0, "batches": 0, "failedAccounts": 0},
-  "leads": {"cutoff": "2025-10-14T20:00:07Z", "leads": 3, "batches": 1},
+  "leads": {"cutoff": "2025-10-14T20:00:07Z", "leads": 3, "batches": 0},
   "complete": true
 }
 ```
@@ -334,9 +334,9 @@ runs in a read-only transaction).
   days, which looks the same as a sweep with nothing to do. Open the workflow's job summary every week, or add
   a failure notification to the repository, and check that the schedule still shows as enabled.
   A backlog the first night does not clear is normal.
-- `leads` is the consultation requests step: the requests created before its `cutoff`, 12 months
-  back, that the run deleted or, on a dry run, would delete. It has no `enabled`, because no
-  setting turns it off.
+- `leads` is the consultation requests step: `leads.leads` is the requests created before its
+  `cutoff`, 12 months back, that the run deleted or, on a dry run, would delete. It has no
+  `enabled`, because no setting turns it off.
 - `overdueInProgress` counts attempts still in progress past their deadline on an assignment that
   closed before the answers cutoff. The sweep never removes their answers: an overdue attempt is
   closed, and scored from its stored answers, only when a teacher's monitor reads its assignment,
