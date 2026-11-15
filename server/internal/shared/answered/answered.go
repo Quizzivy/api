@@ -18,9 +18,12 @@ const ecmaScriptWhitespace = `E'\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680
 // is not blank, a fill-in with every blank of the frozen question filled, and
 // a matching answer that pairs every item of the frozen question. Blank is
 // what JavaScript's trim() leaves empty; an answer of any other type says
-// nothing.
+// nothing. An answer the retention sweep removed (retention.RemovedAnswer)
+// keeps no content to read, and counts as answered: the student answered it,
+// and the sweep must not make analysis and the monitor fall to 0 (RM-2).
 func SaysSomething(alias string) string {
 	return fmt.Sprintf(`
+	(%[1]s.payload = '`+retention.RemovedAnswer+`'::jsonb OR
 	CASE %[1]s.payload->>'type'
 	  WHEN 'choice' THEN
 	       CASE WHEN jsonb_typeof(%[1]s.payload->'optionIds') = 'array'
@@ -46,7 +49,7 @@ func SaysSomething(alias string) string {
 	                    WHERE i.test_version_question_id = %[1]s.question_id
 	                      AND jsonb_typeof(%[1]s.payload->'pairs'->i.id::text) IS DISTINCT FROM 'string')
 	  ELSE false
-	END`, alias)
+	END)`, alias)
 }
 
 // AwaitsGrade is the boolean SQL expression over a row of app.attempt_answers
