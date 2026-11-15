@@ -8054,7 +8054,7 @@
             "format": "date-time"
           },
           "actor": {
-            "description": "Who did it; `null` is the system itself, or an account since removed.",
+            "description": "Who did it; `null` is the system itself, or an account since removed (`actorRemoved`).",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/AuditActor"
@@ -8063,6 +8063,10 @@
                 "type": "null"
               }
             ]
+          },
+          "actorRemoved": {
+            "type": "boolean",
+            "description": "Present and true when the entry was made by an account that has\nsince been removed: `actor` is then `null`. An entry with `actor:\nnull` and no `actorRemoved` is the system's own work.\n"
           },
           "action": {
             "type": "string",
@@ -9552,7 +9556,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present only when `review.showScore`. `null` while awaiting manual grading."
+            "description": "Present only when `review.showScore`. `null` while awaiting manual\ngrading, and `null` for an answer removed under the retention policy\nbefore anyone marked it (`answerRemoved`): it was not answered wrong,\nand it is never marked now. A removed answer that was marked keeps\nits mark.\n"
           },
           "pendingManual": {
             "type": "boolean"
@@ -12429,6 +12433,14 @@
           },
           "language": {
             "$ref": "#/components/schemas/AiLanguage"
+          },
+          "chooseN": {
+            "type": "boolean",
+            "description": "Write each `multiple_choice` question as \"Choose N\": its prompt\nsays how many to choose, and the draft carries `selectCount`, the\nnumber of its correct options (2 to 7). Off when absent.\n"
+          },
+          "maxWords": {
+            "$ref": "#/components/schemas/MaxWords",
+            "description": "A word limit for the `short_answer` questions: each is written to be\nanswered within it, and its draft carries it. Absent or `null`, the\ndrafts carry none.\n"
           }
         }
       },
@@ -12483,6 +12495,14 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Empty when the request did not ask for explanations."
+          },
+          "selectCount": {
+            "$ref": "#/components/schemas/SelectCount",
+            "description": "`multiple_choice` only, present when the request asked for `chooseN`: the number of correct options, which the question is saved with."
+          },
+          "maxWords": {
+            "$ref": "#/components/schemas/MaxWords",
+            "description": "`short_answer` only, present when the request set `maxWords`: the limit the question is saved with."
           }
         }
       },
@@ -12800,6 +12820,9 @@
         "type": "object",
         "required": [
           "changes",
+          "questions",
+          "changedQuestions",
+          "capped",
           "usage"
         ],
         "additionalProperties": false,
@@ -12810,6 +12833,20 @@
             "items": {
               "$ref": "#/components/schemas/AiVariantChange"
             }
+          },
+          "questions": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The questions of the draft the pass read, group members included."
+          },
+          "changedQuestions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The questions with at least one change in `changes`. The others are\nleft as they are: the model proposed nothing safe for them, or their\nrequest failed or ran out of time.\n"
+          },
+          "capped": {
+            "type": "boolean",
+            "description": "True when the pass proposed more than 300 changes and those past the 300th, in paper order, were left out."
           },
           "usage": {
             "$ref": "#/components/schemas/AiUsage"
@@ -24306,7 +24343,7 @@
           "admin-audit"
         ],
         "summary": "The audit log",
-        "description": "One page of the audit log, newest first, and how many entries each\ncategory holds. The log is append-only: nothing here changes it.\n\n**Range.** `range` is `today` (from midnight), `7d` (the last seven\ncalendar days, today included), `30d` (the last thirty), `all`, or\n`custom`, which takes `from` and `to` as dates, both inclusive. Every\nday is the viewer's own: their stored time zone, else the centre's\ndefault. `from` and `to` without `custom`, `custom` without both, and a\n`to` before `from` answer `400 VALIDATION_FAILED` naming the field.\n\n**Search.** `q` matches, without regard to case or accents, the actor's\nname or email, the sentence that words the action in either language,\nand the label of the user, class, test, assignment, attempt, media file,\nimport or question group an entry is about.\n\n**Categories.** An entry's category follows from the kind of thing it\nis about. Entries about the organization, exports, maintenance,\nretention and the AI credits belong to no category: `category` is\n`null` and only the unfiltered list holds them.\n\n**Facets.** `facets` counts the entries that match the current `q` and\nrange and ignores `category`, so selecting one never zeroes the others;\n`all` counts every such entry, those in no category included, so it can\nexceed the sum of the six. `total` is the selected category's count, or\n`all`.\n\n**Entries.** `changes` lists the fields an entry changed, each with the\nvalue it had and the value it has. `details` holds anything else the\nentry recorded. A join code is shown as `••••-` and its last four\ncharacters, and a password, token or secret is never shown. `label` is\n`null` when the row the entry is about no longer exists.\n",
+        "description": "One page of the audit log, newest first, and how many entries each\ncategory holds. The log is append-only: nothing here changes it.\n\n**Range.** `range` is `today` (from midnight), `7d` (the last seven\ncalendar days, today included), `30d` (the last thirty), `all`, or\n`custom`, which takes `from` and `to` as dates, both inclusive. Every\nday is the viewer's own: their stored time zone, else the centre's\ndefault. `from` and `to` without `custom`, `custom` without both, and a\n`to` before `from` answer `400 VALIDATION_FAILED` naming the field.\n\n**Search.** `q` matches, without regard to case or accents, the actor's\nname or email, the sentence that words the action in either language,\nthe label of the user, class, test, assignment, attempt, media file,\nimport, question group or role an entry is about, and the names the\nlist gives an entry with no actor: \"Hệ thống\" / \"System\" for the\nsystem's own entries, \"Người dùng đã xoá\" / \"Deleted user\" for those of\nan account since removed.\n\n**Categories.** An entry's category follows from the kind of thing it\nis about. Entries about the organization, exports, maintenance,\nretention and the AI credits belong to no category: `category` is\n`null` and only the unfiltered list holds them.\n\n**Facets.** `facets` counts the entries that match the current `q` and\nrange and ignores `category`, so selecting one never zeroes the others;\n`all` counts every such entry, those in no category included, so it can\nexceed the sum of the six. `total` is the selected category's count, or\n`all`.\n\n**Entries.** `changes` lists the fields an entry changed, each with the\nvalue it had and the value it has. `details` holds anything else the\nentry recorded. A join code is shown as `••••-` and its last four\ncharacters, and a password, token or secret is never shown. `label` is\n`null` when the row the entry is about no longer exists.\n",
         "parameters": [
           {
             "name": "category",
