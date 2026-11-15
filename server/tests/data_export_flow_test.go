@@ -257,7 +257,7 @@ func TestAnAdminExportsTheCentresDataAndFetchesItOnce(t *testing.T) {
 	}
 
 	names, files := readZip(t, raw)
-	wantNames := []string{"README.txt", "users.csv", "roles.csv", "classes.csv", "class_members.csv", "tests.csv", "test_versions.csv", "assignments.csv", "attempts.csv", "answers.csv"}
+	wantNames := []string{"README.txt", "users.csv", "roles.csv", "classes.csv", "class_members.csv", "tests.csv", "test_versions.csv", "assignments.csv", "attempts.csv", "leads.csv", "answers.csv"}
 	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("the ZIP holds %v, want %v", names, wantNames)
 	}

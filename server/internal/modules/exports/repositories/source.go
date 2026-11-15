@@ -169,6 +169,16 @@ var queries = map[string]string{
 		       t.void_reason AS void_reason, t.teacher_note AS teacher_note
 		  FROM app.attempts t
 		 ORDER BY t.id`,
+	domain.LeadsFile: `
+		SELECT l.id::text AS id, l.full_name AS full_name, l.phone_digits AS phone,
+		       array_to_string(l.interests, ';') AS interests, l.course_for AS course_for,
+		       l.call_time AS call_time, l.locale AS locale,
+		       l.privacy_notice_version AS privacy_notice_version, ` + at("l.consented_at") + ` AS consented_at,
+		       l.status AS status, l.note AS note, l.handled_by::text AS handled_by,
+		       ` + at("l.handled_at") + ` AS handled_at, ` + at("l.created_at") + ` AS created_at,
+		       ` + at("l.updated_at") + ` AS updated_at
+		  FROM app.leads l
+		 ORDER BY l.id`,
 	domain.AnswersFile: `
 		SELECT x.attempt_id::text AS attempt_id, x.question_id::text AS question_id, x.payload::text AS answer,
 		       (x.payload = '{"removed": true}'::jsonb)::text AS removed,
