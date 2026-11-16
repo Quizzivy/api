@@ -349,11 +349,11 @@ func insertCopiedSet(ctx context.Context, tx pgx.Tx, w domain.SetWrite, name str
 		    FROM created, unnest($4::uuid[]) WITH ORDINALITY AS t(question_id, ordinal)
 		), logged AS (
 		  INSERT INTO app.audit_log (actor_user_id, action, entity, entity_id, occurred_at, ip, user_agent, diff)
-		  SELECT $1::uuid, 'question_set.created', 'question_set', created.id, $5, $6::inet, $7,
+		  SELECT $1::uuid, 'question_set.created', 'question_set', created.id, $5::timestamptz, $6::inet, $7::text,
 		         jsonb_build_object('added', to_jsonb($4::uuid[]))
 		    FROM created
 		  UNION ALL
-		  SELECT $1::uuid, 'share.copied', 'question_set', created.id, $5, $6::inet, $7,
+		  SELECT $1::uuid, 'share.copied', 'question_set', created.id, $5::timestamptz, $6::inet, $7::text,
 		         jsonb_build_object('sourceId', $8::uuid)
 		    FROM created
 		)
