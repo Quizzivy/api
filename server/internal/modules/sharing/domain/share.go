@@ -51,7 +51,9 @@ var (
 	// ErrOwnerOnly is an owner's action by a caller who holds a grant: only the
 	// content's owner and scope.all share it, change or stop a grant (D4).
 	ErrOwnerOnly = errors.New("sharing: only the content's owner may do this")
-	// ErrInvalid is a kind or an access level the sharing context does not know.
+	// ErrInvalid is a kind or an access level the sharing context does not
+	// know, or a request it refuses: no recipient, too many, one named twice,
+	// a message past its length.
 	ErrInvalid = errors.New("sharing: unknown kind or access")
 )
 

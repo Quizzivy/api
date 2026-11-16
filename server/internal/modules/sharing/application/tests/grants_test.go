@@ -208,6 +208,28 @@ func TestOnlyTheOwnerAndScopeAllManageAShare(t *testing.T) {
 	}
 }
 
+// The contract's uniqueItems compares the ids as written, so the same id in
+// two spellings (upper case, braces, urn:uuid:) reaches the command twice
+// once the handler has normalised it.
+func TestARecipientNamedTwiceRefusesTheWholeShare(t *testing.T) {
+	w := newWorld(t)
+	owner, colleague, other := w.user("Chủ", "teacher"), w.user("Đồng nghiệp", "teacher"), w.user("Người khác", "teacher")
+	test := w.test(owner, "Đề nêu hai lần")
+	_, err := w.app.Commands.CreateShares.Handle(context.Background(), command.CreateShares{
+		Actor: by(owner), Kind: domain.KindTest, ResourceID: test, GranteeIDs: []string{colleague, other, colleague},
+		Access: domain.AccessUse, Notify: true,
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("a recipient named twice: %v, want ErrInvalid", err)
+	}
+	if got := w.audits(test); len(got) != 0 {
+		t.Fatalf("a refused share was audited: %+v", got)
+	}
+	if got := w.notices(colleague); len(got) != 0 {
+		t.Fatalf("a refused share notified the recipient: %v", got)
+	}
+}
+
 func TestEachRecipientWithoutAGrantIsSkippedWithItsReason(t *testing.T) {
 	w := newWorld(t)
 	owner, holder, student, disabled, fresh := w.user("Chủ", "teacher"), w.user("Đã có", "teacher"), w.user("Học viên", "student"), w.user("Đã khoá", "teacher"), w.user("Mới", "teacher")

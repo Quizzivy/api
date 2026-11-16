@@ -14,7 +14,9 @@ import (
 // CreateShares shares the test or question set Kind and ResourceID name with
 // GranteeIDs at Access, for its owner or scope.all; a grantee gets
 // domain.ErrOwnerOnly, since a recipient never shares further (D4), and anyone
-// who cannot read it domain.ErrNotFound. With Notify each new recipient is
+// who cannot read it domain.ErrNotFound. GranteeIDs are normalised ids
+// (uuid.UUID.String()); one named twice is domain.ErrInvalid, as the contract's
+// uniqueItems compares the spellings only. With Notify each new recipient is
 // told (content.shared), carrying Message when the sharer wrote one.
 type CreateShares struct {
 	Actor      actor.Actor
@@ -33,6 +35,13 @@ type CreateSharesHandler struct {
 func (s CreateSharesHandler) Handle(ctx context.Context, cmd CreateShares) (domain.Granted, error) {
 	if !cmd.Access.Valid() || len(cmd.GranteeIDs) == 0 || len(cmd.GranteeIDs) > domain.MaxGrantees {
 		return domain.Granted{}, domain.ErrInvalid
+	}
+	seen := make(map[string]bool, len(cmd.GranteeIDs))
+	for _, id := range cmd.GranteeIDs {
+		if seen[id] {
+			return domain.Granted{}, domain.ErrInvalid
+		}
+		seen[id] = true
 	}
 	message := domain.CleanMessage(cmd.Message)
 	if message != nil && utf8.RuneCountInString(*message) > domain.MaxMessage {
