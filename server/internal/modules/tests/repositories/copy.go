@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
+	mediadomain "quizzivy/internal/modules/media/domain"
 	questions "quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/shared/access"
@@ -24,12 +26,13 @@ import (
 //  2. a new test of the actor's, titled and described as the source, as
 //     Duplicate names its copies;
 //  3. the source draft's groups and questions under share locks, as publish
-//     takes them, then every standalone question of the draft as a new bank
-//     question of the actor's, through the questions module's copy
-//     (QuestionWrites), which
-//     locks each source and then each asset it names with
-//     media.LockForVersionUse before writing the copy, and copies its
-//     options, blanks, match items and rubric with fresh gap ids;
+//     takes them, then every asset the copy will name, its questions' and
+//     its groups', with media.LockForVersionUse in one pass in id order
+//     (lockDraftMedia), then every standalone question of the draft as a
+//     new bank question of the actor's, through the questions module's copy
+//     (QuestionWrites), which locks each source and then each asset it
+//     names before writing the copy, and copies its options, blanks, match
+//     items and rubric with fresh gap ids;
 //  4. the sections, their instructions and the test's own groups, as
 //     Duplicate writes them, with each copy locked with
 //     questions.LockForDraftUse before test_section_questions names it;
@@ -113,11 +116,59 @@ func (s *Postgres) copyDraft(ctx context.Context, tx pgx.Tx, copyID string, in d
 	if err != nil {
 		return err
 	}
+	if err := s.lockDraftMedia(ctx, tx, draft); err != nil {
+		return err
+	}
 	copyOf, err := s.copyDraftQuestions(ctx, tx, draft, in)
 	if err != nil {
 		return err
 	}
 	return s.copyDraftGraph(ctx, tx, copyID, in.ActorID, draft, in, copyOf)
+}
+
+// lockDraftMedia locks every asset the copy of draft will name, its
+// standalone questions', its groups' materials and recordings and their
+// members', with media.LockForVersionUse in one pass in id order, as publish
+// and a group save lock theirs. The questions module's copy, then each group
+// write, lock their own share of them again afterwards, which is harmless,
+// but taking them in two sorted passes could deadlock against a publish or
+// group save holding the other order. A file already deleted is left to the
+// step that names it, which refuses it as before.
+func (s *Postgres) lockDraftMedia(ctx context.Context, tx pgx.Tx, draft domain.DraftContent) error {
+	ids, err := copyMediaIDs(draft)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	if s.media == nil {
+		return errors.New("tests: media reference locks unavailable")
+	}
+	for _, id := range ids {
+		if err := s.media.LockForVersionUse(ctx, tx, id); err != nil && !errors.Is(err, mediadomain.ErrNotFound) {
+			return fmt.Errorf("tests: copy media asset %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// copyMediaIDs is every asset a copy of draft names, in id order: what a
+// publish of it locks (snapshotMediaIDs) and what a write of each of its
+// groups locks (groupAssetIDs), its recordings included.
+func copyMediaIDs(draft domain.DraftContent) ([]string, error) {
+	ids, err := snapshotMediaIDs(draft)
+	if err != nil {
+		return nil, err
+	}
+	for _, section := range draft.Sections {
+		for _, group := range section.Groups {
+			assets, err := groupAssetIDs(group)
+			if err != nil {
+				return nil, err
+			}
+			ids = append(ids, assets...)
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids), nil
 }
 
 // copyDraftQuestions copies every standalone question of draft, each once
