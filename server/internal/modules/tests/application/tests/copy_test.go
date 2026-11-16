@@ -50,8 +50,8 @@ func (w *shareWorld) count(t *testing.T, sql string, args ...any) int {
 // B's copy of A's published test is a draft of B's, titled as A's, whose
 // sections hold a new question of B's in place of A's and a new group in
 // place of A's section group, with none of A's versions, assignments or
-// grants. A's test is unchanged, and A's own duplicate still references A's
-// question.
+// grants, audited as a test B created and as share.copied from A's. A's test
+// is unchanged, and A's own duplicate still references A's question.
 func TestACopyOfATestIsTheCopiersOwnDraftAndLeavesEverythingElseBehind(t *testing.T) {
 	for _, level := range []string{levelNone, levelUse, levelEdit, levelRevoked} {
 		t.Run(level, func(t *testing.T) {
@@ -99,6 +99,10 @@ func TestACopyOfATestIsTheCopiersOwnDraftAndLeavesEverythingElseBehind(t *testin
 			if n := w.count(t, `SELECT count(*) FROM app.audit_log WHERE action = 'share.copied' AND entity = 'test' AND entity_id = $1
 				AND actor_user_id = $2 AND diff->>'sourceId' = $3`, copied.ID, w.b, w.testA); n != 1 {
 				t.Errorf("the copy has %d share.copied rows from A's test, want one", n)
+			}
+			if n := w.count(t, `SELECT count(*) FROM app.audit_log WHERE action = 'test.created' AND entity = 'test' AND entity_id = $1
+				AND actor_user_id = $2`, copied.ID, w.b); n != 1 {
+				t.Errorf("the copy has %d test.created rows by B, want one beside share.copied", n)
 			}
 
 			afterQuestions, afterGroups := w.draftRows(t, w.testA)

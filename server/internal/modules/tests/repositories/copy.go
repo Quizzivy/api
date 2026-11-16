@@ -36,7 +36,8 @@ import (
 //  4. the sections, their instructions and the test's own groups, as
 //     Duplicate writes them, with each copy locked with
 //     questions.LockForDraftUse before test_section_questions names it;
-//  5. share.copied for the new test, from the source.
+//  5. test.created for the new test, as a new test is audited, and
+//     share.copied from the source beside it.
 //
 // Versions, assignments and grants stay behind. Duplicate is the owner's: it
 // keeps referencing the bank questions. A test the scope cannot read is
@@ -92,17 +93,20 @@ func (s *Postgres) copyTestRow(ctx context.Context, tx pgx.Tx, in domain.Duplica
 	if err != nil {
 		return "", err
 	}
-	err = audit.Write(ctx, tx, audit.Entry{
+	entry := audit.Entry{
 		ActorUserID: &in.ActorID,
-		Action:      "share.copied",
+		Action:      "test.created",
 		Entity:      entityTest,
 		EntityID:    &copyID,
 		OccurredAt:  in.Now,
 		IP:          opt.String(in.IP),
 		UserAgent:   opt.String(in.UserAgent),
-		Diff:        diff,
-	})
-	return copyID, err
+	}
+	if err := audit.Write(ctx, tx, entry); err != nil {
+		return "", err
+	}
+	entry.Action, entry.Diff = "share.copied", diff
+	return copyID, audit.Write(ctx, tx, entry)
 }
 
 // copyDraft writes the source in.ID's draft into the new test copyID, with a
