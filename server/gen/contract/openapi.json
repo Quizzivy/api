@@ -16609,7 +16609,7 @@
         ],
         "security": [],
         "summary": "Resend's delivery events (bounces and complaints)",
-        "description": "The webhook Resend calls (O-R5.2, T-R7.15). It accepts only Resend's\nsigned deliveries: the Svix signature in `svix-id`, `svix-timestamp`\nand `svix-signature`, an HMAC-SHA256 over `{id}.{timestamp}.{body}`\nwith the decoded `RESEND_WEBHOOK_SECRET`, within five minutes of the\ntimestamp. A hard bounce (`email.bounced`) or a complaint\n(`email.complained`) puts the recipient's address on the suppression\nlist, and no more mail goes to it; every other event type is accepted\nand ignored. A replayed `svix-id` changes nothing.\n\n**Leak review (§6.5).** The answer is `204` or `401`, both empty,\nwhatever the body says: nothing tells a caller whether an address is\nknown or already suppressed. A forged request cannot suppress an\naddress, because it cannot sign; the address stored is one Quizzivy\nalready sent to. The limit is per address: 120 a minute.\n",
+        "description": "The webhook Resend calls (O-R5.2, T-R7.15). It accepts only Resend's\nsigned deliveries: the Svix signature in `svix-id`, `svix-timestamp`\nand `svix-signature`, an HMAC-SHA256 over `{id}.{timestamp}.{body}`\nwith the decoded `RESEND_WEBHOOK_SECRET`, within five minutes of the\ntimestamp. A hard bounce (`email.bounced`) or a complaint\n(`email.complained`) puts the recipient's address on the suppression\nlist, and no more mail goes to it; every other event type is accepted\nand ignored. A replayed `svix-id` changes nothing.\n\n**Leak review (§6.5).** A request without the three headers, or\nwhose body is not a JSON object, is refused with `400` by request\nvalidation before the signature is read, as on every operation. Past\nthat, the answer is `204` or `401`, both empty, whatever the body\nsays: nothing tells a caller whether an address is\nknown or already suppressed. A forged request cannot suppress an\naddress, because it cannot sign; the address stored is one Quizzivy\nalready sent to. The limit is per address: 120 a minute.\n",
         "parameters": [
           {
             "name": "svix-id",
@@ -16654,6 +16654,9 @@
         "responses": {
           "204": {
             "description": "Received."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "description": "The signature is missing, wrong or stale. No body."
