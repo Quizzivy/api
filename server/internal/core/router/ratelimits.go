@@ -40,6 +40,9 @@ func RateLimits() *ratelimit.Registry {
 	reg.Add("GET /public/organization", capacity, ratelimit.PerMinute(120), ratelimit.PerHour(2000))
 	reg.Add("GET /public/organization/logo", capacity, ratelimit.PerMinute(300))
 	reg.Add("POST /public/leads", capacity, ratelimit.PerMinute(3), ratelimit.PerHour(10))
+	// Resend's signed delivery events (T-R7.15), per sending address. It
+	// answers 501 until that task verifies the signature.
+	reg.Add("POST /public/email-events", capacity, ratelimit.PerMinute(120))
 
 	return reg
 }

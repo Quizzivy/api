@@ -17,6 +17,7 @@ const (
 	RouteTest              Route = "test"
 	RouteMessages          Route = "messages"
 	RouteStudentMessages   Route = "studentMessages"
+	RouteDashboard         Route = "dashboard"
 )
 
 type requirement struct {
@@ -40,6 +41,7 @@ var routes = map[Route]requirement{
 	RouteTest:              {test: true},
 	RouteMessages:          {student: true},
 	RouteStudentMessages:   {thread: true},
+	RouteDashboard:         {},
 }
 
 // Target is where a click on a notification goes, stored as the contract's

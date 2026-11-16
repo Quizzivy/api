@@ -126,7 +126,7 @@ func TestTheContractsRoutesAreTheDomains(t *testing.T) {
 		string(domain.RouteAssignment), string(domain.RouteAttempt), string(domain.RouteGrading),
 		string(domain.RouteClasses), string(domain.RouteResult), string(domain.RouteStudentAssignment),
 		string(domain.RouteSharedWithMe), string(domain.RouteTest), string(domain.RouteMessages),
-		string(domain.RouteStudentMessages),
+		string(domain.RouteStudentMessages), string(domain.RouteDashboard),
 	}
 	slices.Sort(routes)
 	target := schema(t, "NotificationTarget")

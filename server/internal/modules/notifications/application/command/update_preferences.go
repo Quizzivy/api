@@ -9,9 +9,11 @@ import (
 
 // UpdatePreferences replaces UserID's switches with Preferences, which must
 // hold every event exactly once, and answers them as stored, in
-// domain.Events' order.
+// domain.Events' order. A student's are stored with each email equal to its
+// switch in the app, whatever was given (DG-82).
 type UpdatePreferences struct {
 	UserID      string
+	Recipient   domain.Recipient
 	Preferences []domain.Preference
 }
 
@@ -27,9 +29,9 @@ func (s UpdatePreferencesHandler) Handle(ctx context.Context, cmd UpdatePreferen
 	if err != nil {
 		return nil, err
 	}
-	stored, err := s.Repo.SavePreferences(ctx, cmd.UserID, whole)
+	stored, err := s.Repo.SavePreferences(ctx, cmd.UserID, cmd.Recipient.Keep(whole))
 	if err != nil {
 		return nil, err
 	}
-	return domain.WithDefaults(stored), nil
+	return domain.WithDefaults(stored, cmd.Recipient), nil
 }

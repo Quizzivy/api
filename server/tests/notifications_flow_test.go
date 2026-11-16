@@ -114,16 +114,19 @@ func TestASignedInUserReadsMarksAndSwitchesOnlyTheirOwnNotifications(t *testing.
 	}
 	teacher.must(http.StatusBadRequest, http.MethodGet, "/me/notifications?limit=51", nil)
 
-	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received"}
+	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "summary.weekly"}
 	switches := func(c *client) []any {
 		t.Helper()
 		return c.must(http.StatusOK, http.MethodGet, "/me/notification-preferences", nil)["items"].([]any)
 	}
 	for i, item := range switches(student) {
-		if s := item.(map[string]any); s["event"] != events[i] || s["inApp"] != true || s["email"] != false {
-			t.Errorf("the student's switch %d defaults to %v", i, s)
+		on := events[i] != "summary.weekly"
+		if s := item.(map[string]any); s["event"] != events[i] || s["inApp"] != on || s["email"] != on {
+			t.Errorf("the student's switch %d defaults to %v, want both channels %v", i, s, on)
 		}
 	}
+	// A student's email is stored equal to the same switch in the app,
+	// whatever the body says (DG-82).
 	saved := make([]map[string]any, len(events))
 	for i, event := range events {
 		saved[len(events)-1-i] = map[string]any{"event": event, "inApp": event != "result.ready", "email": event == "attempt.flagged"}
@@ -132,14 +135,19 @@ func TestASignedInUserReadsMarksAndSwitchesOnlyTheirOwnNotifications(t *testing.
 	stored := switches(student)
 	for i, event := range events {
 		for name, list := range map[string][]any{"the answer": answered, "a later read": stored} {
-			if s := list[i].(map[string]any); s["event"] != event || s["inApp"] != (event != "result.ready") || s["email"] != (event == "attempt.flagged") {
+			if s := list[i].(map[string]any); s["event"] != event || s["inApp"] != (event != "result.ready") || s["email"] != (event != "result.ready") {
 				t.Errorf("%s holds %v for %s", name, s, event)
 			}
 		}
 	}
+	teacherDefaults := map[string][2]bool{
+		"attempt.submitted": {true, false}, "attempt.flagged": {true, true}, "assignment.closing": {true, false},
+		"assignment.due_soon": {true, true}, "result.ready": {true, true}, "message.received": {true, true}, "summary.weekly": {false, true},
+	}
 	for i, item := range switches(teacher) {
-		if s := item.(map[string]any); s["event"] != events[i] || s["inApp"] != true || s["email"] != false {
-			t.Errorf("after the student saved theirs the teacher's switch %d is %v", i, s)
+		want := teacherDefaults[events[i]]
+		if s := item.(map[string]any); s["event"] != events[i] || s["inApp"] != want[0] || s["email"] != want[1] {
+			t.Errorf("after the student saved theirs the teacher's switch %d is %v, want the deck's default %v", i, s, want)
 		}
 	}
 	saved[0]["event"] = "attempt.submitted"

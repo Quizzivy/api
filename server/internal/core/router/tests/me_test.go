@@ -132,16 +132,16 @@ func someIDs(n int) string {
 const outOfOrder = `[{"event":"message.received","inApp":false,"email":false},` +
 	`{"event":"result.ready","inApp":false,"email":true},{"event":"assignment.due_soon","inApp":true,"email":false},` +
 	`{"event":"assignment.closing","inApp":true,"email":false},{"event":"attempt.flagged","inApp":true,"email":false},` +
-	`{"event":"attempt.submitted","inApp":true,"email":false}]`
+	`{"event":"attempt.submitted","inApp":true,"email":false},{"event":"summary.weekly","inApp":true,"email":true}]`
 
-var theSixEvents = []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received"}
+var theSevenEvents = []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "summary.weekly"}
 
 var theMeTree = []struct{ method, path, body string }{
 	{http.MethodGet, "/me/notifications", ""},
 	{http.MethodPost, "/me/notifications/read", `{}`},
 	{http.MethodGet, "/me/summary", ""},
 	{http.MethodGet, "/me/notification-preferences", ""},
-	{http.MethodPut, "/me/notification-preferences", switches(theSixEvents...)},
+	{http.MethodPut, "/me/notification-preferences", switches(theSevenEvents...)},
 	{http.MethodPatch, "/me/preferences", `{}`},
 	{http.MethodPut, "/me/avatar", ""},
 	{http.MethodDelete, "/me/avatar", ""},
@@ -159,17 +159,17 @@ func TestTheMeTreeRefusesWhatItsContractRefuses(t *testing.T) {
 		"an id that is not a uuid":     {http.MethodPost, "/me/notifications/read", `{"ids":["mine"]}`},
 		"a user id beside the ids":     {http.MethodPost, "/me/notifications/read", `{"userId":"` + teacherUser + `"}`},
 		"no body to mark with":         {http.MethodPost, "/me/notifications/read", ""},
-		"five switches":                {http.MethodPut, "/me/notification-preferences", switches(theSixEvents[:5]...)},
-		"seven switches":               {http.MethodPut, "/me/notification-preferences", switches(append(slices.Clone(theSixEvents), "attempt.flagged")...)},
+		"six switches":                 {http.MethodPut, "/me/notification-preferences", switches(theSevenEvents[:6]...)},
+		"eight switches":               {http.MethodPut, "/me/notification-preferences", switches(append(slices.Clone(theSevenEvents), "attempt.flagged")...)},
 		"an event that is not a switch": {http.MethodPut, "/me/notification-preferences",
-			switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "class.joined")},
+			switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "class.joined")},
 		"a switch without its email half": {http.MethodPut, "/me/notification-preferences",
-			strings.Replace(switches(theSixEvents...), `"email":false,`, "", 1)},
+			strings.Replace(switches(theSevenEvents...), `"email":false,`, "", 1)},
 		"a switch for somebody else": {http.MethodPut, "/me/notification-preferences",
-			strings.Replace(switches(theSixEvents...), `"email":false,`, `"email":false,"userId":"`+teacherUser+`",`, 1)},
-		"switches that are not a list": {http.MethodPut, "/me/notification-preferences", `{"items":` + switches(theSixEvents...) + `}`},
+			strings.Replace(switches(theSevenEvents...), `"email":false,`, `"email":false,"userId":"`+teacherUser+`",`, 1)},
+		"switches that are not a list": {http.MethodPut, "/me/notification-preferences", `{"items":` + switches(theSevenEvents...) + `}`},
 		"a repeated switch": {http.MethodPut, "/me/notification-preferences",
-			switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "attempt.submitted")},
+			switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "attempt.submitted")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &meStore{}
@@ -192,7 +192,7 @@ func TestTheMeTreeRefusesWhatItsContractRefuses(t *testing.T) {
 
 func TestARepeatedSwitchIsRefusedInWordsByTheHandler(t *testing.T) {
 	issuer := testIssuer(t)
-	body := switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "attempt.submitted")
+	body := switches("attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "attempt.submitted")
 	rec := sendAs(t, meRouter(t, issuer, &meStore{}), issuer, http.MethodPut, "/me/notification-preferences", teacherUser, body)
 	var envelope struct {
 		Error struct {
@@ -224,7 +224,7 @@ func TestTheMeTreeServesEverySignedInRoleItsOwnRows(t *testing.T) {
 			"marking everything":    {http.MethodPost, "/me/notifications/read", `{}`, http.StatusNoContent, "MarkAllRead"},
 			"the summary":           {http.MethodGet, "/me/summary", "", http.StatusOK, "Unread"},
 			"reading the switches":  {http.MethodGet, "/me/notification-preferences", "", http.StatusOK, "Preferences"},
-			"saving the switches":   {http.MethodPut, "/me/notification-preferences", switches(theSixEvents...), http.StatusOK, "SavePreferences"},
+			"saving the switches":   {http.MethodPut, "/me/notification-preferences", switches(theSevenEvents...), http.StatusOK, "SavePreferences"},
 			"switches out of order": {http.MethodPut, "/me/notification-preferences", outOfOrder, http.StatusOK, "SavePreferences"},
 		} {
 			store := &meStore{}
@@ -264,10 +264,13 @@ func TestTheMeTreeServesEverySignedInRoleItsOwnRows(t *testing.T) {
 				want := []notificationsdomain.Preference{
 					{Event: "attempt.submitted", InApp: true}, {Event: "attempt.flagged", InApp: true}, {Event: "assignment.closing", InApp: true},
 					{Event: "assignment.due_soon", InApp: true}, {Event: "result.ready", InApp: false, Email: true},
-					{Event: "message.received", InApp: false},
+					{Event: "message.received", InApp: false}, {Event: "summary.weekly", InApp: true, Email: true},
+				}
+				if user == studentUser {
+					want = notificationsdomain.Student.Keep(want)
 				}
 				if !slices.Equal(store.saved, want) {
-					t.Errorf("the store was handed %+v, want the six in the switches' order with their own values", store.saved)
+					t.Errorf("the store was handed %+v as %s, want the seven in the switches' order with their own values, a student's email equal to the app (DG-82)", store.saved, user)
 				}
 			}
 		}
@@ -284,12 +287,13 @@ func TestTheSummaryAndTheSwitchesAnswerTheContractsBodies(t *testing.T) {
 	if err := json.Unmarshal(sendAs(t, h, issuer, http.MethodGet, "/me/notification-preferences", studentUser, "").Body.Bytes(), &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if len(defaults) != 6 {
-		t.Fatalf("%d switches, want six", len(defaults))
+	if len(defaults) != 7 {
+		t.Fatalf("%d switches, want seven", len(defaults))
 	}
-	for i, event := range theSixEvents {
-		if defaults[i]["event"] != event || defaults[i]["inApp"] != true || defaults[i]["email"] != false {
-			t.Errorf("switch %d is %v, want %s in the app and not by email", i, defaults[i], event)
+	for i, event := range theSevenEvents {
+		on := event != "summary.weekly"
+		if defaults[i]["event"] != event || defaults[i]["inApp"] != on || defaults[i]["email"] != on {
+			t.Errorf("a student's switch %d is %v, want %s with both channels %v", i, defaults[i], event, on)
 		}
 	}
 }

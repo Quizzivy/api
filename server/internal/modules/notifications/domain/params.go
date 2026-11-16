@@ -47,6 +47,10 @@ type fields struct {
 	Version      *int       `json:"version,omitempty"`
 	SenderName   *string    `json:"senderName,omitempty"`
 	Excerpt      *string    `json:"excerpt,omitempty"`
+	Flagged      *int       `json:"flagged,omitempty"`
+	// uncounted says that ClassNames are not Count's classes, as for the
+	// weekly summary, whose Count is papers.
+	uncounted bool
 }
 
 // Encode returns p as the object the store keeps and the reader is sent. It
@@ -66,8 +70,15 @@ func (f fields) valid() bool {
 	return within(f.Title, maxTitle) && within(f.StudentName, maxName) && within(f.ClassName, maxName) &&
 		within(f.TeacherName, maxName) && decided(f.Decision) &&
 		counted(f.Count) && counted(f.ToGrade) && counted(f.FocusLost) && counted(f.NotSubmitted) &&
-		counted(f.Used) && counted(f.Allowance) && counted(f.Credits) &&
-		named(f.ClassNames, f.Count) && (f.ClosesAt == nil || !f.ClosesAt.IsZero()) && f.sharing()
+		counted(f.Used) && counted(f.Allowance) && counted(f.Credits) && counted(f.Flagged) &&
+		named(f.ClassNames, f.classes()) && (f.ClosesAt == nil || !f.ClosesAt.IsZero()) && f.sharing()
+}
+
+func (f fields) classes() *int {
+	if f.uncounted {
+		return nil
+	}
+	return f.Count
 }
 
 func (f fields) sharing() bool {
@@ -380,4 +391,21 @@ func (TeacherMessageNotice) Kind() Kind { return MessageFromTeacher }
 
 func (p TeacherMessageNotice) fields() fields {
 	return fields{SenderName: &p.SenderName, Count: &p.Count, Excerpt: &p.Excerpt, ClassName: p.ClassName}
+}
+
+// Weekly is SummaryWeekly's params: last week's papers handed in on the
+// teacher's classes, how many answers wait for a mark, how many attempts were
+// flagged, and the names of at least one and at most five of the classes.
+// T-R7.14's scheduler writes it.
+type Weekly struct {
+	Count      int
+	ToGrade    int
+	Flagged    int
+	ClassNames []string
+}
+
+func (Weekly) Kind() Kind { return SummaryWeekly }
+
+func (p Weekly) fields() fields {
+	return fields{Count: &p.Count, ToGrade: &p.ToGrade, Flagged: &p.Flagged, ClassNames: &p.ClassNames, uncounted: true}
 }

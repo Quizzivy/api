@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -496,5 +498,103 @@ func TestTheTieFileDeletesTheAnonymisedAccountsTiesAndRollsBack(t *testing.T) {
 	}
 	if err := goose.UpTo(conn, dir, tieFile); err != nil {
 		t.Fatalf("second up: %v", err)
+	}
+}
+
+// TestTheWidenedSwitchesTakeTheWeeklySummaryAndRollBack runs 00170, T-R7.13's
+// widen_notification_preference_events, over saved switches. Up admits
+// summary.weekly beside 00162's message.received, which is the plan's
+// seven-key list. Its Down deletes the summary.weekly rows and keeps the
+// message.received ones under 00162's six keys; 00162's own Down then deletes
+// those and restores R4's five, so the two Downs together are the plan's one.
+func TestTheWidenedSwitchesTakeTheWeeklySummaryAndRollBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, widened, beforeSixth int64 = 169, 170, 161
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, student string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, student = f.adminID, f.studentID
+		mustExec(t, tx, `INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES
+			($1, 'attempt.flagged', true, false), ($2, 'message.received', false, false)`, teacher, student)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	weekly := func() error {
+		_, err := conn.Exec(`INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES ($1, 'summary.weekly', false, true)`, teacher)
+		return err
+	}
+	if err := weekly(); !db.IsCheckViolation(err, "notification_preferences_event_check") {
+		t.Fatalf("before 00170 summary.weekly is %v, want the check to refuse it", err)
+	}
+	if err := goose.UpTo(conn, dir, widened); err != nil {
+		t.Fatalf("up over saved switches: %v", err)
+	}
+	if err := weekly(); err != nil {
+		t.Fatalf("after 00170 summary.weekly is refused: %v", err)
+	}
+	var definition string
+	if err := conn.QueryRow(`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'notification_preferences_event_check'`).Scan(&definition); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "summary.weekly"} {
+		if !strings.Contains(definition, "'"+event+"'") {
+			t.Errorf("the widened check %s lacks %s", definition, event)
+		}
+	}
+	if strings.Contains(definition, "NOT VALID") {
+		t.Errorf("the widened check was left unvalidated: %s", definition)
+	}
+	events := func() []string {
+		t.Helper()
+		rows, err := conn.Query(`SELECT event FROM app.notification_preferences WHERE user_id IN ($1, $2) ORDER BY event`, teacher, student)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, e)
+		}
+		return out
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if got := events(); !slices.Equal(got, []string{"attempt.flagged", "message.received"}) {
+		t.Errorf("after 00170's down the switches are %v, want the weekly summary's row gone and the others kept", got)
+	}
+	if err := weekly(); !db.IsCheckViolation(err, "notification_preferences_event_check") {
+		t.Errorf("after 00170's down summary.weekly is %v, want 00162's check to refuse it", err)
+	}
+	if err := goose.DownTo(conn, dir, beforeSixth); err != nil {
+		t.Fatalf("down past 00162: %v", err)
+	}
+	if got := events(); !slices.Equal(got, []string{"attempt.flagged"}) {
+		t.Errorf("after both downs the switches are %v, want R4's alone", got)
+	}
+	if err := goose.UpTo(conn, dir, widened); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	if err := weekly(); err != nil {
+		t.Errorf("after the second up summary.weekly is refused: %v", err)
 	}
 }

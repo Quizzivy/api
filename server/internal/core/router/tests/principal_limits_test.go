@@ -270,8 +270,8 @@ func TestThePrincipalAssertionActuallyFails(t *testing.T) {
 		t.Errorf("err = %v, want it to name the entry that is no operation of the contract", err)
 	}
 
-	err = httpx.AssertPrincipalRoutesGated(spec, "bearerAuth", keyed(theOpenTwelve...))
-	for _, open := range theOpenTwelve {
+	err = httpx.AssertPrincipalRoutesGated(spec, "bearerAuth", keyed(theOpenThirteen...))
+	for _, open := range theOpenThirteen {
 		if err == nil || !strings.Contains(err.Error(), open+": is an open operation") {
 			t.Errorf("err = %v, want it to name %q", err, open)
 		}

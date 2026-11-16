@@ -38,6 +38,8 @@ const (
 
 	MessageReceived    Kind = "message.received"
 	MessageFromTeacher Kind = "message.from_teacher"
+
+	SummaryWeekly Kind = "summary.weekly"
 )
 
 var governing = map[Kind]Event{
@@ -50,6 +52,7 @@ var governing = map[Kind]Event{
 	ResultReady:        EventResultReady,
 	MessageReceived:    EventMessageReceived,
 	MessageFromTeacher: EventMessageReceived,
+	SummaryWeekly:      EventSummaryWeekly,
 }
 
 var switchless = map[Kind]bool{

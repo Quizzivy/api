@@ -164,7 +164,7 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 	pool := newPool(t)
 	app := over(pool)
 	userID, other := newUser(t, pool, "student"), newUser(t, pool, "student")
-	off := domain.WithDefaults(nil)
+	off := domain.WithDefaults(nil, domain.Staff)
 	off[3].InApp = false
 	save(t, app, userID, off)
 
@@ -186,7 +186,7 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 		t.Fatalf("a switch that is on and a kind without a switch wrote %d rows, want 2", len(rows))
 	}
 
-	everything := domain.WithDefaults(nil)
+	everything := domain.WithDefaults(nil, domain.Staff)
 	for i := range everything {
 		everything[i].InApp = false
 	}
@@ -203,7 +203,7 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 		}
 	}
 
-	on := domain.WithDefaults(nil)
+	on := domain.WithDefaults(nil, domain.Staff)
 	save(t, app, userID, on)
 	notify(t, app, userID, "due_soon:1", domain.DueSoon{Title: "Đề giữa kỳ", ClosesAt: closes}, domain.Replace)
 	if rows := rowsOf(t, pool, userID); len(rows) != 4 {
