@@ -149,6 +149,9 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 		{"createQuestion forTestId", needsEdit, test, func(id string) (string, string, *payload) {
 			return http.MethodPost, "/teacher/questions?forTestId=" + url.QueryEscape(id), new(jsonPayload(t, plainQuestion("Câu đồng nghiệp làm cho đề")))
 		}},
+		{"duplicateQuestion forTestId", needsEdit, question, func(id string) (string, string, *payload) {
+			return http.MethodPost, "/teacher/questions/" + id + "/duplicate?forTestId=" + url.QueryEscape(test), nil
+		}},
 		{"createQuestionGroup in the test", needsEdit, "section", func(id string) (string, string, *payload) {
 			return http.MethodPost, "/teacher/question-groups", new(jsonPayload(t, map[string]any{
 				"bundle": plainGroupBundle(), "ownerSectionId": id, "expectedTestUpdatedAt": updatedAt(),

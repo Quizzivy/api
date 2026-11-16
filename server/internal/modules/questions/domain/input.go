@@ -63,15 +63,19 @@ type RubricCriterionInput struct {
 // scope.all, is set; anything else answers exactly as a missing id does. On a
 // create, OwnerID owns the new question instead of ActorID; a Word-import
 // commit sets it, and so does a question made for a test (forTestId), whose
-// owner it is. A group member still follows its group.
+// owner it is. A group member still follows its group. SourceMedia marks an
+// Input whose media are those of a question the actor has just read, as a
+// duplicate copies them: reading the source authorized them, so they bind as
+// any live asset does.
 type WriteRequest struct {
-	ID        string
-	Input     Input
-	ActorID   string
-	OwnerID   string
-	All       bool
-	IP        string
-	UserAgent string
+	ID          string
+	Input       Input
+	ActorID     string
+	OwnerID     string
+	All         bool
+	SourceMedia bool
+	IP          string
+	UserAgent   string
 }
 
 // Scope is the scope the request reads and binds under: ActorID's own, or
@@ -80,10 +84,19 @@ func (r WriteRequest) Scope() access.Scope {
 	return access.Scope{UserID: r.ActorID, All: r.All}
 }
 
+// MediaScope is the scope the request's media bind under: everyone's live
+// assets for SourceMedia, otherwise Scope.
+func (r WriteRequest) MediaScope() access.Scope {
+	if r.SourceMedia {
+		return access.Scope{All: true}
+	}
+	return r.Scope()
+}
+
 // WriteInput is a create or an update, depending on whether ID is set. An
 // update or delete of a bank question needs ActorID to own it unless All is
 // set; a group member's write is authorized by its group and ignores both.
-// OwnerID applies to a create only, as on WriteRequest.
+// OwnerID and SourceMedia apply as on WriteRequest.
 type WriteInput struct {
 	ID             string
 	Input          Input
@@ -91,6 +104,7 @@ type WriteInput struct {
 	ActorID        string
 	OwnerID        string
 	All            bool
+	SourceMedia    bool
 	Now            time.Time
 	IP             string
 	UserAgent      string

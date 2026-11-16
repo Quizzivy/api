@@ -12,9 +12,14 @@ import (
 // -- options, blanks, media and tags copied, ids fresh -- that no test holds
 // yet. It goes through the same write as a create, so it is validated and
 // audited like one. With ForTestID the copy is made in that test's owner's
-// bank, as Create makes one. Duplicating is the owner's: a caller who reads the
-// question through a share gets ErrOwnerOnly, and makes copies through the
-// test or set instead (T-R7.7).
+// bank, as Create makes one: the caller needs edit access to the test, and may
+// copy any question it can read, so a co-editor duplicates the owner's
+// question inside the shared builder. Without ForTestID the copy lands in the
+// caller's own bank, and that is the owner's: a caller who reads the question
+// through a share gets ErrOwnerOnly, and makes copies of their own through the
+// test or set instead (T-R7.7). The copy keeps the source's media, which
+// reading the source authorized, so a co-editor's copy of the owner's audio
+// question binds the owner's audio.
 type Duplicate struct {
 	Request   domain.WriteRequest
 	ForTestID string
@@ -29,16 +34,16 @@ func (s DuplicateHandler) Handle(ctx context.Context, cmd Duplicate) (domain.Que
 	if err != nil {
 		return domain.Question{}, err
 	}
-	if !source.Access.Owner() {
+	if cmd.ForTestID == "" && !source.Access.Owner() {
 		return domain.Question{}, domain.ErrOwnerOnly
-	}
-	cmd.Request.ID = ""
-	cmd.Request.Input = support.InputOf(source)
-	if err := cmd.Request.Input.RebindGaps(uuid.NewString); err != nil {
-		return domain.Question{}, err
 	}
 	req, err := s.ForTest(ctx, cmd.Request, cmd.ForTestID)
 	if err != nil {
+		return domain.Question{}, err
+	}
+	req.ID, req.SourceMedia = "", true
+	req.Input = support.InputOf(source)
+	if err := req.Input.RebindGaps(uuid.NewString); err != nil {
 		return domain.Question{}, err
 	}
 	return s.Write(ctx, req, false)

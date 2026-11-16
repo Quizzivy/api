@@ -33,7 +33,8 @@ func (w *bankWorld) revokeTest(t *testing.T, testID, grantee string) {
 // TestABankQuestionIsReadThroughTheTestThatHoldsIt holds the question-side
 // predicate to each level of a grant to the test whose draft holds it: B
 // reads A's question with the grant's access and A as its owner, may not
-// change it outside the test, delete it or duplicate it, and, with no grant
+// change it outside the test, delete it or duplicate it into B's own bank,
+// may duplicate it for the test (into A's bank) with Can edit, and, with no grant
 // or a revoked one, gets exactly what a missing question answers.
 func TestABankQuestionIsReadThroughTheTestThatHoldsIt(t *testing.T) {
 	for _, level := range []string{"none", "use", "edit", "revoked"} {
@@ -80,6 +81,24 @@ func TestABankQuestionIsReadThroughTheTestThatHoldsIt(t *testing.T) {
 			_, err = w.svc.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: request(w.b, false, question.ID, domain.Input{})})
 			if !errors.Is(err, wantOwner) {
 				t.Errorf("B duplicating A's question: %v, want %v", err, wantOwner)
+			}
+			// A copy into the shared test's own bank (forTestId) needs edit
+			// access to the test, not ownership of the question.
+			copied, err := w.svc.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: request(w.b, false, question.ID, domain.Input{}), ForTestID: test})
+			wantCopy := map[string]error{"none": domain.ErrNotFound, "revoked": domain.ErrNotFound, "use": domain.ErrTestReadOnly}[level]
+			switch {
+			case wantCopy == nil && err != nil:
+				t.Errorf("B duplicating A's question for the Can edit test: %v", err)
+			case wantCopy == nil:
+				var owner, author string
+				if err := w.tx.QueryRow(ctx, `SELECT owner_id::text, created_by::text FROM app.questions WHERE id = $1`, copied.ID).Scan(&owner, &author); err != nil {
+					t.Fatal(err)
+				}
+				if copied.ID == question.ID || owner != w.a || author != w.b || copied.Access != domain.AccessEdit || copied.Prompt != question.Prompt {
+					t.Errorf("B's copy of A's question for the test: id %s, owner %s, author %s, access %q; want a new question, A, B, edit", copied.ID, owner, author, copied.Access)
+				}
+			case !errors.Is(err, wantCopy):
+				t.Errorf("B duplicating A's question for the test at %s: %v, want %v", level, err, wantCopy)
 			}
 			if _, deleted, _ := w.owner(t, question.ID); deleted != "" {
 				t.Error("A's question was deleted by B")
@@ -161,5 +180,19 @@ func TestAQuestionMadeForASharedTestNeedsEditAccess(t *testing.T) {
 	}
 	if _, err := w.svc.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: request(w.b, false, own.ID, domain.Input{}), ForTestID: used}); !errors.Is(err, domain.ErrTestReadOnly) {
 		t.Errorf("B's copy for the Can use test: %v, want ErrTestReadOnly", err)
+	}
+
+	// A's question with A's image, in the draft B may edit: B's copy of it for
+	// that test keeps the image, which reading the question authorized.
+	image := w.image(t, w.a)
+	pictured := w.create(t, w.a, "Câu có hình của A", &image)
+	shown := w.draftUsing(t, w.a, pictured.ID)
+	w.grantTest(t, shown, w.b, "edit")
+	copiedPicture, err := w.svc.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: request(w.b, false, pictured.ID, domain.Input{}), ForTestID: shown})
+	if err != nil {
+		t.Fatalf("B's copy of A's pictured question for the Can edit test: %v", err)
+	}
+	if o, _, _ := w.owner(t, copiedPicture.ID); o != w.a || copiedPicture.MediaAssetID == nil || *copiedPicture.MediaAssetID != image {
+		t.Errorf("B's copy of the pictured question: owner %s, media %v; want A and A's image", o, copiedPicture.MediaAssetID)
 	}
 }

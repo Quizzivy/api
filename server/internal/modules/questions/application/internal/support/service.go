@@ -39,7 +39,7 @@ func (s *Service) ResolveMediaKind(ctx context.Context, scope access.Scope, asse
 }
 
 func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update bool) (domain.Question, error) {
-	kind, err := s.ResolveMediaKind(ctx, req.Scope(), req.Input.MediaAssetID)
+	kind, err := s.ResolveMediaKind(ctx, req.MediaScope(), req.Input.MediaAssetID)
 	if err != nil {
 		return domain.Question{}, err
 	}
@@ -54,6 +54,7 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 		ActorID:        req.ActorID,
 		OwnerID:        req.OwnerID,
 		All:            req.All,
+		SourceMedia:    req.SourceMedia,
 		Now:            s.Now(),
 		IP:             req.IP,
 		UserAgent:      req.UserAgent,
