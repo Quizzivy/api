@@ -26,4 +26,7 @@ type Repository interface {
 	DiffPapers(ctx context.Context, req DiffRequest) (DiffPapers, error)
 	GroupContexts(ctx context.Context, versionID string) ([]PreviewGroup, error)
 	Publish(ctx context.Context, req PublishRequest, now time.Time, validate func(DraftContent) error) (Version, error)
+	// EditQuestion edits a standalone question of the test's draft in the
+	// test's context, forking it when the copy-on-write rule says so.
+	EditQuestion(ctx context.Context, in QuestionEdit) (QuestionEdited, error)
 }

@@ -10,7 +10,11 @@ var (
 	ErrNotFound         = errors.New("tests: not found")
 	ErrStaleWrite       = errors.New("tests: edited elsewhere since the version read")
 	ErrUnknownQuestion  = errors.New("tests: outline references a question that does not exist")
-	ErrForbidden        = errors.New("tests: the caller lacks the permission this target needs")
+	// ErrQuestionNotInDraft is an edit in a test's context (editTestQuestion)
+	// of a question that is not a standalone question of the test's draft:
+	// another teacher's, a group member, a deleted or a missing one, alike.
+	ErrQuestionNotInDraft = errors.New("tests: the question is not in the test's draft")
+	ErrForbidden          = errors.New("tests: the caller lacks the permission this target needs")
 )
 
 // ErrNotPublished is returned when a test has no version to render.

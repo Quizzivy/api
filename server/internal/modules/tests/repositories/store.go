@@ -42,6 +42,7 @@ type Postgres struct {
 	questions      QuestionLocks
 	media          MediaLocks
 	groupQuestions GroupQuestionStore
+	writes         QuestionWrites
 }
 
 func NewPostgres(dbx db.Context, questions QuestionLocks, media MediaLocks) *Postgres {

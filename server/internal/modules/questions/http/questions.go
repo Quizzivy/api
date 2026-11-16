@@ -173,7 +173,7 @@ func (h Questions) CreateQuestion(ctx context.Context, request openapi.CreateQue
 	if errors.Is(err, domain.ErrTestReadOnly) {
 		return openapi.CreateQuestion403JSONResponse(testReadOnly(ctx)), nil
 	}
-	if resp, handled := questionWriteError(ctx, err); handled {
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -207,7 +207,7 @@ func (h Questions) DuplicateQuestion(ctx context.Context, request openapi.Duplic
 		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
 	}
-	if resp, handled := questionWriteError(ctx, err); handled {
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.DuplicateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -254,7 +254,7 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
 	}
-	if resp, handled := questionWriteError(ctx, err); handled {
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.UpdateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -304,7 +304,10 @@ func (h Questions) DeleteQuestion(ctx context.Context, request openapi.DeleteQue
 	}
 }
 
-func questionWriteError(ctx context.Context, err error) (openapi.ErrorResponse, bool) {
+// QuestionWriteError is the 400 a question write's validation refusal answers,
+// and false for any other error: the bank's own writes and the tests module's
+// editTestQuestion answer them alike.
+func QuestionWriteError(ctx context.Context, err error) (openapi.ErrorResponse, bool) {
 	var invalid *domain.ValidationError
 	if errors.As(err, &invalid) {
 		return httpapi.Invalid(ctx, httpx.Text(ctx, "Dữ liệu câu hỏi không hợp lệ.", "The question data is not valid."), invalid), true
@@ -393,6 +396,14 @@ func ToQuestionInput(body openapi.QuestionInput) domain.Input {
 }
 
 func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openapi.AdminQuestion, error) {
+	return ToAPIQuestion(ctx, h.media, q)
+}
+
+// ToAPIQuestion is q as the contract's AdminQuestion, its attachment and the
+// media its prose shows signed through media (nil when object storage is
+// off): what a bank question's read and every write of one answer, the tests
+// module's editTestQuestion included.
+func ToAPIQuestion(ctx context.Context, media Media, q domain.Question) (openapi.AdminQuestion, error) {
 	points, err := strconv.ParseFloat(q.Points, 64)
 	if err != nil {
 		return openapi.AdminQuestion{}, err
@@ -457,9 +468,9 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		}
 	}
 	out.Blanks = &blanks
-	if q.MediaAssetID != nil && h.media != nil {
-		if asset, err := h.media.Get(ctx, *q.MediaAssetID); err == nil {
-			url, err := h.media.SignedURL(ctx, asset)
+	if q.MediaAssetID != nil && media != nil {
+		if asset, err := media.Get(ctx, *q.MediaAssetID); err == nil {
+			url, err := media.SignedURL(ctx, asset)
 			if err != nil {
 				return openapi.AdminQuestion{}, err
 			}
@@ -467,7 +478,7 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 			out.Media = &api
 		}
 	}
-	return out, h.contentAssets(ctx, q, &out)
+	return out, contentAssets(ctx, media, q, &out)
 }
 
 // readerAccess sets the reader's access and the question's owner on out, where
@@ -484,9 +495,9 @@ func readerAccess(out *openapi.AdminQuestion, q domain.Question) {
 // contentAssets signs the media a question's prompt and explanation show
 // (DG-109) for the editor; a file that cannot be loaded is left out, as the
 // attachment is.
-func (h Questions) contentAssets(ctx context.Context, q domain.Question, out *openapi.AdminQuestion) error {
+func contentAssets(ctx context.Context, media Media, q domain.Question, out *openapi.AdminQuestion) error {
 	shown, err := content.QuestionMedia(q.PromptContent, q.ExplanationContent)
-	if err != nil || len(shown) == 0 || h.media == nil {
+	if err != nil || len(shown) == 0 || media == nil {
 		return nil
 	}
 	seen := make(map[string]bool, len(shown))
@@ -496,11 +507,11 @@ func (h Questions) contentAssets(ctx context.Context, q domain.Question, out *op
 			continue
 		}
 		seen[ref.ID] = true
-		asset, err := h.media.Get(ctx, ref.ID)
+		asset, err := media.Get(ctx, ref.ID)
 		if err != nil {
 			continue
 		}
-		url, err := h.media.SignedURL(ctx, asset)
+		url, err := media.SignedURL(ctx, asset)
 		if err != nil {
 			return err
 		}

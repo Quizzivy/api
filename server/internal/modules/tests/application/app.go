@@ -35,6 +35,7 @@ type Commands struct {
 	Duplicate              cqrs.CommandHandler[command.Duplicate, domain.Test]
 	Publish                cqrs.CommandHandler[command.Publish, domain.Version]
 	Update                 cqrs.CommandHandler[command.Update, domain.Test]
+	EditQuestion           cqrs.CommandHandler[command.EditQuestion, domain.QuestionEdited]
 }
 
 type Queries struct {
@@ -71,6 +72,7 @@ func New(repo domain.Repository) *Application {
 			Duplicate:              command.DuplicateHandler{Service: service},
 			Publish:                command.PublishHandler{Publisher: publisher},
 			Update:                 command.UpdateHandler{Service: service},
+			EditQuestion:           command.EditQuestionHandler{Service: service},
 		},
 		Queries: Queries{
 			Group:         query.GroupHandler{Groups: groups},

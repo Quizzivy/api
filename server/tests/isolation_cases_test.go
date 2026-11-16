@@ -264,7 +264,6 @@ const (
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher  = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
-	editPending = "T-R7.6: copy-on-write"
 	copyPending = "T-R7.7: make a copy"
 
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
@@ -402,7 +401,9 @@ func isolationCases() map[string]isoCase {
 		"listSharedWithMe":   {},
 		"removeSharedWithMe": {as: map[string]string{"path shareId": "shared-with-me"}, fresh: freshSharedWithMe},
 
-		"editTestQuestion":     {pending: editPending, body: func(_ *iso, own *party, _ string) any { return choiceInput(own) }},
+		"editTestQuestion": {body: func(_ *iso, own *party, slot string) any {
+			return withProseMedia(choiceInput(own), own, slot)
+		}},
 		"copyTest":             {pending: copyPending},
 		"copyQuestionsForTest": {pending: copyPending, body: fixed(map[string]any{"questionIds": []any{""}})},
 
