@@ -109,8 +109,9 @@ type outcome struct {
 // out. A row of a Prepared template is handed to its Preparer before it is
 // rendered: one the Preparer drops is closed as failed with SkippedCode and
 // costs neither a send nor the pause between sends, and one whose Preparer
-// fails is retried as a transient failure. When ctx ends, no further row is
-// sent and what was sent is still recorded.
+// fails is retried as a transient failure. Of the due rows, R5's own mail is
+// claimed before the notification emails, each in the order it fell due.
+// When ctx ends, no further row is sent and what was sent is still recorded.
 func (d *Dispatcher) Dispatch(ctx context.Context) (Batch, error) {
 	org, err := d.Org(ctx)
 	if err != nil {
@@ -209,6 +210,18 @@ func release(ctx context.Context, tx pgx.Tx, now time.Time, templates []string) 
 	return int(tag.RowsAffected()), nil
 }
 
+// noticeNames are the notification emails' templates (T-R7.13), which
+// sendDue claims after R5's own account and export mail: a busy day of
+// notifications spends the daily budget only once a set-password or reset
+// link that is due has gone.
+func noticeNames() []string {
+	out := make([]string, len(noticeTemplates))
+	for i, t := range noticeTemplates {
+		out[i] = string(t)
+	}
+	return out
+}
+
 func (d *Dispatcher) sendDue(ctx context.Context, tx pgx.Tx, now time.Time, limit int, org string, batch *Batch) error {
 	rows, err := db.QueryMany(ctx, tx, `
 		SELECT o.id::text, o.to_address, o.to_user_id::text, o.template, o.locale, o.params, o.secret_ciphertext, o.attempts,
@@ -216,9 +229,9 @@ func (d *Dispatcher) sendDue(ctx context.Context, tx pgx.Tx, now time.Time, limi
 		       o.created_at
 		  FROM app.email_outbox o
 		 WHERE o.sent_at IS NULL AND o.failed_at IS NULL AND o.deliver_after <= $1 AND o.template = ANY($3::text[])
-		 ORDER BY o.deliver_after, o.id
+		 ORDER BY o.template = ANY($4::text[]), o.deliver_after, o.id
 		 LIMIT $2
-		   FOR UPDATE OF o SKIP LOCKED`, []any{now, limit, d.Prepare.sendable()}, func(r pgx.Rows) (pending, error) {
+		   FOR UPDATE OF o SKIP LOCKED`, []any{now, limit, d.Prepare.sendable(), noticeNames()}, func(r pgx.Rows) (pending, error) {
 		var p pending
 		err := r.Scan(&p.id, &p.to, &p.toUserID, &p.template, &p.locale, &p.params, &p.secret, &p.attempts, &p.staff, &p.createdAt)
 		return p, err

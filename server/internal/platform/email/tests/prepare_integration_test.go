@@ -178,3 +178,26 @@ func TestTheDailyBudgetStillDefersPreparedRowsAndPrepareDropsThoseStaleByMorning
 		t.Errorf("the held row that went stale overnight is %+v, want skipped", r)
 	}
 }
+
+// TestAccountMailIsClaimedBeforeTheNotificationEmailsThatFellDueFirst fails
+// when the dispatcher claims due rows in the order they fell due alone: a
+// notification email written first would then spend the day's last send and
+// leave a set-password invite waiting until midnight, past which its link may
+// expire.
+func TestAccountMailIsClaimedBeforeTheNotificationEmailsThatFellDueFirst(t *testing.T) {
+	w := newWorld(t, day(25))
+	w.disp.DailyLimit = 1
+	w.disp.Prepare = email.Preparers{email.AttemptFlagged: &preparing{send: true}}
+	user := newUser(t, w.pool, "vi")
+	notice := w.enqueue(t, flagged(addr(t, "notice"), user, someAttempt))
+	account := w.enqueue(t, invite(addr(t, "invite")))
+	if _, err := w.disp.Dispatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r := read(t, w.pool, account); r.sentAt == nil {
+		t.Errorf("the invite is %+v, want it sent with the day's one send", r)
+	}
+	if r := read(t, w.pool, notice); r.sentAt != nil {
+		t.Errorf("the notification email written first is %+v, want it held behind the invite", r)
+	}
+}
