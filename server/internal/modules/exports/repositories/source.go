@@ -179,6 +179,14 @@ var queries = map[string]string{
 		       ` + at("l.updated_at") + ` AS updated_at
 		  FROM app.leads l
 		 ORDER BY l.id`,
+	domain.MessagesFile: `
+		SELECT v.id::text AS id, v.kind AS kind, v.class_id::text AS class_id, v.staff_id::text AS staff_id,
+		       v.student_id::text AS student_id, count(m.id)::text AS message_count,
+		       ` + at("min(m.created_at)") + ` AS first_message_at, ` + at("max(m.created_at)") + ` AS last_message_at
+		  FROM app.conversations v
+		  LEFT JOIN app.messages m ON m.conversation_id = v.id
+		 GROUP BY v.id
+		 ORDER BY v.id`,
 	domain.AnswersFile: `
 		SELECT x.attempt_id::text AS attempt_id, x.question_id::text AS question_id, x.payload::text AS answer,
 		       (x.payload = '{"removed": true}'::jsonb)::text AS removed,
