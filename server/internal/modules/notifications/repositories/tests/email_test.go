@@ -316,6 +316,9 @@ func TestThePreparersDropWhatIsNoLongerTrue(t *testing.T) {
 	if err != nil || !ok || got.Access != email.SharedEdit || got.Message == nil || *got.Message != "Cô xem giúp em" || got.SharerName == "" {
 		t.Errorf("a standing grant reads %+v (%v %v)", got, ok, err)
 	}
+	if _, ok, _ := store.Shared(ctx, w.user("teacher"), share, w.now); ok {
+		t.Error("a teacher the content was not shared with is sent the share email")
+	}
 	w.exec(`DELETE FROM app.content_shares WHERE grantee_id = $1`, grantee)
 	if _, ok, _ := store.Shared(ctx, grantee, share, w.now); ok {
 		t.Error("a revoked grant is still sent as shared")
