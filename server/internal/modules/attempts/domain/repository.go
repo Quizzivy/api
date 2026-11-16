@@ -62,7 +62,11 @@ type ReviewRepository interface {
 }
 
 // TimelineRepository reads the integrity events an attempt recorded, on an
-// assignment the scope reaches.
+// assignment the scope reaches, and the flagged attempts of a student there.
 type TimelineRepository interface {
 	Timeline(ctx context.Context, scope access.Scope, attemptID string) (Timeline, error)
+	// Flagged returns studentID's flagged attempts on the assignments scope
+	// reaches whose moment (FlaggedAttempt.At) is since or later, oldest
+	// first.
+	Flagged(ctx context.Context, scope access.Scope, studentID string, since time.Time) ([]FlaggedAttempt, error)
 }
