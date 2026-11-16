@@ -43,4 +43,6 @@ type Modules struct {
 	Leads         leadshttp.Leads
 	Sharing       sharinghttp.Sharing
 	Messaging     messaginghttp.Staff
+	// StudentMessaging is the student side of messaging, /app/messages.
+	StudentMessaging messaginghttp.Student
 }

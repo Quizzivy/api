@@ -9,18 +9,22 @@ import (
 )
 
 // StaffDirectThread is one page of ActorID's direct thread with StudentID,
-// empty until the first post. A student who is no messaging peer of the
-// caller answers domain.ErrNotFound, an admin's thread included.
+// empty until the first post, and the student's flagged attempts on the
+// assignments Scope reaches. A student who is no messaging peer of the caller
+// answers domain.ErrNotFound, an admin's thread included.
 type StaffDirectThread struct {
 	ActorID   string
+	Scope     access.Scope
 	StudentID string
 	Cursor    domain.Cursor
 }
 
-// DirectThread is the student a direct thread is with and one page of it.
+// DirectThread is the student a direct thread is with, one page of it, and
+// the context events shown beside its messages.
 type DirectThread struct {
-	Peer domain.Peer
-	Page domain.Page
+	Peer   domain.Peer
+	Page   domain.Page
+	Events []domain.ContextEvent
 }
 
 type StaffDirectThreadHandler struct {
@@ -44,11 +48,15 @@ func (s StaffDirectThreadHandler) Handle(ctx context.Context, q StaffDirectThrea
 	if err != nil {
 		return DirectThread{}, err
 	}
+	events, err := contextEvents(ctx, s.Service, q.Scope, q.ActorID, q.StudentID)
+	if err != nil {
+		return DirectThread{}, err
+	}
 	signed := map[string]*string{}
 	peer.AvatarURL = s.Sign(ctx, peer.AvatarKey, signed)
 	peer.CanPost = s.Rules.CanPost(facts)
 	s.SignMessages(ctx, q.ActorID, page.Messages, signed)
-	return DirectThread{Peer: peer, Page: page}, nil
+	return DirectThread{Peer: peer, Page: page, Events: events}, nil
 }
 
 // StaffClassThread is one page of the channel of ClassID, for a reader whose

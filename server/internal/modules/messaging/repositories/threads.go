@@ -43,15 +43,12 @@ func studentMatches(param int) string {
 		contains(`u.full_name`, param), contains(`coalesce(u.display_name, '')`, param), taughtNow, contains(`k.name`, param))
 }
 
-// unread counts the messages of the conversation the SQL expression
-// conversation names that are past the pointer of the reader in $1, not
-// counting the reader's own.
-func unread(conversation string) string {
-	return fmt.Sprintf(`(SELECT count(*)::int FROM app.messages um
-	  WHERE um.conversation_id = %[1]s AND um.sender_id <> $1::uuid
+// unread counts the messages of the conversation v that are past the pointer
+// of the reader in $1, not counting the reader's own.
+const unread = `(SELECT count(*)::int FROM app.messages um
+	  WHERE um.conversation_id = v.id AND um.sender_id <> $1::uuid
 	    AND um.id > coalesce((SELECT r.last_read_message_id FROM app.conversation_reads r
-	                           WHERE r.conversation_id = %[1]s AND r.user_id = $1::uuid), '00000000-0000-0000-0000-000000000000'::uuid))`, conversation)
-}
+	                           WHERE r.conversation_id = v.id AND r.user_id = $1::uuid), '00000000-0000-0000-0000-000000000000'::uuid))`
 
 const newest = `LEFT JOIN LATERAL (
 	    SELECT lm.body, la.original_filename, lm.sender_id = $1::uuid AS mine
@@ -62,7 +59,7 @@ func channelRows() string {
 	return `
 	SELECT 'class', c.id::text, NULL::text, c.name, NULL::text, '{}'::text[], ` + activeStudents("c.id") + `,
 	       false, false, v.last_message_at, last.body, last.original_filename, coalesce(last.mine, false),
-	       CASE WHEN v.id IS NULL THEN 0 ELSE ` + unread("v.id") + ` END
+	       CASE WHEN v.id IS NULL THEN 0 ELSE ` + unread + ` END
 	  FROM app.classes c
 	  LEFT JOIN app.conversations v ON v.kind = 'class' AND v.class_id = c.id
 	  ` + newest + `
@@ -74,7 +71,7 @@ func directRows() string {
 	return `
 	SELECT 'direct', NULL::text, u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + classNames + `, NULL::int,
 	       ` + former + `, u.disabled_at IS NOT NULL, v.last_message_at, last.body, last.original_filename, coalesce(last.mine, false),
-	       ` + unread("v.id") + `
+	       ` + unread + `
 	  FROM app.conversations v
 	  JOIN app.users u ON u.id = v.student_id
 	  ` + newest + `

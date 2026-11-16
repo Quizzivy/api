@@ -274,17 +274,17 @@ const (
 	outsideAnswer   = "an answer to a question outside the attempt's paper is dropped; the cross-reference scan proves no row names it"
 	ownOnly         = "marks only the caller's own notifications; any other id is skipped"
 
-	// The messaging operations answer 501 until their tasks build them. A
+	// The attachment operations answer 501 until T-R7.11 builds them. A
 	// pending case only needs a request the contract accepts, so as points the
-	// kinds the world does not hold yet (attachment, a student's class) at ids
-	// it does hold; each task replaces its cases.
-	studentMessagingPending = "T-R7.10b: the student side of messaging"
-	attachmentsPending      = "T-R7.11: message attachments"
+	// kind the world does not hold yet (attachment) at ids it does hold; the
+	// task replaces its cases.
+	attachmentsPending = "T-R7.11: message attachments"
 
 	noAttachmentYet = "no file can be uploaded before T-R7.11, so every attachmentId, the caller's own media included, answers as a missing one; T-R7.11 adds the world's attachment and removes this entry"
 	clientMade      = "a clientId is made by the client for its own message and names no resource; a repeat answers the message it made, and another sender's clientId is another key (messages_sender_client_key)"
 	inThread        = "a read pointer names a message checked against the thread, so another thread's message answers 422 as a missing one does; the DM case below proves it for another teacher's thread"
 	cursorID        = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
+	teacherChecked  = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
@@ -305,6 +305,11 @@ func isolationCases() map[string]isoCase {
 	posted := map[string]string{"body /clientId": clientMade}
 	paged := map[string]string{"query before": cursorID, "query after": cursorID}
 	pointed := map[string]string{"body /lastReadMessageId": inThread}
+	with := func(excuses map[string]string, slot, reason string) map[string]string {
+		out := maps.Clone(excuses)
+		out[slot] = reason
+		return out
+	}
 	messageRead := func(*iso, *party, string) any {
 		return map[string]any{"lastReadMessageId": uuid.NewString()}
 	}
@@ -606,12 +611,12 @@ func isolationCases() map[string]isoCase {
 		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
 		"postClassAnnouncement":          {as: map[string]string{"body /attachmentId": "media"}, blind: map[string]string{"body /attachmentId": noAttachmentYet}, excuse: posted, body: messagePost},
 		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
-		"listStudentThreads":             {pending: studentMessagingPending, student: true},
-		"getStudentDirectThread":         {pending: studentMessagingPending, student: true},
-		"postStudentDirectMessage":       {pending: studentMessagingPending, student: true, body: messagePost},
-		"markStudentDirectThreadRead":    {pending: studentMessagingPending, student: true, body: messageRead},
-		"getStudentClassThread":          {pending: studentMessagingPending, student: true, as: map[string]string{"path classId": "assignment"}},
-		"markStudentClassThreadRead":     {pending: studentMessagingPending, student: true, as: map[string]string{"path classId": "assignment"}, body: messageRead},
+		"listStudentThreads":             {student: true},
+		"getStudentDirectThread":         {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
+		"postStudentDirectMessage":       {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
+		"markStudentDirectThreadRead":    {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
+		"getStudentClassThread":          {student: true, omit: []string{"after"}, excuse: paged},
+		"markStudentClassThreadRead":     {student: true, excuse: pointed, body: messageRead},
 		"uploadMessageAttachment":        {pending: attachmentsPending, format: "png"},
 		"getStaffMessageAttachmentUrl":   {pending: attachmentsPending, as: map[string]string{"path id": "media"}},
 		"getStudentMessageAttachmentUrl": {pending: attachmentsPending, student: true, as: map[string]string{"path id": "media"}},

@@ -121,6 +121,7 @@ func PrincipalRateLimits() *ratelimit.Registry {
 	perActor("POST /teacher/shares", ratelimit.PerHour(30))
 	reg.Share("POST /teacher/messages/classes/{classId}", reg.AddKeyed("POST /teacher/messages/students/{studentId}").
 		WithKey("perActor", ratelimit.PrincipalKey, capacity, ratelimit.PerMinute(30), ratelimit.PerDay(500)))
+	perActor("POST /app/messages/teachers/{teacherId}", ratelimit.PerMinute(10), ratelimit.PerDay(200))
 	for _, pattern := range aiSuggestions {
 		perActor(pattern, ratelimit.PerMinute(10), ratelimit.PerHour(100))
 	}

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"quizzivy/internal/shared/access"
 )
@@ -46,4 +47,31 @@ type Repository interface {
 	MarkDirectRead(ctx context.Context, staffID, studentID string, mark ReadMark) error
 	// MarkChannelRead is MarkDirectRead for the channel of classID.
 	MarkChannelRead(ctx context.Context, classID string, mark ReadMark) error
+	// FirstMessageAt is when the first message of staffID's thread with
+	// studentID was written, nil while the thread has none.
+	FirstMessageAt(ctx context.Context, staffID, studentID string) (*time.Time, error)
+
+	// StudentFacts reads what decides studentID's direct thread with
+	// teacherID.
+	StudentFacts(ctx context.Context, studentID, teacherID string) (StudentFacts, error)
+	// Teacher reads teacherID as the header of studentID's thread with them
+	// shows the teacher. The caller has checked ReadAsStudent; CanPost is
+	// left false.
+	Teacher(ctx context.Context, studentID, teacherID string) (Teacher, error)
+	// StudentChannel reads the class classID for its member studentID,
+	// archived or not, or ErrNotFound.
+	StudentChannel(ctx context.Context, studentID, classID string) (StudentChannel, error)
+	// StudentThreads returns studentID's Messages: their direct threads and
+	// the channels of the classes they are in that are not archived and have
+	// a post, newest activity first.
+	StudentThreads(ctx context.Context, studentID string) ([]StudentThread, error)
+	// StudentChannelPage reads one page of the channel of classID with no
+	// SeenBy.
+	StudentChannelPage(ctx context.Context, classID string, cursor Cursor) (Page, error)
+	// PostAsStudent writes post to studentID's thread with teacherID in one
+	// transaction, as PostDirect does, judging the facts it reads there by
+	// Eligibility's student rules. A first post holds the student's
+	// memberships of the teacher's classes FOR SHARE, so a removal waits for
+	// it.
+	PostAsStudent(ctx context.Context, studentID, teacherID string, post Post) (Posted, error)
 }

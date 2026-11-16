@@ -145,7 +145,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	sharingApp, sharingTransport := sharing(dbx, sharingModules{
 		tests: testsApp, questions: questionsApp, identity: identityApp, notifier: notificationsApp.Commands.Notify,
 	}, logger)
-	_, messagingTransport := messaging(dbx, identityApp)
+	_, messagingTransport, studentMessagingTransport := messaging(dbx, identityApp, attemptsApp)
 	auditApp, auditTransport := audit(dbx, identityApp, logger)
 	dashboardTransport, err := dashboard(cfg, dbx, dashboardModules{
 		notifications: notificationsApp, identity: identityApp, organization: organizationApp, audit: auditApp, ai: aiApp, sharing: sharingApp,
@@ -176,6 +176,8 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 			Leads:         leads(dbx, mail.Outbox, logger),
 			Sharing:       sharingTransport,
 			Messaging:     messagingTransport,
+
+			StudentMessaging: studentMessagingTransport,
 		},
 		Principals:    principals,
 		Maintenance:   adapters.MaintenanceGate{Current: availabilityApp.Queries.CurrentWindow},

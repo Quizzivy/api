@@ -1,6 +1,6 @@
 // Package command is the messaging context's writes: a staff member's direct
-// message, a class announcement, and a read pointer. None writes an audit row
-// (D17).
+// message, a class announcement, a student's message to a teacher, and the
+// read pointers. None writes an audit row (D17).
 package command
 
 import (

@@ -1,6 +1,7 @@
 // Package http is the messaging context's transport. The staff side lives
 // under /teacher/messages: the Messages list, a direct thread addressed by its
-// student, and a class's announcement channel addressed by its class.
+// student, and a class's announcement channel addressed by its class. The
+// student side lives under /app/messages (student.go).
 package http
 
 import (
@@ -146,6 +147,17 @@ func threadOf(t domain.StaffThread) openapi.StaffThread {
 	return out
 }
 
+func contextEventsOf(events []domain.ContextEvent) []openapi.ContextEvent {
+	out := make([]openapi.ContextEvent, len(events))
+	for i, e := range events {
+		out[i] = openapi.ContextEvent{
+			AttemptId: httpapi.ParseUUID(e.AttemptID), AssignmentId: httpapi.ParseUUID(e.AssignmentID),
+			Title: e.Title, FocusLost: e.FocusLost, At: e.At.UTC(),
+		}
+	}
+	return out
+}
+
 func mayWriteClasses(ctx context.Context) bool {
 	principal, _ := httpx.PrincipalFromContext(ctx)
 	return principal.Access.Permissions.Has(access.TeachingClassesWrite)
@@ -186,7 +198,7 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 	}
 	p := request.Params
 	thread, err := h.app.Queries.StaffDirectThread.Handle(ctx, query.StaffDirectThread{
-		ActorID: who.ID, StudentID: request.StudentId.String(), Cursor: cursorOf(p.Before, p.After, p.Limit),
+		ActorID: who.ID, Scope: who.Scope, StudentID: request.StudentId.String(), Cursor: cursorOf(p.Before, p.After, p.Limit),
 	})
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
@@ -206,9 +218,8 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 			Id: httpapi.ParseUUID(peer.ID), Name: peer.Name, AvatarUrl: peer.AvatarURL, Classes: classes,
 			Former: peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
 		},
-		Messages: messagesOf(thread.Page),
-		// T-R7.10b computes the student's flagged attempts.
-		ContextEvents: []openapi.ContextEvent{},
+		Messages:      messagesOf(thread.Page),
+		ContextEvents: contextEventsOf(thread.Events),
 		NextBefore:    uuidOf(thread.Page.NextBefore),
 		LatestId:      uuidOf(thread.Page.LatestID),
 	}, nil

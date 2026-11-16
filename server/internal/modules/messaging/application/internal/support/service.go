@@ -8,11 +8,13 @@ import (
 )
 
 // Service carries what the handlers share: the conversations, the rules that
-// decide who reads and posts, and the photo signer.
+// decide who reads and posts, the photo signer, and the flagged attempts a
+// staff member's direct thread shows.
 type Service struct {
 	Repo    domain.Repository
 	Rules   domain.Eligibility
 	Avatars ports.Avatars
+	Events  ports.ContextEvents
 }
 
 // Sign returns the signed URL of the photo key names, once per key in signed,
@@ -53,4 +55,28 @@ func (s *Service) Direct(ctx context.Context, staffID, studentID string) (domain
 		return domain.DirectFacts{}, err
 	}
 	return facts, s.Rules.ReadDirect(facts)
+}
+
+// SignStudentMessages fills each student message's sender photo, and Mine
+// for reader.
+func (s *Service) SignStudentMessages(ctx context.Context, readerID string, messages []domain.StudentMessage, signed map[string]*string) {
+	for i := range messages {
+		s.SignStudentMessage(ctx, readerID, &messages[i], signed)
+	}
+}
+
+// SignStudentMessage fills m's sender photo, and Mine for reader.
+func (s *Service) SignStudentMessage(ctx context.Context, readerID string, m *domain.StudentMessage, signed map[string]*string) {
+	m.Sender.AvatarURL = s.Sign(ctx, m.Sender.AvatarKey, signed)
+	m.Mine = m.Sender.ID == readerID
+}
+
+// AsStudent resolves teacherID as a teacher studentID may name, by the
+// rules' ReadAsStudent: the facts, or domain.ErrNotFound.
+func (s *Service) AsStudent(ctx context.Context, studentID, teacherID string) (domain.StudentFacts, error) {
+	facts, err := s.Repo.StudentFacts(ctx, studentID, teacherID)
+	if err != nil {
+		return domain.StudentFacts{}, err
+	}
+	return facts, s.Rules.ReadAsStudent(facts)
 }

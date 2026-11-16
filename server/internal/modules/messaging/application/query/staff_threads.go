@@ -1,5 +1,6 @@
-// Package query is the messaging context's reads on the staff side: the
-// Messages list and one thread's page.
+// Package query is the messaging context's reads: the staff and the student
+// Messages lists, one thread's page on either side, and the context events a
+// staff member's direct thread shows.
 package query
 
 import (

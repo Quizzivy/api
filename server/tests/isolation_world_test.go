@@ -333,7 +333,12 @@ func (w *world) teacherWorld(name string) *party {
 		"version-question":  id(open["questions"].([]any)[0].(map[string]any)),
 		"version-recording": stimulus["recordings"].([]any)[0].(map[string]any)["id"].(string),
 		"media":             p.ids["media"],
+		"class":             p.ids["class"],
 	}}
+	// The student's Messages hold their teacher's thread and their class's
+	// announcement, so the walk compares a list that is not empty.
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/students/"+p.student.userID, map[string]any{"clientId": uuid.NewString(), "body": "Chào em " + name})
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/classes/"+p.ids["class"], map[string]any{"clientId": uuid.NewString(), "body": "Chào lớp " + name})
 	return p
 }
 
