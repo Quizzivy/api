@@ -34,8 +34,8 @@ type Repository interface {
 	Preferences(ctx context.Context, userID string) ([]Preference, error)
 	// SavePreferences stores prefs for userID and returns them as stored.
 	SavePreferences(ctx context.Context, userID string, prefs []Preference) ([]Preference, error)
-	// DeleteBefore deletes every notification first written before cutoff,
-	// and returns how many went.
+	// DeleteBefore deletes every notification created before cutoff (first
+	// written, or last renewed under Renew), and returns how many went.
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	// Due reads the notices userID has earned by the passing of time alone, as
 	// of now: the moments from DueLookback before now up to now, judged

@@ -137,7 +137,8 @@ func (p *Postgres) Unread(ctx context.Context, userID string, audience domain.Au
 	return unread, nil
 }
 
-// DeleteBefore deletes the notifications first written before cutoff. It is
+// DeleteBefore deletes the notifications created before cutoff: first
+// written, or last renewed, since Renew resets created_at. It is
 // idempotent, so a second run or a second machine removes nothing.
 func (p *Postgres) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	tag, err := p.Exec(ctx, `DELETE FROM app.notifications WHERE created_at < $1`, cutoff)

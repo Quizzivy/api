@@ -19,9 +19,10 @@ const (
 	// as zero.
 	Add
 	// Renew writes the notice in place of the stored row as a new
-	// notification: a new id, so it lists first, created now. Its count is
-	// added to the stored one while that row is unread, and starts again from
-	// the notice's once the row was read.
+	// notification: a new id, so it lists first, and created now, so
+	// domain.Retention counts from its latest write. Its count is added to the
+	// stored one while that row is unread, and starts again from the notice's
+	// once the row was read.
 	Renew
 )
 

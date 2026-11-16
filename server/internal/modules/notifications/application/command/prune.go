@@ -7,8 +7,8 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 )
 
-// Prune deletes every notification first written more than domain.Retention
-// ago and answers how many went. Intended for a scheduled call; a second run
+// Prune deletes every notification created more than domain.Retention ago
+// (first written, or last renewed under Renew) and answers how many went. Intended for a scheduled call; a second run
 // finds nothing.
 type Prune struct{}
 
