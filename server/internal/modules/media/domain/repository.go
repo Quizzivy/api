@@ -27,7 +27,7 @@ type Repository interface {
 	Usage(ctx context.Context, scope access.Scope) (Usage, error)
 	QuestionCounts(ctx context.Context, assetIDs []string) (map[string]int, error)
 	SoftDelete(ctx context.Context, in DeleteInput) (Retired, error)
-	ReferencesFor(ctx context.Context, assetIDs []string) (map[string][]TestRef, error)
+	VersionUses(ctx context.Context, assetIDs []string) (map[string]VersionUses, error)
 	ReachableByStudent(ctx context.Context, studentID, assetID string) (bool, error)
 	Readable(ctx context.Context, scope access.Scope, assetIDs []string) (map[string]Kind, error)
 }

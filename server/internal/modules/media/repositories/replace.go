@@ -135,12 +135,17 @@ func replaceBody(ctx context.Context, tx pgx.Tx, in domain.ReplaceInput) (domain
 	}
 	return result, nil
 }
+
+// retireReplaced retires the replaced asset old, naming the published
+// versions of its owner's own tests that still use it. Another owner's
+// versions, a copy's (T-R7.7), keep it in storage too (deleteAt stays null)
+// but are never named.
 func retireReplaced(ctx context.Context, tx pgx.Tx, in domain.ReplaceInput, old domain.Asset) (domain.Retired, error) {
-	usedIn, err := References(ctx, tx, in.ID)
+	byAsset, err := referencesFor(ctx, tx, []string{in.ID}, &in.Asset.OwnerID)
 	if err != nil {
 		return domain.Retired{}, err
 	}
-	return describeRetired(ctx, tx, old, usedIn, in.Asset.Now)
+	return describeRetired(ctx, tx, old, byAsset[strings.ToLower(in.ID)], in.Asset.Now)
 }
 func replacementGraph(ctx context.Context, tx pgx.Tx, in domain.ReplaceInput, asset domain.Asset, questions, groups []string) (domain.ReplaceResult, error) {
 	result := domain.ReplaceResult{Asset: asset}

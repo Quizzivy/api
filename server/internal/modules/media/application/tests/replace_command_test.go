@@ -35,7 +35,7 @@ func (r *replacementRepo) Replace(_ context.Context, in domain.ReplaceInput) (do
 	}
 	return domain.ReplaceResult{Asset: domain.Asset{ID: in.Asset.ID, StorageKey: in.Asset.StorageKey, Kind: in.Asset.Kind, Bytes: in.Asset.Bytes, DisplayName: *in.Asset.DisplayName, DefaultMaxPlays: in.Asset.DefaultMaxPlays}, Repointed: domain.ReplacementCounts{Questions: 2, Groups: 1}, Left: domain.ReplacementCounts{Questions: 3, Groups: 2}, Previous: domain.Retired{Asset: r.target.Asset}}, nil
 }
-func (r *replacementRepo) ReferencesFor(context.Context, []string) (map[string][]domain.TestRef, error) {
+func (r *replacementRepo) VersionUses(context.Context, []string) (map[string]domain.VersionUses, error) {
 	return r.versions, r.refsErr
 }
 func (r *replacementRepo) QuestionCounts(context.Context, []string) (map[string]int, error) {

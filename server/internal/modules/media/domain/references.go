@@ -7,6 +7,16 @@ type TestRef struct {
 	Version int
 }
 
+// VersionUses is what of the published versions uses one asset: Tests names
+// those of the tests the asset's own owner owns, by title then version, and
+// Count counts every owner's versions, those included. Another owner's
+// versions, a copy's (T-R7.7), are only counted, so no title of another
+// teacher's test leaves the server through the owner's library.
+type VersionUses struct {
+	Tests []TestRef
+	Count int
+}
+
 // ReferencedError is ErrReferenced carrying the versions and independent groups that prevent deletion.
 type ReferencedError struct {
 	Tests  []TestRef

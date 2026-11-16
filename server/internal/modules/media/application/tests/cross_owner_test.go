@@ -12,6 +12,7 @@ import (
 	"quizzivy/internal/core/adapters"
 	"quizzivy/internal/modules/media/application"
 	"quizzivy/internal/modules/media/application/command"
+	"quizzivy/internal/modules/media/application/query"
 	"quizzivy/internal/modules/media/domain"
 	"quizzivy/internal/modules/media/repositories"
 	questionsapp "quizzivy/internal/modules/questions/application"
@@ -121,6 +122,49 @@ func TestDeletingAFileAnotherOwnersContentUsesIsRefusedWithACount(t *testing.T) 
 	}
 	if n := w.scalar(t, `SELECT count(*) FROM app.media_assets WHERE id = $1 AND deleted_at IS NULL`, file); n != 1 {
 		t.Error("a refused delete deleted the file")
+	}
+}
+
+// TestTheLibraryNamesOnlyTheOwnersOwnVersions: once B publishes a test of
+// B's that uses A's file (a copy's, T-R7.7), A's library row counts B's
+// version beside A's own but names A's alone, and A's replace answers the
+// old file as still used by A's version alone, its removal held for B's.
+// No title of B's test reaches A.
+func TestTheLibraryNamesOnlyTheOwnersOwnVersions(t *testing.T) {
+	ctx := context.Background()
+	w := newReplacementWorld(t, nil)
+	file := w.asset(t, w.a, domain.KindImage, 1)
+	mine := w.versionUsing(t, w.a, file)
+	theirs := w.versionUsing(t, w.b, file)
+	w.exec(t, `UPDATE app.tests SET title = 'Đề riêng của B' WHERE id = $1`, theirs)
+
+	listed, err := w.media().Queries.List.Handle(ctx, query.List{Input: domain.ListInput{Scope: access.Scope{UserID: w.a}, Limit: 100}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range listed.Items {
+		if a.ID != file {
+			continue
+		}
+		found = true
+		if a.UsageCount != 2 || len(a.UsedIn) != 1 || a.UsedIn[0].ID != mine {
+			t.Errorf("A's library row counts %d versions and names %+v; want both counted and A's test alone named", a.UsageCount, a.UsedIn)
+		}
+	}
+	if !found {
+		t.Fatalf("A's library does not list the file %s", file)
+	}
+
+	result, err := w.repo.Replace(ctx, w.input(file, w.a, domain.KindImage, 1, 1<<30))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used := result.Previous.UsedIn; len(used) != 1 || used[0].ID != mine {
+		t.Errorf("A's replace answers the old file as used in %+v, want A's test alone", used)
+	}
+	if result.Previous.DeleteAt != nil {
+		t.Error("the old file is due for removal although B's version still uses it")
 	}
 }
 
