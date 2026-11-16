@@ -37,11 +37,20 @@ type Question struct {
 	MatchItems      []MatchItem
 	Rubric          []RubricCriterion
 	Tags            []string
+	// Owner is the question's owner, read only where a list names it (a set's
+	// questions); nil elsewhere.
+	Owner *Owner
 	// Draft outlines referencing this question.
 	UsedInTests int
 	UsedIn      []TestRef
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+// Owner is a person who owns content, by id and display name.
+type Owner struct {
+	ID   string
+	Name string
 }
 
 type Option struct {

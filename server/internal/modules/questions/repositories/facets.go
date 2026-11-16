@@ -84,7 +84,7 @@ func (s *Postgres) Tags(ctx context.Context, in domain.ListInput) ([]string, err
 // it the current filters match -- A-06's "180 câu · đang lọc 41".
 func (s *Postgres) Counts(ctx context.Context, in domain.ListInput) (total int, filtered int, err error) {
 	args, where := appendFilters(in, allFilters())
-	_, bank := bankRows(in.Scope)
+	_, bank := bankRows(in)
 
 	if err := s.QueryRow(ctx, `
 		SELECT (SELECT count(*) FROM app.questions q WHERE `+strings.Join(bank, " AND ")+`),

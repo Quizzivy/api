@@ -44,6 +44,7 @@ type Server struct {
 	organizationhttp.Organization
 	exportshttp.Exports
 	leadshttp.Leads
+	R7Pending
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

@@ -61,8 +61,9 @@ type RubricCriterionInput struct {
 // WriteRequest is a write to the bank by ActorID. It reaches only ActorID's own
 // questions and binds only assets ActorID may read, unless All, the actor's
 // scope.all, is set; anything else answers exactly as a missing id does. On a
-// create, OwnerID owns the new question instead of ActorID; only a Word-import
-// commit sets it, and a group member still follows its group.
+// create, OwnerID owns the new question instead of ActorID; a Word-import
+// commit sets it, and so does a question made for a test (forTestId), whose
+// owner it is. A group member still follows its group.
 type WriteRequest struct {
 	ID        string
 	Input     Input
@@ -113,6 +114,9 @@ type BlankInput struct {
 // ListInput selects a page of the bank. Scope limits it to the caller's own
 // questions, or every teacher's under scope.all; a zero Scope matches nothing.
 type ListInput struct {
+	// SetID lists that question set's questions, in set order, instead of the
+	// scope's bank. The caller checks the set is readable first.
+	SetID    string
 	Types    []Type
 	Levels   []Level
 	Skills   []Skill

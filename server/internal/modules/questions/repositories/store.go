@@ -290,7 +290,8 @@ func imageAlt(kind, alt *string) *string {
 	return alt
 }
 
-// SoftDelete marks a bank question deleted and audits it. The actor must own it
+// SoftDelete marks a bank question deleted, takes it out of every question set
+// and audits it. The actor must own it
 // unless All is set; the owner is checked in the row lock, before the drafts
 // that would refuse the delete are read, so another owner's question answers
 // ErrNotFound and never the tests that use it.
@@ -322,6 +323,9 @@ func (s *Postgres) SoftDelete(ctx context.Context, in domain.WriteInput) error {
 	}
 	if len(refs) > 0 {
 		return &domain.ReferencedError{Tests: refs}
+	}
+	if err := RemoveFromSets(ctx, tx, in.ID); err != nil {
+		return err
 	}
 
 	if _, err := tx.Exec(ctx,

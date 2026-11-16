@@ -12,7 +12,10 @@ import (
 type Service struct {
 	Repo  domain.Repository
 	Media ports.MediaKinds
-	Now   func() time.Time
+	// Sets and Contexts are nil until the application is given them (WithSets).
+	Sets     domain.SetRepository
+	Contexts domain.WriteContexts
+	Now      func() time.Time
 }
 
 func NewService(repo domain.Repository, media ports.MediaKinds) *Service {

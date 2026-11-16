@@ -11,9 +11,11 @@ import (
 // Duplicate is A-06a's "Nhân bản": the same question again as a new bank row
 // -- options, blanks, media and tags copied, ids fresh -- that no test holds
 // yet. It goes through the same write as a create, so it is validated and
-// audited like one.
+// audited like one. With ForTestID the copy is made in that test's owner's
+// bank, as Create makes one.
 type Duplicate struct {
-	Request domain.WriteRequest
+	Request   domain.WriteRequest
+	ForTestID string
 }
 
 type DuplicateHandler struct {
@@ -30,5 +32,9 @@ func (s DuplicateHandler) Handle(ctx context.Context, cmd Duplicate) (domain.Que
 	if err := cmd.Request.Input.RebindGaps(uuid.NewString); err != nil {
 		return domain.Question{}, err
 	}
-	return s.Write(ctx, cmd.Request, false)
+	req, err := s.ForTest(ctx, cmd.Request, cmd.ForTestID)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	return s.Write(ctx, req, false)
 }

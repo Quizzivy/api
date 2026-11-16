@@ -27,6 +27,9 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 	}
 
 	in := domain.ListInput{Scope: httpapi.ScopeFromContext(ctx).Own()}
+	if request.Params.SetId != nil {
+		in.SetID = request.Params.SetId.String()
+	}
 	questionListDimensions(&in, request.Params)
 	if request.Params.Tag != nil {
 		in.Tags = append(in.Tags, *request.Params.Tag...)
@@ -42,8 +45,12 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 		in.Limit = int(*request.Params.Limit)
 	}
 
-	listResult, err := h.app.Queries.List.Handle(ctx, query.List{Input: in})
+	listResult, err := h.app.Queries.List.Handle(ctx, query.List{Input: in, Reader: httpapi.ScopeFromContext(ctx)})
 	found, page := listResult.Items, listResult.Page
+	if errors.Is(err, domain.ErrSetNotFound) {
+		return openapi.ListQuestions400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(
+			httpapi.FieldError(ctx, "setId", msgSetNotFound(ctx)))}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +71,12 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 		return nil, err
 	}
 
+	items, err := h.listItems(ctx, found, listResult.Set)
+	if err != nil {
+		return nil, err
+	}
 	out := openapi.ListQuestions200JSONResponse{
-		Items: make([]openapi.AdminQuestion, len(found)),
+		Items: items,
 		Facets: openapi.QuestionTypeFacets{
 			All:            facets.All,
 			SingleChoice:   facets.ByType[domain.SingleChoice],
@@ -96,13 +107,24 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 	out.Facets.Skills.Listening = facets.BySkill["listening"]
 	out.Facets.Skills.Writing = facets.BySkill["writing"]
 	out.Facets.Skills.Speaking = facets.BySkill["speaking"]
+	return out, nil
+}
+
+func (h Questions) listItems(ctx context.Context, found []domain.Question, set *domain.QuestionSet) ([]openapi.AdminQuestion, error) {
+	items := make([]openapi.AdminQuestion, len(found))
 	for i, q := range found {
-		out.Items[i], err = h.toAPIQuestion(ctx, q)
+		item, err := h.toAPIQuestion(ctx, q)
 		if err != nil {
 			return nil, err
 		}
+		if set != nil && q.Owner != nil {
+			access := rowAccess(*set, q, httpapi.ScopeFromContext(ctx))
+			item.Access = &access
+			item.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
+		}
+		items[i] = item
 	}
-	return out, nil
+	return items, nil
 }
 
 func (h Questions) GetQuestion(ctx context.Context, request openapi.GetQuestionRequestObject) (openapi.GetQuestionResponseObject, error) {
@@ -133,7 +155,11 @@ func (h Questions) CreateQuestion(ctx context.Context, request openapi.CreateQue
 		return nil, httpx.ErrNotImplemented
 	}
 
-	q, err := h.app.Commands.Create.Handle(ctx, command.Create{Request: req})
+	q, err := h.app.Commands.Create.Handle(ctx, command.Create{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
+	if errors.Is(err, domain.ErrTestNotFound) {
+		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(
+			httpapi.FieldError(ctx, "forTestId", msgTestNotFound(ctx)))}, nil
+	}
 	if resp, handled := questionWriteError(ctx, err); handled {
 		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
@@ -156,7 +182,11 @@ func (h Questions) DuplicateQuestion(ctx context.Context, request openapi.Duplic
 		return nil, httpx.ErrNotImplemented
 	}
 
-	q, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req})
+	q, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
+	if errors.Is(err, domain.ErrTestNotFound) {
+		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
+			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
@@ -183,7 +213,13 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 		return nil, httpx.ErrNotImplemented
 	}
 
-	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req})
+	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req, SetID: uuidString(request.Params.SetId)})
+	if errors.Is(err, domain.ErrSetNotFound) {
+		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: setNotFound(ctx)}, nil
+	}
+	if errors.Is(err, domain.ErrSetReadOnly) {
+		return openapi.UpdateQuestion403JSONResponse(setReadOnly(ctx)), nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
@@ -492,6 +528,17 @@ func apiTypeParts(out *openapi.AdminQuestion, q domain.Question) {
 func writeRequest(ctx context.Context, id string, input domain.Input) (domain.WriteRequest, bool) {
 	actor, ok := httpapi.ActorFromContext(ctx)
 	return domain.WriteRequest{ID: id, Input: input, ActorID: actor.ID, All: actor.Scope.All, IP: actor.IP, UserAgent: actor.UserAgent}, ok
+}
+
+func uuidString(id *openapi.Uuid) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
+}
+
+func msgTestNotFound(ctx context.Context) string {
+	return httpx.Text(ctx, "Không tìm thấy bài kiểm tra.", "The test was not found.")
 }
 
 func optionID(id *openapi.Uuid) *string {
