@@ -18,5 +18,9 @@ type CreateHandler struct {
 
 func (s CreateHandler) Handle(ctx context.Context, cmd Create) (domain.Assignment, error) {
 	cmd.Input.StudentNote = content.NFCPtr(cmd.Input.StudentNote)
-	return s.Repo.Create(ctx, cmd.Request, cmd.Input)
+	created, err := s.Repo.Create(ctx, cmd.Request, cmd.Input)
+	if err == nil {
+		s.Nudge()
+	}
+	return created, err
 }

@@ -18,5 +18,9 @@ type DeleteOverride struct {
 type DeleteOverrideHandler struct{ *support.Service }
 
 func (s DeleteOverrideHandler) Handle(ctx context.Context, cmd DeleteOverride) (cqrs.Nothing, error) {
-	return cqrs.Nothing{}, s.Repo.DeleteOverride(ctx, cmd.Request, cmd.StudentID, cmd.Now)
+	if err := s.Repo.DeleteOverride(ctx, cmd.Request, cmd.StudentID, cmd.Now); err != nil {
+		return cqrs.Nothing{}, err
+	}
+	s.Nudge()
+	return cqrs.Nothing{}, nil
 }

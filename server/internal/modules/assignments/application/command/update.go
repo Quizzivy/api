@@ -18,5 +18,9 @@ type UpdateHandler struct {
 
 func (s UpdateHandler) Handle(ctx context.Context, cmd Update) (domain.Assignment, error) {
 	cmd.Input.StudentNote = content.NFCPtr(cmd.Input.StudentNote)
-	return s.Repo.Update(ctx, cmd.Request, cmd.Input)
+	updated, err := s.Repo.Update(ctx, cmd.Request, cmd.Input)
+	if err == nil {
+		s.Nudge()
+	}
+	return updated, err
 }

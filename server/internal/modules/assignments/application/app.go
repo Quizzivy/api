@@ -26,6 +26,14 @@ func (a *Application) WithNotifier(notifier ports.Notifier, logger *slog.Logger)
 	return a
 }
 
+// WithScheduleNudge supplies the notification scheduler that create, update,
+// reopen, extend and override writes nudge once they commit. Without it
+// they nudge nothing, and the scheduler finds their moments on its own clock.
+func (a *Application) WithScheduleNudge(nudge ports.ScheduleNudge) *Application {
+	a.service.Schedule = nudge
+	return a
+}
+
 type Commands struct {
 	Delete         cqrs.CommandHandler[command.Delete, cqrs.Nothing]
 	Create         cqrs.CommandHandler[command.Create, domain.Assignment]
