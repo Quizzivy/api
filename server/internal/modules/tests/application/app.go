@@ -43,6 +43,7 @@ type Queries struct {
 	Diff          cqrs.QueryHandler[query.Diff, query.DiffResult]
 	Facets        cqrs.QueryHandler[query.Facets, domain.StatusFacets]
 	Get           cqrs.QueryHandler[query.Get, domain.Test]
+	Ownership     cqrs.QueryHandler[query.Ownership, domain.Ownership]
 	List          cqrs.QueryHandler[query.List, query.ListResult]
 	ListVersions  cqrs.QueryHandler[query.ListVersions, []domain.Version]
 	Preview       cqrs.QueryHandler[query.Preview, query.PreviewResult]
@@ -77,6 +78,7 @@ func New(repo domain.Repository) *Application {
 			Diff:          query.DiffHandler{Service: service},
 			Facets:        query.FacetsHandler{Service: service},
 			Get:           query.GetHandler{Service: service},
+			Ownership:     query.OwnershipHandler{Service: service},
 			List:          query.ListHandler{Service: service},
 			ListVersions:  query.ListVersionsHandler{Service: service},
 			Preview:       query.PreviewHandler{Service: service},

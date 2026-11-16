@@ -465,3 +465,53 @@ func TestAddingToASetSerialisesAgainstDelete(t *testing.T) {
 		}
 	}
 }
+
+func TestAGrantOpensTheSetToItsGranteeAtItsLevel(t *testing.T) {
+	w := newSetWorld(t)
+	ctx := context.Background()
+	user := w.user(t, "teacher")
+	q1, q2 := w.create(t, w.a, "Câu một", nil), w.create(t, w.a, "Câu hai", nil)
+	set := w.makeSet(t, w.a, "Bộ dùng chung", q1.ID, q2.ID)
+	for grantee, level := range map[string]string{w.b: "edit", user: "use"} {
+		if _, err := w.tx.Exec(ctx, `INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			VALUES ('question_set', $1::uuid, $2::uuid, $3, $4::uuid)`, set.ID, grantee, level, w.a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for grantee, want := range map[string]domain.Access{w.b: domain.AccessEdit, user: domain.AccessUse} {
+		got, err := w.svc.Queries.GetSet.Handle(ctx, query.GetSet{Scope: access.Scope{UserID: grantee}, ID: set.ID})
+		if err != nil || got.Access != want || got.OwnerID != w.a || got.SharedWith != 0 {
+			t.Fatalf("the %s grantee reads %+v, %v", want, got, err)
+		}
+		if listed, _ := w.setQuestions(t, access.Scope{UserID: grantee}, set.ID); !slices.Equal(listed, []string{q1.ID, q2.ID}) {
+			t.Errorf("the %s grantee lists the set's questions as %v", want, listed)
+		}
+		if mine, err := w.svc.Queries.ListSets.Handle(ctx, query.ListSets{Scope: access.Scope{UserID: grantee}}); err != nil || len(mine) != 0 {
+			t.Errorf("the %s grantee's own sets hold %+v (%v): a shared set is listed by Shared with me", want, mine, err)
+		}
+	}
+	if owned, err := w.svc.Queries.GetSet.Handle(ctx, query.GetSet{Scope: access.Scope{UserID: w.a}, ID: set.ID}); err != nil || owned.Access != domain.AccessOwner || owned.SharedWith != 2 {
+		t.Fatalf("the owner reads %+v, %v", owned, err)
+	}
+
+	rename := domain.SetFields{Name: new("Bộ đã đổi tên")}
+	if _, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: setWriteBy(user, false, set.ID), Fields: rename}); !errors.Is(err, domain.ErrSetReadOnly) {
+		t.Errorf("a use grantee renaming the set: %v, want read only", err)
+	}
+	if renamed, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: setWriteBy(w.b, false, set.ID), Fields: rename}); err != nil || renamed.Name != "Bộ đã đổi tên" || renamed.Access != domain.AccessEdit {
+		t.Errorf("an edit grantee renaming the set: %+v, %v", renamed, err)
+	}
+	if _, err := w.svc.Commands.AddToSet.Handle(ctx, command.AddToSet{Write: setWriteBy(w.b, false, set.ID), QuestionIDs: []string{q1.ID}}); !errors.Is(err, domain.ErrSetOwnerOnly) {
+		t.Errorf("an edit grantee adding to the set: %v, want owner only", err)
+	}
+	if _, err := w.svc.Commands.DeleteSet.Handle(ctx, command.DeleteSet{Write: setWriteBy(w.b, false, set.ID)}); !errors.Is(err, domain.ErrSetOwnerOnly) {
+		t.Errorf("an edit grantee deleting the set: %v, want owner only", err)
+	}
+	if removed, err := w.svc.Commands.RemoveFromSet.Handle(ctx, command.RemoveFromSet{Write: setWriteBy(w.b, false, set.ID), QuestionIDs: []string{q2.ID}}); err != nil || removed.QuestionCount != 1 {
+		t.Errorf("an edit grantee removing from the set: %+v, %v", removed, err)
+	}
+	if _, err := w.svc.Queries.GetSet.Handle(ctx, query.GetSet{Scope: access.Scope{UserID: w.user(t, "teacher")}, ID: set.ID}); !errors.Is(err, domain.ErrSetNotFound) {
+		t.Errorf("a teacher with no grant reads the set: %v", err)
+	}
+}

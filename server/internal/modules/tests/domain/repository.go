@@ -13,6 +13,7 @@ type Repository interface {
 	Facets(ctx context.Context, in ListInput) (StatusFacets, error)
 	Tags(ctx context.Context, in ListInput) ([]string, error)
 	Get(ctx context.Context, scope access.Scope, id string) (Test, error)
+	Ownership(ctx context.Context, scope access.Scope, id string) (Ownership, error)
 	Create(ctx context.Context, in CreateInput) (Test, error)
 	Update(ctx context.Context, in UpdateRequest) (Test, error)
 	Duplicate(ctx context.Context, in DuplicateInput) (Test, error)

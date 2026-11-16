@@ -17,12 +17,13 @@ import (
 const personName = `coalesce(nullif(u.display_name, ''), u.full_name)`
 
 // SetAccess is the SQL expression for what the caller may do with the set s:
-// 'owner' for its owner and for scope.all, NULL for anyone who cannot read it.
-// all and user are the placeholders of the caller's scope.all and user id.
-// Every read and write of a set decides access here and nowhere else; the
-// grants of app.content_shares widen it to 'edit' and 'use' (T-R7.4).
+// 'owner' for its owner and for scope.all, the access of the caller's grant
+// in app.content_shares ('edit' or 'use'), and NULL for anyone who cannot
+// read it. all and user are the placeholders of the caller's scope.all and
+// user id. Every read and write of a set decides access here and nowhere else.
 func SetAccess(all, user int) string {
-	return fmt.Sprintf(`CASE WHEN $%d::boolean OR s.owner_id = $%d::uuid THEN 'owner' END`, all, user)
+	return fmt.Sprintf(`CASE WHEN $%[1]d::boolean OR s.owner_id = $%[2]d::uuid THEN 'owner'
+	  ELSE (SELECT g.access FROM app.content_shares g WHERE g.question_set_id = s.id AND g.grantee_id = $%[2]d::uuid) END`, all, user)
 }
 
 func setColumns(all, user int) string {
