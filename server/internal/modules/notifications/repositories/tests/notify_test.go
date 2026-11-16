@@ -211,6 +211,28 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 	}
 }
 
+// TestAWeeklySummaryIsWrittenInTheAppOnlyOnceTheTeacherTurnsItOn fails when
+// a switch whose default is off in the app (summary.weekly, as the deck
+// draws it) writes its in-app item for a teacher who never saved it, or not
+// for one who turned it on.
+func TestAWeeklySummaryIsWrittenInTheAppOnlyOnceTheTeacherTurnsItOn(t *testing.T) {
+	pool := newPool(t)
+	app := over(pool)
+	userID := newUser(t, pool, "teacher")
+	weekly := domain.Weekly{Count: 3, ToGrade: 1, Flagged: 0, ClassNames: []string{"Lớp A"}}
+	notify(t, app, userID, "weekly:2026-W46", weekly, domain.Replace)
+	if rows := rowsOf(t, pool, userID); len(rows) != 0 {
+		t.Fatalf("a teacher who never turned the weekly summary on in the app holds %+v", rows)
+	}
+	on := domain.WithDefaults(nil, domain.Staff)
+	on[6].InApp = true
+	save(t, app, userID, on)
+	notify(t, app, userID, "weekly:2026-W46", weekly, domain.Replace)
+	if rows := rowsOf(t, pool, userID); len(rows) != 1 || rows[0].kind != "summary.weekly" {
+		t.Errorf("with the weekly summary on in the app the teacher holds %+v", rows)
+	}
+}
+
 func TestConcurrentAddsLoseNoIncrement(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
