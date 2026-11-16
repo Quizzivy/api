@@ -82,6 +82,9 @@ func as(f domain.StudentFacts, change func(*domain.StudentFacts)) domain.Student
 	return f
 }
 
+// An archived class has no fact here: teachesNow leaves it out of Teaches in
+// SQL, so its teacher arrives as a former teacher's facts.
+// TestTheStudentEligibilityTableOnTheDatabase tests the archived rows.
 func TestTheEligibilityTableForAStudentsDirectThread(t *testing.T) {
 	rules := domain.Eligibility{}
 	for name, c := range map[string]struct {

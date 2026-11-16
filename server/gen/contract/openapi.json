@@ -14835,7 +14835,7 @@
       },
       "StudentThread": {
         "type": "object",
-        "description": "A row of the student's Messages. A direct row's `title` is the\nteacher's name and `classNames` the student's classes they teach\n(\"Your teacher · {classes}\"), empty with `former` when the student has\nleft them all (\"Former teacher\"). A class row is a channel with at\nleast one post (\"Class announcements\"), titled with the class's name.\n",
+        "description": "A row of the student's Messages. A direct row's `title` is the\nteacher's name and `classNames` the student's classes they teach that\nare not archived (\"Your teacher · {classes}\"). It is empty with\n`former` when the teacher taught the student and teaches them in no\nsuch class now, having left them all or seen them archived (\"Former\nteacher\"). It is empty without `former` when the staff member never\ntaught the student (one who created the student's account and wrote\nfirst): the subtitle is then \"Your teacher\" alone, with no \" · \" and\nnothing after it. A class row is a channel with at least one post\n(\"Class announcements\"), titled with the class's name.\n",
         "required": [
           "thread",
           "title",
@@ -14894,6 +14894,7 @@
       },
       "StudentDirectThreadTeacher": {
         "type": "object",
+        "description": "The thread's header. `classNames` and `former` read as they do on the\nthread's `StudentThread` row: \"Your teacher · {classes}\", \"Former\nteacher\", or \"Your teacher\" alone when both are empty and false.\n",
         "required": [
           "id",
           "name",
@@ -31325,7 +31326,7 @@
         "tags": [
           "student-messages"
         ],
-        "description": "The student's thread with a teacher: one who teaches a class the\nstudent is in, or one they already have a thread with. `teacherId`\nis a user id whose eligibility the operation checks (not an owned\nresource); any other id answers 404.\n",
+        "description": "The student's thread with a teacher: one who teaches a class the\nstudent is in that is not archived, or one they already have a\nthread with. `teacherId`\nis a user id whose eligibility the operation checks (not an owned\nresource); any other id answers 404.\n",
         "parameters": [
           {
             "name": "before",
@@ -31395,7 +31396,7 @@
           "student-messages"
         ],
         "summary": "Write to a teacher",
-        "description": "Text only. A student may write first to the teacher of a class they\nare an active member of, and goes on writing in a thread that exists\nafter leaving the class; they cannot write first to a teacher of a\nclass they left.\n\nLimited to 10 a minute and 200 a day per student.\n",
+        "description": "Text only. A student may write first to the teacher of a class they\nare in that is not archived, and goes on writing in a thread that\nexists after leaving the class or after the class is archived; they\ncannot write first to a teacher of a class they left, or of a class\nthat is archived.\n\nLimited to 10 a minute and 200 a day per student.\n",
         "requestBody": {
           "required": true,
           "content": {
