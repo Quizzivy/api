@@ -1,7 +1,10 @@
 package router_test
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -68,5 +71,47 @@ func TestAStudentCannotPostInAClassChannel(t *testing.T) {
 	}
 	if rec := sendFrom(t, h, issuer, http.MethodPost, "/teacher/messages/classes/"+class, studentUser, centreAddress, post); rec.Code != http.StatusForbidden {
 		t.Errorf("a student's announcement to a class: %d, want 403", rec.Code)
+	}
+}
+
+func TestAStaffMembersUploadsHaveABudgetOfTwentyAnHour(t *testing.T) {
+	issuer := testIssuer(t)
+	h := roleRouter(t, issuer, rolePrincipals())
+	upload := func(userID, address string) int {
+		t.Helper()
+		var b bytes.Buffer
+		form := multipart.NewWriter(&b)
+		part, err := form.CreateFormFile("file", "bai-tap.pdf")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("%PDF-1.4\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := form.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/teacher/messages/attachments", &b)
+		req.RemoteAddr = address + ":40000"
+		req.Header.Set("Content-Type", form.FormDataContentType())
+		raw, err := issuer.Issue(userID, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+raw)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := range 20 {
+		if code := upload(teacherUser, centreAddress); code != http.StatusNotImplemented {
+			t.Fatalf("upload %d: %d, want it to reach the handler within the budget of 20 an hour", i+1, code)
+		}
+	}
+	if code := upload(teacherUser, homeAddress); code != http.StatusTooManyRequests {
+		t.Errorf("the 21st upload in an hour, from another address: %d, want 429", code)
+	}
+	if code := upload(adminUser, centreAddress); code != http.StatusNotImplemented {
+		t.Errorf("a second user's first upload behind the same address: %d, want it to reach the handler", code)
 	}
 }

@@ -79,6 +79,7 @@ func (p *pooled) cleanUp() {
 	for sql, ids := range map[string][]string{
 		`DELETE FROM app.messaging_ties WHERE staff_id = ANY($1::uuid[]) OR student_id = ANY($1::uuid[])`: p.users,
 		`DELETE FROM app.class_members WHERE class_id = ANY($1::uuid[])`:                                  p.classes,
+		`DELETE FROM app.message_attachments WHERE uploaded_by = ANY($1::uuid[])`:                         p.users,
 	} {
 		if _, err := p.pool.Exec(ctx, sql, ids); err != nil {
 			p.t.Logf("cleanup: %v", err)
