@@ -35,6 +35,9 @@ const commitBudget = 10 * time.Second
 // of Location; one that is zero is read, in each batch, from the usage limits
 // resolved under Limits. A message that names a time writes it in Location.
 // Interval is the pause between two sends. Now is the clock, time.Now when nil.
+// Prepare holds the Preparer of each Prepared template; a row of a Prepared
+// template without one is never claimed, so it waits for a dispatcher that
+// has it, as a row of a template this binary does not know does.
 type Dispatcher struct {
 	DB           db.Context
 	Sealer       *secrets.Sealer
@@ -50,14 +53,15 @@ type Dispatcher struct {
 	Location     *time.Location
 	Now          func() time.Time
 	Logger       *slog.Logger
+	Prepare      Preparers
 }
 
 // Batch is what one Dispatch did. Busy means another dispatcher held the
 // lock and nothing was claimed; Claimed counts the rows it locked, and the
 // rest count outcomes, Deferred being rows moved to the next local day or
 // month because its budget was spent, Released rows a cap had held that were
-// made due again because budget remained, and Expired rows failed because
-// their link expired while they waited.
+// made due again because budget remained, Expired rows failed because
+// their link expired while they waited, and Skipped rows a Preparer dropped.
 type Batch struct {
 	Busy     bool
 	Claimed  int
@@ -67,23 +71,27 @@ type Batch struct {
 	Deferred int
 	Released int
 	Expired  int
+	Skipped  int
 }
 
 type pending struct {
-	id       string
-	to       string
-	template string
-	locale   string
-	params   []byte
-	secret   []byte
-	attempts int
-	staff    bool
+	id        string
+	to        string
+	toUserID  *string
+	template  string
+	locale    string
+	params    []byte
+	secret    []byte
+	attempts  int
+	staff     bool
+	createdAt time.Time
 }
 
 type outcome struct {
 	provider string
 	code     string
 	kind     error
+	skipped  bool
 }
 
 // Dispatch claims up to BatchSize due rows and sends them, Interval apart. A
@@ -98,8 +106,11 @@ type outcome struct {
 // template this binary does not send is never claimed, deferred or counted as
 // due: it stays pending, secret and attempts intact, for a newer release's
 // dispatcher, which the API and the worker may run while a deploy is rolling
-// out. When ctx ends, no further row is sent and what was sent is still
-// recorded.
+// out. A row of a Prepared template is handed to its Preparer before it is
+// rendered: one the Preparer drops is closed as failed with SkippedCode and
+// costs neither a send nor the pause between sends, and one whose Preparer
+// fails is retried as a transient failure. When ctx ends, no further row is
+// sent and what was sent is still recorded.
 func (d *Dispatcher) Dispatch(ctx context.Context) (Batch, error) {
 	org, err := d.Org(ctx)
 	if err != nil {
@@ -170,14 +181,14 @@ func (d *Dispatcher) spend(ctx context.Context, tx pgx.Tx, now, until time.Time,
 		tag, err := tx.Exec(ctx, `
 			UPDATE app.email_outbox SET deliver_after = $2, held_by = $4
 			 WHERE sent_at IS NULL AND failed_at IS NULL AND deliver_after <= $1 AND template = ANY($3::text[])`,
-			now, until, templateNames(), heldBy)
+			now, until, d.Prepare.sendable(), heldBy)
 		if err != nil {
 			return err
 		}
 		batch.Deferred = int(tag.RowsAffected())
 		return nil
 	}
-	released, err := release(ctx, tx, now)
+	released, err := release(ctx, tx, now, d.Prepare.sendable())
 	if err != nil {
 		return err
 	}
@@ -187,11 +198,11 @@ func (d *Dispatcher) spend(ctx context.Context, tx pgx.Tx, now, until time.Time,
 
 // release makes the rows a cap held back due again and unmarks them, each at
 // the time it was written so it goes ahead of newer mail.
-func release(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
+func release(ctx context.Context, tx pgx.Tx, now time.Time, templates []string) (int, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE app.email_outbox SET deliver_after = least(created_at, $1), held_by = NULL
 		 WHERE sent_at IS NULL AND failed_at IS NULL AND held_by IS NOT NULL AND template = ANY($2::text[])`,
-		now, templateNames())
+		now, templates)
 	if err != nil {
 		return 0, err
 	}
@@ -200,15 +211,16 @@ func release(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
 
 func (d *Dispatcher) sendDue(ctx context.Context, tx pgx.Tx, now time.Time, limit int, org string, batch *Batch) error {
 	rows, err := db.QueryMany(ctx, tx, `
-		SELECT o.id::text, o.to_address, o.template, o.locale, o.params, o.secret_ciphertext, o.attempts,
-		       EXISTS (SELECT 1 FROM app.users u WHERE u.id = o.to_user_id AND `+limits.StaffRole("u.role_id")+`)
+		SELECT o.id::text, o.to_address, o.to_user_id::text, o.template, o.locale, o.params, o.secret_ciphertext, o.attempts,
+		       EXISTS (SELECT 1 FROM app.users u WHERE u.id = o.to_user_id AND `+limits.StaffRole("u.role_id")+`),
+		       o.created_at
 		  FROM app.email_outbox o
 		 WHERE o.sent_at IS NULL AND o.failed_at IS NULL AND o.deliver_after <= $1 AND o.template = ANY($3::text[])
 		 ORDER BY o.deliver_after, o.id
 		 LIMIT $2
-		   FOR UPDATE OF o SKIP LOCKED`, []any{now, limit, templateNames()}, func(r pgx.Rows) (pending, error) {
+		   FOR UPDATE OF o SKIP LOCKED`, []any{now, limit, d.Prepare.sendable()}, func(r pgx.Rows) (pending, error) {
 		var p pending
-		err := r.Scan(&p.id, &p.to, &p.template, &p.locale, &p.params, &p.secret, &p.attempts, &p.staff)
+		err := r.Scan(&p.id, &p.to, &p.toUserID, &p.template, &p.locale, &p.params, &p.secret, &p.attempts, &p.staff, &p.createdAt)
 		return p, err
 	})
 	if err != nil {
@@ -216,26 +228,56 @@ func (d *Dispatcher) sendDue(ctx context.Context, tx pgx.Tx, now time.Time, limi
 	}
 	batch.Claimed = len(rows)
 	record := context.WithoutCancel(ctx)
-	for i, row := range rows {
-		if i > 0 && !pause(ctx, d.Interval) {
-			break
-		}
+	sent := false
+	for _, row := range rows {
 		if ctx.Err() != nil {
 			break
 		}
-		result := d.deliver(ctx, row, org)
-		if err := d.record(record, tx, row, result, batch); err != nil {
+		params, early := d.prepare(ctx, row)
+		if early == nil {
+			if sent && !pause(ctx, d.Interval) {
+				break
+			}
+			result := d.deliver(ctx, row, params, org)
+			early, sent = &result, true
+		}
+		if err := d.record(record, tx, row, *early, batch); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *Dispatcher) deliver(ctx context.Context, row pending, org string) outcome {
-	params, err := DecodeParams(Template(row.template), row.params)
+// prepare reads row's params and hands them to its template's Preparer. It
+// answers the params to render, or the outcome that ends the row without a
+// send: unreadable params, a failed Preparer, or one that dropped the row.
+func (d *Dispatcher) prepare(ctx context.Context, row pending) (Params, *outcome) {
+	t := Template(row.template)
+	params, err := DecodeParams(t, row.params)
 	if err != nil {
-		return outcome{kind: ErrPermanent, code: "params_unreadable"}
+		return nil, &outcome{kind: ErrPermanent, code: "params_unreadable"}
 	}
+	preparer := d.Prepare[t]
+	if preparer == nil {
+		return params, nil
+	}
+	draft := Draft{Params: params, CreatedAt: row.createdAt, Now: d.now()}
+	if row.toUserID != nil {
+		draft.ToUserID = *row.toUserID
+	}
+	prepared, send, err := preparer.Prepare(ctx, draft)
+	switch {
+	case err != nil:
+		return nil, &outcome{kind: ErrTransient, code: "prepare_failed"}
+	case !send:
+		return nil, &outcome{kind: ErrPermanent, code: SkippedCode, skipped: true}
+	case prepared == nil || prepared.Template() != t:
+		return nil, &outcome{kind: ErrPermanent, code: "params_unreadable"}
+	}
+	return prepared, nil
+}
+
+func (d *Dispatcher) deliver(ctx context.Context, row pending, params Params, org string) outcome {
 	var secret string
 	if row.secret != nil {
 		if d.Sealer == nil {
@@ -251,7 +293,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row pending, org string) outco
 	if row.staff || StaffOnly(Template(row.template)) {
 		home = access.AudienceStaff
 	}
-	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.Hosts.URL(home), Params: params, Secret: secret, Zone: d.Location})
+	rendered, err := d.Renderer.Render(Letter{Locale: row.locale, Org: org, AppURL: d.Hosts.URL(home), Params: params, Secret: secret, Zone: d.Location, Staff: home == access.AudienceStaff})
 	if err != nil {
 		return outcome{kind: ErrPermanent, code: "render_failed"}
 	}
@@ -281,6 +323,13 @@ func (d *Dispatcher) record(ctx context.Context, tx pgx.Tx, row pending, result 
 			UPDATE app.email_outbox
 			   SET sent_at = $2, provider_id = $3, attempts = $4, last_error_code = NULL, secret_ciphertext = NULL
 			 WHERE id = $1`, row.id, at, truncate(result.provider, 200), attempts)
+	case result.skipped:
+		batch.Skipped++
+		verdict, attempts = "skipped", row.attempts
+		_, err = tx.Exec(ctx, `
+			UPDATE app.email_outbox
+			   SET failed_at = $2, last_error_code = $3, secret_ciphertext = NULL
+			 WHERE id = $1`, row.id, at, SkippedCode)
 	case errors.Is(result.kind, ErrTransient) && attempts < MaxAttempts:
 		batch.Retried++
 		verdict = "retry"
@@ -318,15 +367,15 @@ func Backoff(attempts int) time.Duration {
 	}
 }
 
-// NextDue answers when the earliest pending row of a template this binary
-// sends falls due or its link expires, whichever is first, and false when
+// NextDue answers when the earliest pending row of a template this
+// dispatcher sends falls due or its link expires, whichever is first, and false when
 // nothing is pending: a row a cap holds to the 1st is failed when its link
 // expires, not on the 1st.
 func (d *Dispatcher) NextDue(ctx context.Context) (time.Time, bool, error) {
 	var due *time.Time
 	if err := d.DB.QueryRow(ctx, `
 		SELECT least(min(deliver_after), min(expires_at)) FROM app.email_outbox
-		 WHERE sent_at IS NULL AND failed_at IS NULL AND template = ANY($1::text[])`, templateNames()).Scan(&due); err != nil {
+		 WHERE sent_at IS NULL AND failed_at IS NULL AND template = ANY($1::text[])`, d.Prepare.sendable()).Scan(&due); err != nil {
 		return time.Time{}, false, err
 	}
 	if due == nil {

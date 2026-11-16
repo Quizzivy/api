@@ -29,7 +29,8 @@ func letterFor(t *testing.T, tmpl email.Template, locale, name string) email.Let
 			CourseFor: "child", CallTime: "evening", ReceivedAt: time.Date(2026, 11, 15, 7, 5, 0, 0, time.UTC),
 		}
 	default:
-		t.Fatalf("no fixture for template %q", tmpl)
+		l.Params = noticeFixture(t, tmpl, name)
+		l.Staff = email.StaffOnly(tmpl) || tmpl == email.MessageReceived
 	}
 	return l
 }
@@ -42,8 +43,10 @@ func wantLink(tmpl email.Template) string {
 		return appURL + "/login"
 	case email.LeadReceived:
 		return appURL + "/admin/leads/0192a7c0-0000-7000-8000-000000000002"
-	default:
+	case email.DataExportReady:
 		return appURL + "/admin/exports/0192a7c0-0000-7000-8000-000000000001"
+	default:
+		return appURL + noticeLinks[tmpl]
 	}
 }
 

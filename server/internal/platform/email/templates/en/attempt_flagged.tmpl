@@ -1,0 +1,29 @@
+{{define "subject"}}{{.Org}}: {{.Params.StudentName}}'s attempt was flagged · {{.Params.Title}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}
+
+{{.Params.StudentName}}'s attempt at {{.Params.Title}} was flagged{{if eq .Params.FocusLost 1}}: they left the test once{{else if .Params.FocusLost}}: they left the test {{.Params.FocusLost}} times{{end}}.
+
+Open the attempt to review it:
+
+{{.Link}}
+
+--
+Change which emails you get:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}</p>
+<p>{{.Params.StudentName}}'s attempt at {{.Params.Title}} was flagged{{if eq .Params.FocusLost 1}}: they left the test once{{else if .Params.FocusLost}}: they left the test {{.Params.FocusLost}} times{{end}}.</p>
+<p>Open the attempt to review it:</p>
+<p><a href="{{.Link}}">Open the attempt</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
+</body>
+</html>{{end}}

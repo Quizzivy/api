@@ -88,10 +88,12 @@ func (DataExportReadyParams) Template() Template { return DataExportReady }
 func (LeadReceivedParams) Template() Template { return LeadReceived }
 
 type definition struct {
-	secret bool
-	staff  bool
-	decode func([]byte) (Params, error)
-	link   func(appURL string, p Params, secret string) string
+	secret   bool
+	staff    bool
+	prepared bool
+	event    string
+	decode   func([]byte) (Params, error)
+	link     func(appURL string, p Params, secret string) string
 }
 
 func decoder[P Params]() func([]byte) (Params, error) {
@@ -108,7 +110,7 @@ func setPasswordLink(appURL string, _ Params, secret string) string {
 	return appURL + "/set-password#token=" + secret
 }
 
-var definitions = map[Template]definition{
+var definitions = withNotices(map[Template]definition{
 	AccountInvite:     {secret: true, decode: decoder[AccountInviteParams](), link: setPasswordLink},
 	PasswordResetLink: {secret: true, decode: decoder[PasswordResetLinkParams](), link: setPasswordLink},
 	SignInInvite: {decode: decoder[SignInInviteParams](), link: func(appURL string, _ Params, _ string) string {
@@ -120,11 +122,19 @@ var definitions = map[Template]definition{
 	LeadReceived: {staff: true, decode: decoder[LeadReceivedParams](), link: func(appURL string, p Params, _ string) string {
 		return appURL + "/admin/leads/" + url.PathEscape(p.(LeadReceivedParams).LeadID)
 	}},
+})
+
+func withNotices(defs map[Template]definition) map[Template]definition {
+	for t, def := range noticeDefinitions {
+		defs[t] = def
+	}
+	return defs
 }
 
-// Templates lists every template the app sends.
+// Templates lists every template the app sends: R5's account, export and
+// lead mail, then the notification emails.
 func Templates() []Template {
-	return []Template{AccountInvite, PasswordResetLink, SignInInvite, DataExportReady, LeadReceived}
+	return append([]Template{AccountInvite, PasswordResetLink, SignInInvite, DataExportReady, LeadReceived}, noticeTemplates...)
 }
 
 func templateNames() []string {
@@ -162,7 +172,9 @@ func DecodeParams(t Template, raw []byte) (Params, error) {
 // organization's short name for the header, the origin of the web host its
 // link points into, the template's params and, for a template that needs one,
 // the secret its link carries. Zone is the time zone a template writes a time
-// in, UTC when nil.
+// in, UTC when nil. Staff says that AppURL is the staff host's, so that the
+// footer of a notification email links to the teacher workspace's settings
+// rather than the student's.
 type Letter struct {
 	Locale string
 	Org    string
@@ -170,6 +182,7 @@ type Letter struct {
 	Params Params
 	Secret string
 	Zone   *time.Location
+	Staff  bool
 }
 
 // Rendered is a rendered message's subject on one line, and its text and HTML
@@ -180,11 +193,15 @@ type Rendered struct {
 	HTML    string
 }
 
+// view is what a template executes over. Settings is the recipient's
+// notification settings on their own host, which every notification email's
+// footer links to.
 type view struct {
-	Org    string
-	Link   string
-	Params Params
-	Zone   *time.Location
+	Org      string
+	Link     string
+	Settings string
+	Params   Params
+	Zone     *time.Location
 }
 
 type pair struct {
@@ -259,7 +276,12 @@ func (r *Renderer) Render(l Letter) (Rendered, error) {
 	if zone == nil {
 		zone = time.UTC
 	}
-	v := view{Org: l.Org, Link: def.link(strings.TrimRight(l.AppURL, "/"), l.Params, l.Secret), Params: l.Params, Zone: zone}
+	appURL := strings.TrimRight(l.AppURL, "/")
+	settings := appURL + studentSettingsPath
+	if l.Staff {
+		settings = appURL + staffSettingsPath
+	}
+	v := view{Org: l.Org, Link: def.link(appURL, l.Params, l.Secret), Settings: settings, Params: l.Params, Zone: zone}
 	var subject, text, html bytes.Buffer
 	if err := p.text.ExecuteTemplate(&subject, "subject", v); err != nil {
 		return Rendered{}, err

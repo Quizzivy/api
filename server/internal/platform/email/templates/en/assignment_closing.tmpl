@@ -1,0 +1,31 @@
+{{define "subject"}}{{.Org}}: {{.Params.Title}} closes within the hour{{end}}
+
+{{define "closesAt"}}{{(.Params.ClosesAt.In .Zone).Format "2 Jan 2006, 15:04 (GMT-07:00)"}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}
+
+{{.Params.Title}} closes at {{template "closesAt" .}}, and {{.Params.NotSubmitted}} {{if eq .Params.NotSubmitted 1}}student has{{else}}students have{{end}} not handed in yet.
+
+Open the assignment to see who:
+
+{{.Link}}
+
+--
+Change which emails you get:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}</p>
+<p>{{.Params.Title}} closes at {{template "closesAt" .}}, and {{.Params.NotSubmitted}} {{if eq .Params.NotSubmitted 1}}student has{{else}}students have{{end}} not handed in yet.</p>
+<p>Open the assignment to see who:</p>
+<p><a href="{{.Link}}">Open the assignment</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
+</body>
+</html>{{end}}

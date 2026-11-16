@@ -1,0 +1,29 @@
+{{define "subject"}}{{.Org}}: {{if .Params.ClassName}}New announcement in {{.Params.ClassName}}{{else}}New message from {{.Params.SenderName}}{{end}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}
+
+{{if .Params.ClassName}}{{.Params.SenderName}} posted a new announcement in {{.Params.ClassName}}.{{else}}{{.Params.SenderName}} sent you a message.{{end}}{{if gt .Params.Count 1}} You have {{.Params.Count}} unread messages in this conversation.{{end}}
+
+Messages can only be read in Quizzivy. Open the conversation:
+
+{{.Link}}
+
+--
+Change which emails you get:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}</p>
+<p>{{if .Params.ClassName}}{{.Params.SenderName}} posted a new announcement in {{.Params.ClassName}}.{{else}}{{.Params.SenderName}} sent you a message.{{end}}{{if gt .Params.Count 1}} You have {{.Params.Count}} unread messages in this conversation.{{end}}</p>
+<p>Messages can only be read in Quizzivy. Open the conversation:</p>
+<p><a href="{{.Link}}">Open the conversation</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
+</body>
+</html>{{end}}
