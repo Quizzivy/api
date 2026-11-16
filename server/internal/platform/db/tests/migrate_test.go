@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"database/sql"
+	"maps"
 	"net/url"
 	"os"
 	"slices"
@@ -596,5 +597,78 @@ func TestTheWidenedSwitchesTakeTheWeeklySummaryAndRollBack(t *testing.T) {
 	}
 	if err := weekly(); err != nil {
 		t.Errorf("after the second up summary.weekly is refused: %v", err)
+	}
+}
+
+// TestThePreR7SwitchesGetTheDecksEmailAndUpRunsAgain runs 00171 over the rows
+// R4's settings page saved, each with email false. A staff member's switches
+// whose email the deck draws on are turned on, those it draws off stay off,
+// and a row set to true through the API is kept. A student's email becomes
+// their in-app switch. Down leaves the rows, and up runs a second time.
+func TestThePreR7SwitchesGetTheDecksEmailAndUpRunsAgain(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, reset int64 = 170, 171
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, student string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, student = f.adminID, f.studentID
+		mustExec(t, tx, `INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES
+			($1, 'attempt.flagged', true, false), ($1, 'message.received', false, false), ($1, 'attempt.submitted', true, false),
+			($1, 'assignment.closing', true, true), ($2, 'result.ready', true, false), ($2, 'assignment.due_soon', false, true)`, teacher, student)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	emails := func() map[string]bool {
+		t.Helper()
+		rows, err := conn.Query(`SELECT CASE WHEN user_id = $1 THEN 'staff ' ELSE 'student ' END || event, email
+			FROM app.notification_preferences WHERE user_id IN ($1, $2)`, teacher, student)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]bool{}
+		for rows.Next() {
+			var key string
+			var on bool
+			if err := rows.Scan(&key, &on); err != nil {
+				t.Fatal(err)
+			}
+			out[key] = on
+		}
+		return out
+	}
+	want := map[string]bool{
+		"staff attempt.flagged": true, "staff message.received": true, "staff attempt.submitted": false,
+		"staff assignment.closing": true, "student result.ready": true, "student assignment.due_soon": false,
+	}
+	if err := goose.UpTo(conn, dir, reset); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if got := emails(); !maps.Equal(got, want) {
+		t.Errorf("after 00171 the email switches are %v, want %v", got, want)
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if got := emails(); !maps.Equal(got, want) {
+		t.Errorf("after 00171's down the email switches are %v, want them left as up wrote them", got)
+	}
+	if err := goose.UpTo(conn, dir, reset); err != nil {
+		t.Fatalf("second up: %v", err)
 	}
 }
