@@ -5,6 +5,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -74,6 +75,7 @@ type isoCase struct {
 	as      map[string]string
 	excuse  map[string]string
 	blind   map[string]string
+	pending string
 }
 
 type iso struct {
@@ -274,8 +276,21 @@ func answer(s sent) string {
 
 func success(s sent) bool { return s.status >= 200 && s.status < 300 }
 
+func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
+	x.t.Helper()
+	own := x.b.with("share", uuid.NewString())
+	method, path, body := x.request(op, c, own, "", "")
+	if got := own.c.send(method, path, body); got.status != http.StatusNotImplemented {
+		x.t.Errorf("%s is pending (%s) yet answers %s: give it its isolation case", op.id, c.pending, answer(got))
+	}
+}
+
 func (x *iso) substitute(op scopedOp, c isoCase) {
 	x.t.Helper()
+	if c.pending != "" {
+		x.pendingAnswer(op, c)
+		return
+	}
 	caller := func(p *party) *party {
 		if c.student {
 			return p.student

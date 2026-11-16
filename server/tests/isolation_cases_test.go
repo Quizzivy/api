@@ -195,6 +195,12 @@ func freshAttempt(x *iso, own *party) *party {
 	return own.with("attempt", attempt)
 }
 
+func freshSet(_ *iso, own *party) *party {
+	return own.with("question-set", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-sets", map[string]any{
+		"name": "Bộ dùng một lần", "questionIds": []any{own.id("question")},
+	})))
+}
+
 func freshPublishedTest(_ *iso, own *party) *party {
 	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
 	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề đã phát hành dùng một lần"})
@@ -238,6 +244,12 @@ const (
 	outsideEvent    = "an event naming a question outside the attempt's paper is kept without it; the cross-reference scan proves the id is not stored"
 	outsideAnswer   = "an answer to a question outside the attempt's paper is dropped; the cross-reference scan proves no row names it"
 	ownOnly         = "marks only the caller's own notifications; any other id is skipped"
+
+	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
+
+	sharingPending = "T-R7.3: the sharing module"
+	editPending    = "T-R7.6: copy-on-write"
+	copyPending    = "T-R7.7: make a copy"
 
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
 	budgetSpent        = "the third call in a minute is refused 429 (two a minute per user), so the caller's own id cannot be tried here; the bulk reset flow test resets the caller's own students beside another teacher's in one batch"
@@ -346,6 +358,33 @@ func isolationCases() map[string]isoCase {
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},
+
+		"listQuestionSets":    {},
+		"createQuestionSet":   {body: fixed(map[string]any{"name": "Bộ mới", "questionIds": []any{""}})},
+		"getQuestionSet":      {},
+		"updateQuestionSet":   {body: fixed(map[string]any{"name": "Bộ đã đổi tên"})},
+		"deleteQuestionSet":   {fresh: freshSet},
+		"addQuestionSetItems": {body: fixed(map[string]any{"questionIds": []any{""}})},
+		"removeQuestionSetItems": {
+			fresh:  freshSet,
+			excuse: map[string]string{"body /questionIds/-": notInSet},
+			body:   fixed(map[string]any{"questionIds": []any{""}}),
+		},
+		"copyQuestionSet": {pending: copyPending},
+
+		"searchTeacherDirectory": {pending: sharingPending, query: map[string]string{"q": "lan"}},
+		"listShares":             {pending: sharingPending, query: map[string]string{"kind": "test"}},
+		"createShares": {pending: sharingPending, body: fixed(map[string]any{
+			"kind": "test", "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false,
+		})},
+		"updateShare":        {pending: sharingPending, body: fixed(map[string]any{"access": "edit"})},
+		"deleteShare":        {pending: sharingPending},
+		"listSharedWithMe":   {pending: sharingPending},
+		"removeSharedWithMe": {pending: sharingPending},
+
+		"editTestQuestion":     {pending: editPending, body: func(_ *iso, own *party, _ string) any { return choiceInput(own) }},
+		"copyTest":             {pending: copyPending},
+		"copyQuestionsForTest": {pending: copyPending, body: fixed(map[string]any{"questionIds": []any{""}})},
 
 		"createWordImport": {},
 		"listWordImports":  {},

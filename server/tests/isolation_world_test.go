@@ -243,6 +243,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	p.ids["question"] = id(question)
 	c.must(http.StatusOK, http.MethodPost, "/teacher/questions/tags", map[string]any{"questionIds": []string{p.ids["question"]}, "tags": []string{"cách ly"}})
+	p.ids["question-set"] = id(c.must(http.StatusCreated, http.MethodPost, "/teacher/question-sets", map[string]any{
+		"name": "Bộ cách ly " + name, "questionIds": []string{p.ids["question"]},
+	}))
 	test := c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề cách ly " + name + " " + nonce(w.t)})
 	p.ids["test"] = id(test)
 	test = c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+id(test), map[string]any{
@@ -427,6 +430,8 @@ func (w *world) snapshotOf(p *party) string {
 		  UNION ALL SELECT row_to_json(x)::text FROM app.test_versions x JOIN app.tests t ON t.id = x.test_id WHERE t.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.test_sections x JOIN app.tests t ON t.id = x.test_id WHERE t.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.questions x WHERE x.owner_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.question_sets x WHERE x.owner_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.question_set_items x JOIN app.question_sets s ON s.id = x.set_id WHERE s.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.question_groups x WHERE x.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.media_assets x WHERE x.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.word_imports x WHERE x.created_by = $1::uuid
