@@ -27,7 +27,10 @@ func TestTheStudentEligibilityTableOnTheDatabase(t *testing.T) {
 	w.enrol(mine, student)
 	w.enrol(left, student)
 	w.remove(left, student)
+	archivedWithThread := w.user("Học viên Dương", "student")
 	w.enrol(archived, student)
+	w.enrol(archived, archivedWithThread)
+	w.mustAsStudent(archivedWithThread, minhID, "Em chào thầy ạ.")
 	w.archive(archived)
 
 	formerWithThread := w.user("Học viên Bình", "student")
@@ -65,7 +68,8 @@ func TestTheStudentEligibilityTableOnTheDatabase(t *testing.T) {
 		"the teacher of a class the student left":   {student, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no writing first to a former teacher"},
 		"a former teacher with a thread":            {formerWithThread, hoaID, nil, nil, "the thread outlives the class"},
 		"a teacher who wrote first":                 {writtenFirst, lanID, nil, nil, "the thread they started"},
-		"the teacher of an archived class":          {student, minhID, nil, nil, "a member of an archived class is still in it"},
+		"the teacher of an archived class":          {student, minhID, domain.ErrNotFound, domain.ErrNotFound, "an archived class lets no one write first"},
+		"an archived class's teacher with a thread": {archivedWithThread, minhID, nil, nil, "the thread outlives the archive"},
 		"a teacher who never taught the student":    {classmate, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no class, no thread"},
 		"the staff member who created the account":  {created, creator, domain.ErrNotFound, domain.ErrNotFound, "creating is staff's tie, never the student's"},
 		"a disabled teacher of the student's class": {student, disabledTeacher, nil, domain.ErrNotAllowed, "readable, no post"},
@@ -92,6 +96,12 @@ func TestTheStudentEligibilityTableOnTheDatabase(t *testing.T) {
 		if got := rules.Teacher(facts); got != (c.read == nil) {
 			t.Errorf("%s: the manager's Teacher = %v on %+v, want %v", name, got, facts, c.read == nil)
 		}
+	}
+
+	// An archived class is not named, so its teacher reads "Former teacher"
+	// in the thread that outlived it.
+	if header, err := w.studentThread(archivedWithThread, minhID, domain.Cursor{}); err != nil || len(header.Teacher.ClassNames) != 0 || !header.Teacher.Former {
+		t.Errorf("the archived class's teacher in the header: %+v, %v, want no class names and former", header.Teacher, err)
 	}
 }
 
@@ -252,16 +262,17 @@ func TestAStudentsListNamesTheirTeachersAndTheirAnnouncedClasses(t *testing.T) {
 	if !slices.Equal(titles, want) {
 		t.Fatalf("the student's list: %v, want the announced class, then Lan's and Mai's threads (one moment, by title), then Hoa's, newest first; no channel without a post, no archived class and none of a class the student left", titles)
 	}
-	if th := byKey["direct"+lanID]; !slices.Equal(th.ClassNames, []string{"Lớp đã lưu trữ " + w.marker, "Ngữ pháp " + w.marker, "Tiếng Anh " + w.marker}) || th.Former ||
+	if th := byKey["direct"+lanID]; !slices.Equal(th.ClassNames, []string{"Ngữ pháp " + w.marker, "Tiếng Anh " + w.marker}) || th.Former ||
 		th.Unread != 1 || th.Preview == nil || th.Preview.Mine || *th.Preview.Text != "Chào em." || th.AvatarURL == nil {
-		t.Errorf("Lan's row: %+v, want 'Your teacher · ' her classes, the reply unread and previewed, her photo", th)
+		t.Errorf("Lan's row: %+v, want 'Your teacher · ' her classes that are not archived, the reply unread and previewed, her photo", th)
 	}
 	if th := byKey["direct"+hoaID]; !th.Former || len(th.ClassNames) != 0 || th.Unread != 1 {
 		t.Errorf("Hoa's row: %+v, want 'Former teacher': no class of hers now", th)
 	}
 	// The staff member who created the account and wrote first never taught
 	// the student: no class of theirs and no tie, so neither "Your teacher ·
-	// {classes}" nor "Former teacher" (the wording is the owner's to settle).
+	// {classes}" nor "Former teacher". The client reads it as "Your teacher"
+	// alone (the owner, 2026-11-17).
 	if th := byKey["direct"+maiID]; len(th.ClassNames) != 0 || th.Former || th.Unread != 1 {
 		t.Errorf("Mai's row: %+v, want no class names, not former, her message unread", th)
 	}

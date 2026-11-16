@@ -92,6 +92,8 @@ func TestTheEligibilityTableForAStudentsDirectThread(t *testing.T) {
 		"a thread the teacher started":                     {as(pupil, func(f *domain.StudentFacts) { f.Conversation = true }), nil, nil},
 		"a former teacher with a thread":                   {as(pupil, func(f *domain.StudentFacts) { f.Conversation = true }), nil, nil},
 		"a former teacher without a thread":                {pupil, domain.ErrNotFound, domain.ErrNotFound},
+		"an archived class's teacher, without a thread":    {pupil, domain.ErrNotFound, domain.ErrNotFound}, // an archived class is no Teaches
+		"an archived class's teacher, with a thread":       {as(pupil, func(f *domain.StudentFacts) { f.Conversation = true }), nil, nil},
 		"an id no account has":                             {domain.StudentFacts{Student: true}, domain.ErrNotFound, domain.ErrNotFound},
 		"the student naming themselves":                    {as(pupil, func(f *domain.StudentFacts) { f.Self, f.Teaches = true, true }), domain.ErrNotFound, domain.ErrNotFound},
 		"a disabled teacher of the student's class":        {as(pupil, func(f *domain.StudentFacts) { f.Teaches, f.TeacherEnabled = true, false }), nil, domain.ErrNotAllowed},

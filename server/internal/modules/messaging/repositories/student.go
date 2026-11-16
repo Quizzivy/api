@@ -15,11 +15,15 @@ import (
 )
 
 // The SQL of the student side, over a teacher row t and the student in $1:
-// the student's classes the teacher teaches now, archived ones included, and
+// the student's classes the teacher teaches now that are not archived, and
 // whether the teacher taught the student (app.messaging_ties) and teaches
-// them in none of them now.
+// them in none of them now. An archived class lets no one write first (the
+// owner, 2026-11-17), so it is neither the Teaches fact nor a class the
+// subtitle names, as the student's class list and Messages leave it out. Its
+// channel stays readable (StudentChannel) and a thread that exists stays open.
 const (
-	teachesNow = `SELECT c.id, c.name FROM app.class_members cm JOIN app.classes c ON c.id = cm.class_id AND c.teacher_id = t.id
+	teachesNow = `SELECT c.id, c.name FROM app.class_members cm
+	  JOIN app.classes c ON c.id = cm.class_id AND c.teacher_id = t.id AND c.archived_at IS NULL
 	  WHERE cm.user_id = $1::uuid`
 	teacherClasses = `coalesce((SELECT array_agg(k.name ORDER BY app.immutable_unaccent(lower(k.name)), k.id) FROM (` + teachesNow + `) k), '{}')`
 	formerTeacher  = `(EXISTS (SELECT 1 FROM app.messaging_ties ft WHERE ft.staff_id = t.id AND ft.student_id = $1::uuid)
