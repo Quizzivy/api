@@ -14422,8 +14422,7 @@
           },
           "name": {
             "type": "string",
-            "description": "The test's title or the set's name",
-            "read now.": null
+            "description": "The test's title or the set's name, read now."
           },
           "owner": {
             "$ref": "#/components/schemas/SharedWithMeOwner"
@@ -18828,6 +18827,16 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `setId` names no set the caller can read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -18916,6 +18925,26 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "description": "`SHARE_READ_ONLY` — `forTestId` names a test the caller holds a Can use grant to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `forTestId` names no test the caller can read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -19454,7 +19483,10 @@
                       "string",
                       "null"
                     ],
-                    "maxLength": 500
+                    "maxLength": 500,
+                    "description": "Trimmed; empty after trimming, or `null`, removes the description.",
+                    "x-go-type": "json.RawMessage",
+                    "x-go-type-skip-optional-pointer": true
                   }
                 }
               }

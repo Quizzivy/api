@@ -7731,7 +7731,7 @@ components:
         shareId: { $ref: '#/components/schemas/Uuid' }
         kind: { $ref: '#/components/schemas/ShareKind' }
         resourceId: { $ref: '#/components/schemas/Uuid' }
-        name: { type: string, description: The test's title or the set's name, read now. }
+        name: { type: string, description: "The test's title or the set's name, read now." }
         owner: { $ref: '#/components/schemas/SharedWithMeOwner' }
         access: { $ref: '#/components/schemas/ShareAccess' }
         sharedAt: { $ref: '#/components/schemas/Timestamp' }
@@ -10395,6 +10395,11 @@ paths:
                           from. Distinct from `facets.all`, which ignores the
                           type filter so the "Tất cả" row can show a total.
         '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: '`NOT_FOUND` — `setId` names no set the caller can read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     post:
       operationId: createQuestion
       x-resource:
@@ -10432,6 +10437,16 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdminQuestion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — `forTestId` names a test the caller holds a Can use grant to.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: '`NOT_FOUND` — `forTestId` names no test the caller can read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /teacher/questions/tags:
     post:
@@ -10715,7 +10730,12 @@ paths:
               additionalProperties: false
               properties:
                 name: { type: string, minLength: 1, maxLength: 120 }
-                description: { type: [string, 'null'], maxLength: 500 }
+                description:
+                  type: [string, 'null']
+                  maxLength: 500
+                  description: Trimmed; empty after trimming, or `null`, removes the description.
+                  x-go-type: json.RawMessage
+                  x-go-type-skip-optional-pointer: true
       responses:
         '200':
           description: Saved.
