@@ -319,3 +319,51 @@ func TestConcurrentFirstPostsMakeOneThread(t *testing.T) {
 		}
 	}
 }
+
+// TestARemovalDuringAStudentsFirstPostLeavesNoThread: a student may write
+// first only to the teacher of a class they are in, so a first post and the
+// student's removal from that class must not interleave. The removal is held
+// open while the student posts: the post waits on the membership it holds FOR
+// SHARE, and once the removal commits it finds the student in no class of the
+// teacher's and answers as for a teacher it may not name, making no thread.
+// Without the hold, the post reads the membership the removal has not yet
+// committed away and starts a thread with a teacher the student has left.
+func TestARemovalDuringAStudentsFirstPostLeavesNoThread(t *testing.T) {
+	p := newPooled(t)
+	ctx := context.Background()
+	teacher := p.user("Cô Diệp", "teacher")
+	class := p.class(teacher, "Lớp 3A")
+	student := p.user("Học viên Quân", "student")
+	if _, err := p.pool.Exec(ctx, `INSERT INTO app.class_members (class_id, user_id, joined_via) VALUES ($1::uuid, $2::uuid, 'admin')`, class, student); err != nil {
+		t.Fatal(err)
+	}
+
+	removal, err := p.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = removal.Rollback(ctx) }()
+	if _, err := removal.Exec(ctx, `DELETE FROM app.class_members WHERE class_id = $1::uuid AND user_id = $2::uuid`, class, student); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan result, 1)
+	go func() {
+		posted, err := p.app.Commands.PostAsStudent.Handle(ctx, command.PostAsStudent{
+			StudentID: student, TeacherID: teacher, ClientID: uuid.NewString(), Body: "Em chào cô.",
+		})
+		done <- result{domain.Posted{Created: posted.Created}, err}
+	}()
+	select {
+	case r := <-done:
+		t.Fatalf("the first post finished while the removal was open: created %v, %v; want it to wait on the membership", r.posted.Created, r.err)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if err := removal.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	wantErr(t, "the first post once the removal committed", r.err, domain.ErrNotFound)
+	if n := p.count(`SELECT count(*)::int FROM app.conversations WHERE kind = 'direct' AND staff_id = $1::uuid AND student_id = $2::uuid`, teacher, student); n != 0 {
+		t.Errorf("%d threads with the teacher the student left, want none", n)
+	}
+}
