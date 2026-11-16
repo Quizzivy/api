@@ -145,6 +145,20 @@ func fixture(t *testing.T, name string) []byte {
 	return data
 }
 
+// uploadedAgo records a PDF uploader stored ago, its row and its object, as
+// the upload would have then. The app role may not change a file's row
+// (00163), so the row is written with its time rather than moved back.
+func (w *world) uploadedAgo(store *files, uploader string, ago time.Duration) domain.Attachment {
+	w.t.Helper()
+	a := domain.Attachment{ID: uuid.NewString(), Filename: "Cũ.pdf", Bytes: 10, MimeType: domain.MimePDF}
+	key := domain.StorageKey(a.ID, a.MimeType)
+	w.exec(`INSERT INTO app.message_attachments (id, uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256, created_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, sha256('x'::bytea), now() - make_interval(secs => $7))`,
+		a.ID, uploader, key, a.MimeType, a.Bytes, a.Filename, ago.Seconds())
+	store.put(key, time.Now().Add(-ago))
+	return a
+}
+
 func (w *world) upload(uploader, filename string, data []byte) (domain.Attachment, error) {
 	w.t.Helper()
 	return w.app.Commands.UploadAttachment.Handle(context.Background(), command.UploadAttachment{
@@ -429,13 +443,11 @@ func TestTheSweepsRemoveUnsentFilesAndUnnamedObjectsAndKeepSentOnes(t *testing.T
 	w.enrol(class, student)
 	ctx := context.Background()
 
-	old := w.mustUpload(teacher, "Cũ.pdf", fixture(t, "document.pdf"))
-	sent := w.mustUpload(teacher, "Đã gửi.pdf", fixture(t, "document.pdf"))
+	old, sent := w.uploadedAgo(store, teacher, 25*time.Hour), w.uploadedAgo(store, teacher, 25*time.Hour)
 	fresh := w.mustUpload(teacher, "Mới.pdf", fixture(t, "document.pdf"))
 	if _, err := w.postFile(by(teacher), student, sent.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	w.exec(`UPDATE app.message_attachments SET created_at = now() - interval '25 hours' WHERE id = ANY($1::uuid[])`, []string{old.ID, sent.ID})
 	keyOf := func(a domain.Attachment) string { return domain.StorageKey(a.ID, a.MimeType) }
 
 	removed, err := w.app.Commands.SweepUnsentAttachments.Handle(ctx, command.SweepUnsentAttachments{Limit: 500})
