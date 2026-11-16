@@ -48,8 +48,7 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 	listResult, err := h.app.Queries.List.Handle(ctx, query.List{Input: in, Reader: httpapi.ScopeFromContext(ctx)})
 	found, page := listResult.Items, listResult.Page
 	if errors.Is(err, domain.ErrSetNotFound) {
-		return openapi.ListQuestions400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(
-			httpapi.FieldError(ctx, "setId", msgSetNotFound(ctx)))}, nil
+		return openapi.ListQuestions404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
 	}
 	if err != nil {
 		return nil, err
@@ -157,8 +156,7 @@ func (h Questions) CreateQuestion(ctx context.Context, request openapi.CreateQue
 
 	q, err := h.app.Commands.Create.Handle(ctx, command.Create{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
 	if errors.Is(err, domain.ErrTestNotFound) {
-		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(
-			httpapi.FieldError(ctx, "forTestId", msgTestNotFound(ctx)))}, nil
+		return openapi.CreateQuestion404JSONResponse(httpapi.NotFound(ctx, msgTestNotFound(ctx))), nil
 	}
 	if resp, handled := questionWriteError(ctx, err); handled {
 		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil

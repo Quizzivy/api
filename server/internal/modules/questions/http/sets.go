@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,7 @@ import (
 	"quizzivy/internal/platform/httpapi"
 	"quizzivy/internal/platform/httpx"
 	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/validation"
 )
 
 func msgSetNotFound(ctx context.Context) string {
@@ -147,9 +149,11 @@ func (h Questions) UpdateQuestionSet(ctx context.Context, request openapi.Update
 	if !ok {
 		return nil, httpx.ErrNotImplemented
 	}
-	set, err := h.app.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: w, Fields: domain.SetFields{
-		Name: request.Body.Name, Description: request.Body.Description, DescriptionSet: request.Body.Description != nil,
-	}})
+	fields, err := setFieldsOf(*request.Body)
+	var set domain.QuestionSet
+	if err == nil {
+		set, err = h.app.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: w, Fields: fields})
+	}
 	var invalid *domain.ValidationError
 	switch {
 	case err == nil:
@@ -163,6 +167,18 @@ func (h Questions) UpdateQuestionSet(ctx context.Context, request openapi.Update
 	default:
 		return nil, err
 	}
+}
+
+func setFieldsOf(body openapi.UpdateQuestionSetJSONRequestBody) (domain.SetFields, error) {
+	fields := domain.SetFields{Name: body.Name}
+	if len(body.Description) > 0 {
+		var description *string
+		if err := json.Unmarshal(body.Description, &description); err != nil {
+			return domain.SetFields{}, validation.Refuse("description", "Mô tả phải là văn bản.", "The description must be text.")
+		}
+		fields.Description, fields.DescriptionSet = description, true
+	}
+	return fields, nil
 }
 
 func (h Questions) DeleteQuestionSet(ctx context.Context, request openapi.DeleteQuestionSetRequestObject) (openapi.DeleteQuestionSetResponseObject, error) {

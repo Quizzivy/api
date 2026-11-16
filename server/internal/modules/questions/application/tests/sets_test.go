@@ -131,6 +131,10 @@ func TestASetHoldsItsQuestionsInTheOrderGivenAndListsThemSo(t *testing.T) {
 	if err != nil || renamed.Name != "Ngữ pháp" || renamed.Description == nil || *renamed.Description != "Cho lớp tối" {
 		t.Fatalf("renaming the set: %+v, %v", renamed, err)
 	}
+	cleared, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: setWriteBy(w.a, false, set.ID), Fields: domain.SetFields{DescriptionSet: true}})
+	if err != nil || cleared.Description != nil || cleared.Name != "Ngữ pháp" {
+		t.Fatalf("clearing the description: %+v, %v", cleared, err)
+	}
 
 	sets, err := w.svc.Queries.ListSets.Handle(ctx, query.ListSets{Scope: mine})
 	if err != nil || len(sets) != 1 || sets[0].ID != set.ID || sets[0].QuestionCount != 2 {
