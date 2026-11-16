@@ -398,7 +398,7 @@ func isolationCases() map[string]isoCase {
 			excuse: map[string]string{"body /questionIds/-": notInSet},
 			body:   fixed(map[string]any{"questionIds": []any{""}}),
 		},
-		"copyQuestionSet": {pending: copyPending},
+		"copyQuestionSet": {body: fixed(map[string]any{"questionIds": []any{""}})},
 
 		"searchTeacherDirectory": {query: map[string]string{"q": "lan"}},
 		"listShares": {each: []isoCase{

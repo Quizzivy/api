@@ -124,7 +124,8 @@ type QuestionSet struct {
 
 // QuestionsNotFoundError names the ids of a set write that are not live
 // standalone questions of the set owner's bank, in the order given, so another
-// teacher's ids answer as missing ones do. It is an ErrNotFound.
+// teacher's ids answer as missing ones do; and those of a copy that the copier
+// cannot read, or that the set copied does not hold. It is an ErrNotFound.
 type QuestionsNotFoundError struct{ IDs []string }
 
 func (e *QuestionsNotFoundError) Error() string {
@@ -237,6 +238,10 @@ type SetRepository interface {
 	AddToSet(ctx context.Context, w SetWrite, questionIDs []string) (QuestionSet, error)
 	// RemoveFromSet takes questionIDs out of the set; one it does not hold is ignored.
 	RemoveFromSet(ctx context.Context, w SetWrite, questionIDs []string) (QuestionSet, error)
+	// CopySet copies a set the actor can read into the actor's own content:
+	// the whole set as a new one when questionIDs is nil, otherwise just those
+	// of its questions, into the actor's bank.
+	CopySet(ctx context.Context, w SetWrite, questionIDs []string) (SetCopy, error)
 }
 
 // WriteContexts writes a bank edit made in the context of a set (setId). The

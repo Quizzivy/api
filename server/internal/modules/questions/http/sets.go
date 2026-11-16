@@ -38,7 +38,10 @@ func setInvalid(ctx context.Context, invalid *domain.ValidationError) openapi.Er
 	return httpapi.Invalid(ctx, httpx.Text(ctx, "Dữ liệu bộ câu hỏi không hợp lệ.", "The question set data is not valid."), invalid)
 }
 
-func setQuestionsNotFound(ctx context.Context, missing *domain.QuestionsNotFoundError) openapi.ErrorResponse {
+// QuestionsNotFound is the 404 naming the questions a write could not use, as
+// details.questionIds: a set write's and a copy's alike, the tests module's
+// question-copies included.
+func QuestionsNotFound(ctx context.Context, missing *domain.QuestionsNotFoundError) openapi.ErrorResponse {
 	ids := make([]openapi.Uuid, len(missing.IDs))
 	for i, id := range missing.IDs {
 		ids[i] = httpapi.ParseUUID(id)
@@ -120,7 +123,7 @@ func (h Questions) CreateQuestionSet(ctx context.Context, request openapi.Create
 	case errors.As(err, &invalid):
 		return openapi.CreateQuestionSet400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(setInvalid(ctx, invalid))}, nil
 	case errors.As(err, &missing):
-		return openapi.CreateQuestionSet404JSONResponse(setQuestionsNotFound(ctx, missing)), nil
+		return openapi.CreateQuestionSet404JSONResponse(QuestionsNotFound(ctx, missing)), nil
 	default:
 		return nil, err
 	}
@@ -225,7 +228,7 @@ func (h Questions) AddQuestionSetItems(ctx context.Context, request openapi.AddQ
 	case errors.Is(err, domain.ErrSetNotFound):
 		return openapi.AddQuestionSetItems404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
 	case errors.As(err, &missing):
-		return openapi.AddQuestionSetItems404JSONResponse(setQuestionsNotFound(ctx, missing)), nil
+		return openapi.AddQuestionSetItems404JSONResponse(QuestionsNotFound(ctx, missing)), nil
 	case errors.Is(err, domain.ErrSetOwnerOnly):
 		return openapi.AddQuestionSetItems403JSONResponse(setOwnerOnly(ctx)), nil
 	default:
@@ -255,4 +258,53 @@ func (h Questions) RemoveQuestionSetItems(ctx context.Context, request openapi.R
 	default:
 		return nil, err
 	}
+}
+
+// CopyQuestionSet implements POST /teacher/question-sets/{id}/copy.
+func (h Questions) CopyQuestionSet(ctx context.Context, request openapi.CopyQuestionSetRequestObject) (openapi.CopyQuestionSetResponseObject, error) {
+	if h.app == nil || h.app.Commands.CopySet == nil {
+		return nil, httpx.ErrNotImplemented
+	}
+	w, ok := setWrite(ctx, request.Id.String())
+	if !ok {
+		return nil, httpx.ErrNotImplemented
+	}
+	var chosen []string
+	if request.Body != nil && request.Body.QuestionIds != nil {
+		chosen = uuidStrings(*request.Body.QuestionIds)
+	}
+	copied, err := h.app.Commands.CopySet.Handle(ctx, command.CopySet{Write: w, QuestionIDs: chosen})
+	var invalid *domain.ValidationError
+	var missing *domain.QuestionsNotFoundError
+	switch {
+	case err == nil:
+		out := openapi.CopyQuestionSet201JSONResponse{QuestionIds: make([]openapi.Uuid, len(copied.QuestionIDs))}
+		for i, id := range copied.QuestionIDs {
+			out.QuestionIds[i] = httpapi.ParseUUID(id)
+		}
+		if copied.SetID != nil {
+			id := httpapi.ParseUUID(*copied.SetID)
+			out.SetId = &id
+		}
+		return out, nil
+	case errors.As(err, &invalid):
+		return openapi.CopyQuestionSet400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(setInvalid(ctx, invalid))}, nil
+	case errors.Is(err, domain.ErrSetNotFound):
+		return openapi.CopyQuestionSet404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
+	case errors.As(err, &missing):
+		return openapi.CopyQuestionSet404JSONResponse(QuestionsNotFound(ctx, missing)), nil
+	case errors.Is(err, domain.ErrMediaNotFound):
+		return openapi.CopyQuestionSet400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(CopyMediaGone(ctx))}, nil
+	default:
+		return nil, err
+	}
+}
+
+// CopyMediaGone is the 400 a copy answers when a file a source question
+// binds was deleted after the question bound it: a copy cannot name it, as a
+// new version cannot. The tests module's copies answer it too.
+func CopyMediaGone(ctx context.Context) openapi.ErrorResponse {
+	return httpapi.Error(ctx, openapi.VALIDATIONFAILED,
+		httpx.Text(ctx, "Một tệp mà câu hỏi dùng đã bị xoá nên không thể sao chép câu hỏi.",
+			"A file one of the questions uses has been deleted, so it cannot be copied."))
 }

@@ -26,6 +26,7 @@ type Commands struct {
 	Update    cqrs.CommandHandler[command.Update, domain.Question]
 
 	AddToSet      cqrs.CommandHandler[command.AddToSet, domain.QuestionSet]
+	CopySet       cqrs.CommandHandler[command.CopySet, domain.SetCopy]
 	CreateSet     cqrs.CommandHandler[command.CreateSet, domain.QuestionSet]
 	DeleteSet     cqrs.CommandHandler[command.DeleteSet, cqrs.Nothing]
 	RemoveFromSet cqrs.CommandHandler[command.RemoveFromSet, domain.QuestionSet]
@@ -80,6 +81,7 @@ func (a *Application) WithTests(tests ports.EditableTests) *Application {
 func (a *Application) WithSets(sets domain.SetRepository, contexts domain.WriteContexts) *Application {
 	a.service.Sets, a.service.Contexts = sets, contexts
 	a.Commands.AddToSet = command.AddToSetHandler{Service: a.service}
+	a.Commands.CopySet = command.CopySetHandler{Service: a.service}
 	a.Commands.CreateSet = command.CreateSetHandler{Service: a.service}
 	a.Commands.DeleteSet = command.DeleteSetHandler{Service: a.service}
 	a.Commands.RemoveFromSet = command.RemoveFromSetHandler{Service: a.service}
