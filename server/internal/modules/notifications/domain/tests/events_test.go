@@ -8,13 +8,14 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 )
 
-func theFive() []domain.Preference {
+func theSix() []domain.Preference {
 	return []domain.Preference{
 		{Event: domain.EventAttemptSubmitted, InApp: true},
 		{Event: domain.EventAttemptFlagged, InApp: true},
 		{Event: domain.EventAssignmentClosing, InApp: true},
 		{Event: domain.EventAssignmentDueSoon, InApp: true},
 		{Event: domain.EventResultReady, InApp: true},
+		{Event: domain.EventMessageReceived, InApp: true},
 	}
 }
 
@@ -42,7 +43,7 @@ func TestTheSwitchesAreTheContractsEventsInItsOrder(t *testing.T) {
 
 func TestASwitchNeverSavedIsInTheAppAndNotByEmail(t *testing.T) {
 	got := domain.WithDefaults(nil)
-	if !slices.Equal(got, theFive()) {
+	if !slices.Equal(got, theSix()) {
 		t.Errorf("the defaults are %+v, want every switch in the app and none by email", got)
 	}
 	for _, event := range domain.Events() {
@@ -58,7 +59,7 @@ func TestASavedSwitchWinsOverItsDefault(t *testing.T) {
 		{Event: domain.EventAttemptFlagged, InApp: true, Email: true},
 		{Event: "summary.weekly", InApp: true, Email: true},
 	}
-	want := theFive()
+	want := theSix()
 	want[1].Email = true
 	want[4] = domain.Preference{Event: domain.EventResultReady, InApp: false, Email: true}
 	if got := domain.WithDefaults(stored); !slices.Equal(got, want) {
@@ -67,7 +68,7 @@ func TestASavedSwitchWinsOverItsDefault(t *testing.T) {
 }
 
 func TestAWholeSetHoldsEverySwitchExactlyOnce(t *testing.T) {
-	given := theFive()
+	given := theSix()
 	given[0].InApp, given[3].Email = false, true
 	want := slices.Clone(given)
 	slices.Reverse(given)
@@ -76,21 +77,21 @@ func TestAWholeSetHoldsEverySwitchExactlyOnce(t *testing.T) {
 		t.Errorf("a reversed set gives %+v (%v), want it in the switches' order: %+v", got, err, want)
 	}
 
-	repeated := theFive()
+	repeated := theSix()
 	repeated[4] = domain.Preference{Event: domain.EventAttemptSubmitted, InApp: false}
 	if _, err := domain.WholeSet(repeated); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("a repeated event: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	if _, err := domain.WholeSet(append(theFive(), theFive()[2])); !errors.Is(err, domain.ErrEventsNotOnceEach) {
+	if _, err := domain.WholeSet(append(theSix(), theSix()[2])); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("a sixth switch: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	if _, err := domain.WholeSet(theFive()[:4]); !errors.Is(err, domain.ErrEventsNotOnceEach) {
+	if _, err := domain.WholeSet(theSix()[:4]); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("a missing event: err = %v, want ErrEventsNotOnceEach", err)
 	}
 	if _, err := domain.WholeSet(nil); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("no switch at all: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	unknown := theFive()
+	unknown := theSix()
 	unknown[2].Event = "class.joined"
 	if _, err := domain.WholeSet(unknown); !errors.Is(err, domain.ErrUnknownEvent) {
 		t.Errorf("an event that is not a switch: err = %v, want ErrUnknownEvent", err)

@@ -11,6 +11,7 @@ const (
 	maxName       = 200
 	maxClassNames = 5
 	maxMessage    = 500
+	maxExcerpt    = 80
 )
 
 // Params is what one kind's sentence is built from: plain values under the
@@ -44,6 +45,8 @@ type fields struct {
 	Message      *string    `json:"message,omitempty"`
 	EditorName   *string    `json:"editorName,omitempty"`
 	Version      *int       `json:"version,omitempty"`
+	SenderName   *string    `json:"senderName,omitempty"`
+	Excerpt      *string    `json:"excerpt,omitempty"`
 }
 
 // Encode returns p as the object the store keeps and the reader is sent. It
@@ -70,7 +73,8 @@ func (f fields) valid() bool {
 func (f fields) sharing() bool {
 	return within(f.SharerName, maxName) && within(f.Name, maxTitle) && within(f.Message, maxMessage) &&
 		within(f.EditorName, maxName) && oneOf(f.ContentKind, ShareTest, ShareQuestionSet) &&
-		oneOf(f.Access, ShareUse, ShareEdit) && (f.Version == nil || *f.Version >= 1)
+		oneOf(f.Access, ShareUse, ShareEdit) && (f.Version == nil || *f.Version >= 1) &&
+		within(f.SenderName, maxName) && within(f.Excerpt, maxExcerpt)
 }
 
 func oneOf(value *string, allowed ...string) bool {
@@ -344,4 +348,36 @@ func (PublishedByCollaborator) Kind() Kind { return TestPublishedByCollaborator 
 
 func (p PublishedByCollaborator) fields() fields {
 	return fields{EditorName: &p.EditorName, Title: &p.Title, Version: &p.Version}
+}
+
+// MessageNotice is MessageReceived's params: who wrote the newest message of
+// a thread the teacher has not read, how many are unread, and the newest one's
+// first 80 characters or its file's name. No producer writes it before
+// T-R7.12.
+type MessageNotice struct {
+	SenderName string
+	Count      int
+	Excerpt    string
+}
+
+func (MessageNotice) Kind() Kind { return MessageReceived }
+
+func (p MessageNotice) fields() fields {
+	return fields{SenderName: &p.SenderName, Count: &p.Count, Excerpt: &p.Excerpt}
+}
+
+// TeacherMessageNotice is MessageFromTeacher's params: MessageNotice's, and
+// for a class announcement the class's name. No producer writes it before
+// T-R7.12.
+type TeacherMessageNotice struct {
+	SenderName string
+	Count      int
+	Excerpt    string
+	ClassName  *string
+}
+
+func (TeacherMessageNotice) Kind() Kind { return MessageFromTeacher }
+
+func (p TeacherMessageNotice) fields() fields {
+	return fields{SenderName: &p.SenderName, Count: &p.Count, Excerpt: &p.Excerpt, ClassName: p.ClassName}
 }

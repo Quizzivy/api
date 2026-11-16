@@ -84,14 +84,14 @@ func TestMarkAllReadMarksOnlyThroughTheCallersOwnStatement(t *testing.T) {
 	}
 }
 
-func TestPreferencesFillTheFiveDefaults(t *testing.T) {
+func TestPreferencesFillTheSixDefaults(t *testing.T) {
 	store := only(t, "Preferences")
 	got, err := over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 || store.userID != reader {
-		t.Fatalf("%d preferences for %q, want the five switches for the caller", len(got), store.userID)
+	if len(got) != 6 || store.userID != reader {
+		t.Fatalf("%d preferences for %q, want the six switches for the caller", len(got), store.userID)
 	}
 	for i, event := range domain.Events() {
 		if got[i] != (domain.Preference{Event: event, InApp: true, Email: false}) {

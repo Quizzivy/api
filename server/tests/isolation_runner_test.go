@@ -280,6 +280,9 @@ func success(s sent) bool { return s.status >= 200 && s.status < 300 }
 func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
 	x.t.Helper()
 	own := x.b
+	if c.student {
+		own = x.b.student
+	}
 	method, path, body := x.request(op, c, own, "", "")
 	if got := own.c.send(method, path, body); got.status != http.StatusNotImplemented {
 		x.t.Errorf("%s is pending (%s) yet answers %s: give it its isolation case", op.id, c.pending, answer(got))

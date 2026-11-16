@@ -188,7 +188,7 @@ func (s *Postgres) Facets(ctx context.Context, scope access.Scope, query string)
 // class's own.
 func (s *Postgres) ListMine(ctx context.Context, userID string) ([]domain.MyClass, error) {
 	rows, err := s.Query(ctx, `
-	SELECT c.id::text, c.name, c.description, me.joined_at,
+	SELECT c.id::text, c.name, c.description, me.joined_at, c.teacher_id::text,
 	       (SELECT coalesce(t.display_name, t.full_name) FROM app.users t WHERE t.id = c.teacher_id),
 	       (SELECT t.avatar_key FROM app.users t WHERE t.id = c.teacher_id),
 	       c.schedule_label, c.room
@@ -205,7 +205,7 @@ func (s *Postgres) ListMine(ctx context.Context, userID string) ([]domain.MyClas
 	var out []domain.MyClass
 	for rows.Next() {
 		var c domain.MyClass
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.JoinedAt, &c.TeacherName, &c.TeacherAvatarKey,
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.JoinedAt, &c.TeacherID, &c.TeacherName, &c.TeacherAvatarKey,
 			&c.ScheduleLabel, &c.Room); err != nil {
 			return nil, fmt.Errorf("list my classes: %w", err)
 		}

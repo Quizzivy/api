@@ -274,6 +274,14 @@ const (
 	outsideAnswer   = "an answer to a question outside the attempt's paper is dropped; the cross-reference scan proves no row names it"
 	ownOnly         = "marks only the caller's own notifications; any other id is skipped"
 
+	// The messaging operations answer 501 until their tasks build them. A
+	// pending case only needs a request the contract accepts, so as points the
+	// kinds the world does not hold yet (messaging-peer, attachment, a
+	// student's class) at ids it does hold; each task replaces its cases.
+	staffMessagingPending   = "T-R7.10a: the staff side of messaging"
+	studentMessagingPending = "T-R7.10b: the student side of messaging"
+	attachmentsPending      = "T-R7.11: message attachments"
+
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
@@ -283,6 +291,12 @@ const (
 )
 
 func isolationCases() map[string]isoCase {
+	messagePost := func(*iso, *party, string) any {
+		return map[string]any{"clientId": uuid.NewString(), "body": "Chào em, cô gửi lịch học tuần sau."}
+	}
+	messageRead := func(*iso, *party, string) any {
+		return map[string]any{"lastReadMessageId": uuid.NewString()}
+	}
 	fixed := func(v map[string]any) func(*iso, *party, string) any {
 		return func(*iso, *party, string) any { return v }
 	}
@@ -571,11 +585,28 @@ func isolationCases() map[string]isoCase {
 			blind:  map[string]string{"body /ids/-": ownOnly},
 			body:   fixed(map[string]any{"ids": []any{""}}),
 		},
-		"getMySummary":                  {},
-		"getNotificationPreferences":    {},
-		"updateNotificationPreferences": {},
-		"updatePreferences":             {},
-		"setAvatar":                     {format: "avatar"},
-		"deleteAvatar":                  {},
+		"getMySummary":               {},
+		"getNotificationPreferences": {},
+
+		"listStaffThreads":               {pending: staffMessagingPending, query: map[string]string{"tab": "all"}},
+		"getStaffDirectThread":           {pending: staffMessagingPending, as: map[string]string{"path studentId": "student"}},
+		"postStaffDirectMessage":         {pending: staffMessagingPending, as: map[string]string{"path studentId": "student", "body /attachmentId": "media"}, body: messagePost},
+		"markStaffDirectThreadRead":      {pending: staffMessagingPending, as: map[string]string{"path studentId": "student"}, body: messageRead},
+		"getStaffClassThread":            {pending: staffMessagingPending},
+		"postClassAnnouncement":          {pending: staffMessagingPending, as: map[string]string{"body /attachmentId": "media"}, body: messagePost},
+		"markStaffClassThreadRead":       {pending: staffMessagingPending, body: messageRead},
+		"listStudentThreads":             {pending: studentMessagingPending, student: true},
+		"getStudentDirectThread":         {pending: studentMessagingPending, student: true},
+		"postStudentDirectMessage":       {pending: studentMessagingPending, student: true, body: messagePost},
+		"markStudentDirectThreadRead":    {pending: studentMessagingPending, student: true, body: messageRead},
+		"getStudentClassThread":          {pending: studentMessagingPending, student: true, as: map[string]string{"path classId": "assignment"}},
+		"markStudentClassThreadRead":     {pending: studentMessagingPending, student: true, as: map[string]string{"path classId": "assignment"}, body: messageRead},
+		"uploadMessageAttachment":        {pending: attachmentsPending, format: "png"},
+		"getStaffMessageAttachmentUrl":   {pending: attachmentsPending, as: map[string]string{"path id": "media"}},
+		"getStudentMessageAttachmentUrl": {pending: attachmentsPending, student: true, as: map[string]string{"path id": "media"}},
+		"updateNotificationPreferences":  {},
+		"updatePreferences":              {},
+		"setAvatar":                      {format: "avatar"},
+		"deleteAvatar":                   {},
 	}
 }

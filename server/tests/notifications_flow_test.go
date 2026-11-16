@@ -114,7 +114,7 @@ func TestASignedInUserReadsMarksAndSwitchesOnlyTheirOwnNotifications(t *testing.
 	}
 	teacher.must(http.StatusBadRequest, http.MethodGet, "/me/notifications?limit=51", nil)
 
-	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready"}
+	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received"}
 	switches := func(c *client) []any {
 		t.Helper()
 		return c.must(http.StatusOK, http.MethodGet, "/me/notification-preferences", nil)["items"].([]any)

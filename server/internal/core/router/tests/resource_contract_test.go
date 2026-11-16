@@ -13,7 +13,7 @@ import (
 var resourceKinds = []string{
 	"test", "test-version", "section", "question", "version-question", "version-recording", "question-group", "media",
 	"import", "import-source", "class", "assignment", "attempt", "student", "notification", "override", "question-set",
-	"share", "none",
+	"share", "messaging-peer", "attachment", "none",
 }
 
 type resourceEntry struct {

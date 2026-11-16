@@ -209,13 +209,13 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		}
 		return out.VisitGetMySummaryResponse(w)
 	})
-	if got := summary.Body.String(); got != `{"unreadNotifications":4}`+"\n" || summarised.UserID != caller {
+	if got := summary.Body.String(); got != `{"unreadMessages":0,"unreadNotifications":4}`+"\n" || summarised.UserID != caller {
 		t.Errorf("the summary is %s for %q", got, summarised.UserID)
 	}
 
 	const switches = `[{"email":false,"event":"attempt.submitted","inApp":true},{"email":true,"event":"attempt.flagged","inApp":false},` +
 		`{"email":false,"event":"assignment.closing","inApp":true},{"email":false,"event":"assignment.due_soon","inApp":true},` +
-		`{"email":false,"event":"result.ready","inApp":true}]` + "\n"
+		`{"email":false,"event":"result.ready","inApp":true},{"email":false,"event":"message.received","inApp":true}]` + "\n"
 	preferences := answered(t, "", func(ctx context.Context, w http.ResponseWriter) error {
 		out, err := transport.GetNotificationPreferences(ctx, openapi.GetNotificationPreferencesRequestObject{})
 		if err != nil {
@@ -249,7 +249,7 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		t.Errorf("saving answered %d %s, want the stored switches", updated.Code, updated.Body.String())
 	}
 	if saved.UserID != caller || !slices.Equal(saved.Preferences, stored) {
-		t.Errorf("the command was %+v, want the caller's five switches as sent", saved)
+		t.Errorf("the command was %+v, want the caller's six switches as sent", saved)
 	}
 }
 

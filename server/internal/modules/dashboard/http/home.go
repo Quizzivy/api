@@ -34,7 +34,8 @@ func (h Dashboard) GetTeacherSummary(ctx context.Context, request openapi.GetTea
 	if err != nil {
 		return nil, err
 	}
-	return openapi.GetTeacherSummary200JSONResponse{LiveAssignments: out.LiveAssignments, AnswersToGrade: out.AnswersToGrade, UnreadNotifications: out.UnreadNotifications, SharedWithMe: out.SharedWithMe}, nil
+	// unreadMessages is 0 until the messaging module counts it (T-R7.12).
+	return openapi.GetTeacherSummary200JSONResponse{LiveAssignments: out.LiveAssignments, AnswersToGrade: out.AnswersToGrade, UnreadNotifications: out.UnreadNotifications, SharedWithMe: out.SharedWithMe, UnreadMessages: 0}, nil
 }
 
 func toAPISubmissions(in domain.Submissions) (openapi.DashboardSubmissions, error) {

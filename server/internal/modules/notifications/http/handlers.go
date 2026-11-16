@@ -100,6 +100,9 @@ func toAPINotification(n domain.Notification) (openapi.Notification, error) {
 			AssignmentId: optionalID(n.Target.AssignmentID),
 			AttemptId:    optionalID(n.Target.AttemptID),
 			TestId:       optionalID(n.Target.TestID),
+			StudentId:    optionalID(n.Target.StudentID),
+			TeacherId:    optionalID(n.Target.TeacherID),
+			ClassId:      optionalID(n.Target.ClassID),
 		}
 	}
 	return out, nil
@@ -173,5 +176,6 @@ func (h Notifications) GetMySummary(ctx context.Context, request openapi.GetMySu
 	if err != nil {
 		return nil, err
 	}
-	return openapi.GetMySummary200JSONResponse{UnreadNotifications: summary.UnreadNotifications}, nil
+	// unreadMessages is 0 until the messaging module counts it (T-R7.12).
+	return openapi.GetMySummary200JSONResponse{UnreadNotifications: summary.UnreadNotifications, UnreadMessages: 0}, nil
 }

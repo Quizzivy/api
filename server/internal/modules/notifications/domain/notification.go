@@ -35,6 +35,9 @@ const (
 
 	ContentShared               Kind = "content.shared"
 	TestPublishedByCollaborator Kind = "test.published_by_collaborator"
+
+	MessageReceived    Kind = "message.received"
+	MessageFromTeacher Kind = "message.from_teacher"
 )
 
 var governing = map[Kind]Event{
@@ -45,6 +48,8 @@ var governing = map[Kind]Event{
 	AssignmentDueSoon:  EventAssignmentDueSoon,
 	AssignmentExtended: EventAssignmentDueSoon,
 	ResultReady:        EventResultReady,
+	MessageReceived:    EventMessageReceived,
+	MessageFromTeacher: EventMessageReceived,
 }
 
 var switchless = map[Kind]bool{

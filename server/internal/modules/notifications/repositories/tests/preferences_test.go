@@ -61,7 +61,7 @@ func TestASwitchDefaultsUntilItIsStoredAndTheStoredOneWins(t *testing.T) {
 	defaults := domain.WithDefaults(nil)
 
 	if got := preferences(t, app, userID); !slices.Equal(got, defaults) {
-		t.Errorf("with no row the switches are %+v, want the five defaults", got)
+		t.Errorf("with no row the switches are %+v, want the six defaults", got)
 	}
 	if n := savedRows(t, pool, userID); n != 0 {
 		t.Errorf("reading the switches stored %d rows, want none", n)
@@ -79,6 +79,7 @@ func TestASwitchDefaultsUntilItIsStoredAndTheStoredOneWins(t *testing.T) {
 	}
 
 	given := []domain.Preference{
+		{Event: domain.EventMessageReceived, InApp: false, Email: true},
 		{Event: domain.EventResultReady, InApp: false, Email: false},
 		{Event: domain.EventAssignmentDueSoon, InApp: true, Email: true},
 		{Event: domain.EventAssignmentClosing, InApp: true, Email: false},
@@ -93,21 +94,21 @@ func TestASwitchDefaultsUntilItIsStoredAndTheStoredOneWins(t *testing.T) {
 	if got := preferences(t, app, userID); !slices.Equal(got, stored) {
 		t.Errorf("after saving the switches are %+v, want %+v", got, stored)
 	}
-	if n := savedRows(t, pool, userID); n != 5 {
-		t.Errorf("%d rows after saving, want five", n)
+	if n := savedRows(t, pool, userID); n != 6 {
+		t.Errorf("%d rows after saving, want six", n)
 	}
 
 	firstSaved := savedAt(t, pool, userID)
 	time.Sleep(20 * time.Millisecond)
-	stored[0].InApp, stored[4].Email = false, true
+	stored[0].InApp, stored[4].Email, stored[5].InApp = false, true, true
 	if got := save(t, app, userID, stored); !slices.Equal(got, stored) {
 		t.Errorf("saving again answered %+v, want %+v", got, stored)
 	}
 	if got := preferences(t, app, userID); !slices.Equal(got, stored) {
 		t.Errorf("after saving again the switches are %+v, want %+v", got, stored)
 	}
-	if n := savedRows(t, pool, userID); n != 5 {
-		t.Errorf("%d rows after saving twice, want five", n)
+	if n := savedRows(t, pool, userID); n != 6 {
+		t.Errorf("%d rows after saving twice, want six", n)
 	}
 	if again := savedAt(t, pool, userID); !again.After(firstSaved) {
 		t.Errorf("saving again left updated_at at %v, was %v", again, firstSaved)

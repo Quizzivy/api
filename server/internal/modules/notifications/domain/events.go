@@ -12,10 +12,12 @@ const (
 	EventAssignmentClosing Event = "assignment.closing"
 	EventAssignmentDueSoon Event = "assignment.due_soon"
 	EventResultReady       Event = "result.ready"
+	EventMessageReceived   Event = "message.received"
 )
 
 var events = []Event{
 	EventAttemptSubmitted, EventAttemptFlagged, EventAssignmentClosing, EventAssignmentDueSoon, EventResultReady,
+	EventMessageReceived,
 }
 
 // Events returns every switch, in the order a set of preferences is answered.

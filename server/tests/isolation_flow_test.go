@@ -297,7 +297,7 @@ func (x *iso) adminsOwnAssignmentNamesEveryTarget() {
 }
 
 func switchesAllOff() []map[string]any {
-	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready"}
+	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received"}
 	out := make([]map[string]any, len(events))
 	for i, event := range events {
 		out[i] = map[string]any{"event": event, "inApp": false, "email": true}
