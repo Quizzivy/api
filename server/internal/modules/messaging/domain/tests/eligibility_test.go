@@ -72,3 +72,45 @@ func TestTheEligibilityTableForAClassChannel(t *testing.T) {
 		}
 	}
 }
+
+// pupil is a student naming an enabled staff account with nothing tying the
+// two.
+var pupil = domain.StudentFacts{Exists: true, TeacherEnabled: true, TeacherStaff: true, Student: true}
+
+func as(f domain.StudentFacts, change func(*domain.StudentFacts)) domain.StudentFacts {
+	change(&f)
+	return f
+}
+
+func TestTheEligibilityTableForAStudentsDirectThread(t *testing.T) {
+	rules := domain.Eligibility{}
+	for name, c := range map[string]struct {
+		facts      domain.StudentFacts
+		read, post error
+	}{
+		"the teacher of a class the student is in":         {as(pupil, func(f *domain.StudentFacts) { f.Teaches = true }), nil, nil},
+		"a thread the teacher started":                     {as(pupil, func(f *domain.StudentFacts) { f.Conversation = true }), nil, nil},
+		"a former teacher with a thread":                   {as(pupil, func(f *domain.StudentFacts) { f.Conversation = true }), nil, nil},
+		"a former teacher without a thread":                {pupil, domain.ErrNotFound, domain.ErrNotFound},
+		"an id no account has":                             {domain.StudentFacts{Student: true}, domain.ErrNotFound, domain.ErrNotFound},
+		"the student naming themselves":                    {as(pupil, func(f *domain.StudentFacts) { f.Self, f.Teaches = true, true }), domain.ErrNotFound, domain.ErrNotFound},
+		"a disabled teacher of the student's class":        {as(pupil, func(f *domain.StudentFacts) { f.Teaches, f.TeacherEnabled = true, false }), nil, domain.ErrNotAllowed},
+		"a thread whose teacher is no longer staff":        {as(pupil, func(f *domain.StudentFacts) { f.Conversation, f.TeacherStaff = true, false }), nil, domain.ErrNotAllowed},
+		"a thread kept by a caller no longer a student":    {as(pupil, func(f *domain.StudentFacts) { f.Conversation, f.Student = true, false }), nil, domain.ErrNotAllowed},
+		"a staff caller sitting in the teacher's class":    {as(pupil, func(f *domain.StudentFacts) { f.Teaches, f.Student = true, false }), domain.ErrNotFound, domain.ErrNotFound},
+		"a disabled teacher the student has no class with": {as(pupil, func(f *domain.StudentFacts) { f.TeacherEnabled = false }), domain.ErrNotFound, domain.ErrNotFound},
+	} {
+		if err := rules.ReadAsStudent(c.facts); !errors.Is(err, c.read) {
+			t.Errorf("%s: read = %v, want %v", name, err, c.read)
+		}
+		if err := rules.PostAsStudent(c.facts); !errors.Is(err, c.post) {
+			t.Errorf("%s: post = %v, want %v", name, err, c.post)
+		}
+		if got := rules.CanPostAsStudent(c.facts); got != (c.post == nil) {
+			t.Errorf("%s: CanPostAsStudent = %v, want %v", name, got, c.post == nil)
+		}
+		if got := rules.Teacher(c.facts); got != (c.read == nil) {
+			t.Errorf("%s: Teacher = %v, want %v: whom a student may name is exactly whom the thread is readable to", name, got, c.read == nil)
+		}
+	}
+}

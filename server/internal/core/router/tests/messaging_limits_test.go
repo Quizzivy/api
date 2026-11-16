@@ -32,3 +32,41 @@ func TestAStaffMembersPostsSpendOneBudgetPerCaller(t *testing.T) {
 		t.Errorf("the spent poster reading the list: %d, want reads outside the posts' budget", rec.Code)
 	}
 }
+
+func TestAStudentsPostsHaveTheirOwnBudget(t *testing.T) {
+	issuer := testIssuer(t)
+	h := roleRouter(t, issuer, rolePrincipals())
+	post := `{"clientId":"01935000-0000-7000-8000-0000000000d4","body":"Em chào cô"}`
+	teacher := "/app/messages/teachers/01935000-0000-7000-8000-0000000000d5"
+	for i := range 10 {
+		if rec := sendFrom(t, h, issuer, http.MethodPost, teacher, studentUser, centreAddress, post); rec.Code != http.StatusNotImplemented {
+			t.Fatalf("post %d: %d, want it to reach the handler within the budget of 10 a minute", i+1, rec.Code)
+		}
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodPost, teacher, studentUser, homeAddress, post); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("the student's 11th post in a minute, from another address: %d, want 429", rec.Code)
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodGet, teacher, studentUser, centreAddress, ""); rec.Code != http.StatusNotImplemented {
+		t.Errorf("the spent poster reading the thread: %d, want reads outside the posts' budget", rec.Code)
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodPost, "/teacher/messages/students/01935000-0000-7000-8000-0000000000d2", teacherUser, centreAddress, post); rec.Code != http.StatusNotImplemented {
+		t.Errorf("a teacher's post behind the same address: %d, want the staff budget, untouched by the student's", rec.Code)
+	}
+}
+
+// A class's channel is read-only for a student: /app/messages has no post
+// operation for it, and the channel's post operation is gated on
+// teaching.classes.write.
+func TestAStudentCannotPostInAClassChannel(t *testing.T) {
+	issuer := testIssuer(t)
+	h := roleRouter(t, issuer, rolePrincipals())
+	post := `{"clientId":"01935000-0000-7000-8000-0000000000d6","body":"Em chào cả lớp"}`
+	class := "01935000-0000-7000-8000-0000000000d3"
+	rec := sendFrom(t, h, issuer, http.MethodPost, "/app/messages/classes/"+class, studentUser, centreAddress, post)
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET" {
+		t.Errorf("a student's post to their class's channel under /app/messages: %d, Allow %q, want 405 and GET alone", rec.Code, rec.Header().Get("Allow"))
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodPost, "/teacher/messages/classes/"+class, studentUser, centreAddress, post); rec.Code != http.StatusForbidden {
+		t.Errorf("a student's announcement to a class: %d, want 403", rec.Code)
+	}
+}

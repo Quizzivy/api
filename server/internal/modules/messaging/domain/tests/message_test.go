@@ -60,3 +60,17 @@ func TestAPreviewIsTheBodyOnOneLineCutToItsLength(t *testing.T) {
 		t.Errorf("a file's preview = %+v, want no text and its name", p)
 	}
 }
+
+func TestAStudentReadsAMessageWithoutTheStaffSidesFields(t *testing.T) {
+	body, key, url := "Chào em", "avatars/lan", "https://photos.example/lan"
+	m := domain.Message{
+		ID: "019535d9-3df7-79fb-b466-fa907fa17f9e", ConversationID: "019535d9-3df7-79fb-b466-fa907fa17f9f", SenderID: "019535d9-3df7-79fb-b466-fa907fa17fa0",
+		SenderName: "Cô Lan", SenderAvatarKey: &key, SenderAvatarURL: &url, Side: domain.SideStaff, Body: &body, Mine: true,
+		SeenBy: &domain.SeenBy{Seen: 3, Of: 30},
+	}
+	got := domain.Page{Messages: []domain.Message{m}, LatestID: &m.ID}.ForStudent()
+	want := domain.StudentMessage{ID: m.ID, Sender: domain.Sender{ID: m.SenderID, Name: "Cô Lan", AvatarKey: &key, AvatarURL: &url}, Body: &body, Mine: true}
+	if len(got.Messages) != 1 || got.Messages[0] != want || got.LatestID != &m.ID || got.NextBefore != nil {
+		t.Errorf("the student's page = %+v, want %+v alone", got, want)
+	}
+}

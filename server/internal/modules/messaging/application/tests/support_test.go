@@ -168,14 +168,54 @@ func (w *world) mustAnnounce(who actor.Actor, class, body string) domain.Message
 	return posted.Message
 }
 
-// studentWrites stands for the student side (T-R7.10b): a message the
-// student sends in their thread with staff, written as that side will.
+// studentWrites is the student's post in their thread with staff, through
+// the student side (T-R7.10b).
 func (w *world) studentWrites(staff, student, body string) string {
 	w.t.Helper()
-	return w.id(`
-		WITH thread AS (SELECT id FROM app.conversations WHERE kind = 'direct' AND staff_id = $1::uuid AND student_id = $2::uuid)
-		INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
-		SELECT id, $2::uuid, gen_random_uuid(), $3 FROM thread RETURNING id::text`, staff, student, body)
+	return w.mustAsStudent(student, staff, body).ID
+}
+
+// asStudent posts body from student to teacher with a new clientId.
+func (w *world) asStudent(student, teacher, body string) (domain.StudentPosted, error) {
+	w.t.Helper()
+	return w.app.Commands.PostAsStudent.Handle(context.Background(), command.PostAsStudent{
+		StudentID: student, TeacherID: teacher, ClientID: uuid.NewString(), Body: body,
+	})
+}
+
+func (w *world) mustAsStudent(student, teacher, body string) domain.StudentMessage {
+	w.t.Helper()
+	posted, err := w.asStudent(student, teacher, body)
+	if err != nil {
+		w.t.Fatalf("%s writing to %s: %v", student, teacher, err)
+	}
+	return posted.Message
+}
+
+func (w *world) studentThread(student, teacher string, cursor domain.Cursor) (query.StudentDirect, error) {
+	w.t.Helper()
+	return w.app.Queries.StudentDirectThread.Handle(context.Background(), query.StudentDirectThread{StudentID: student, TeacherID: teacher, Cursor: cursor})
+}
+
+func (w *world) studentChannel(student, class string, cursor domain.Cursor) (query.StudentClass, error) {
+	w.t.Helper()
+	return w.app.Queries.StudentClassThread.Handle(context.Background(), query.StudentClassThread{StudentID: student, ClassID: class, Cursor: cursor})
+}
+
+func (w *world) studentList(student string) []domain.StudentThread {
+	w.t.Helper()
+	threads, err := w.app.Queries.StudentThreads.Handle(context.Background(), query.StudentThreads{StudentID: student})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return threads
+}
+
+func (w *world) studentRead(student string, mark command.MarkReadAsStudent) error {
+	w.t.Helper()
+	mark.StudentID = student
+	_, err := w.app.Commands.MarkReadAsStudent.Handle(context.Background(), mark)
+	return err
 }
 
 func (w *world) thread(staff, student string, cursor domain.Cursor) (query.DirectThread, error) {
@@ -220,4 +260,10 @@ func wantErr(t *testing.T, what string, err, want error) {
 	if !errors.Is(err, want) {
 		t.Errorf("%s: %v, want %v", what, err, want)
 	}
+}
+
+// queryStaffDirect is who's read of their thread with student, in who's
+// scope.
+func queryStaffDirect(who actor.Actor, student string) query.StaffDirectThread {
+	return query.StaffDirectThread{ActorID: who.ID, Scope: who.Scope, StudentID: student}
 }
