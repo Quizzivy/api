@@ -231,6 +231,7 @@ func toAPIMember(m domain.Member) openapi.ClassMember {
 		JoinedVia:    openapi.ClassMemberJoinedVia(m.JoinedVia),
 		JoinedAt:     m.JoinedAt,
 		JoinCodeHint: m.JoinCodeHint,
+		CanMessage:   m.CanMessage,
 		Stats:        httpapi.StudentStats(m.Stats),
 	}
 }

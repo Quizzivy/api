@@ -265,12 +265,15 @@ func (s *Postgres) Members(ctx context.Context, scope access.Scope, classID stri
 	return out, page, rows.Err()
 }
 
-const memberColumns = `
-		SELECT u.id::text, u.full_name, u.email, m.joined_via::text, m.joined_at, jc.code_hint`
+// memberColumns reads a member, and whether the caller, whose id is in
+// placeholder $3, may write to them (visibility.CanMessage, which scope.all
+// does not widen).
+var memberColumns = `
+		SELECT u.id::text, u.full_name, u.email, m.joined_via::text, m.joined_at, jc.code_hint, ` + visibility.CanMessage("u", 3)
 
 func scanMember(row pgx.Row) (domain.Member, error) {
 	var m domain.Member
-	if err := row.Scan(&m.UserID, &m.FullName, &m.Email, &m.JoinedVia, &m.JoinedAt, &m.JoinCodeHint); err != nil {
+	if err := row.Scan(&m.UserID, &m.FullName, &m.Email, &m.JoinedVia, &m.JoinedAt, &m.JoinCodeHint, &m.CanMessage); err != nil {
 		return domain.Member{}, err
 	}
 	return m, nil
@@ -493,7 +496,7 @@ func (s *Postgres) AddMember(ctx context.Context, in domain.AddMemberInput) (dom
 		  JOIN app.users u ON u.id = m.user_id
 		  LEFT JOIN app.class_join_codes jc ON jc.id = m.join_code_id
 		 WHERE m.class_id = $1::uuid AND m.user_id = $2::uuid`,
-		in.ClassID, in.UserID))
+		in.ClassID, in.UserID, opt.String(in.ActorUserID)))
 	if err != nil {
 		return domain.Member{}, fmt.Errorf("add member: read back: %w", err)
 	}

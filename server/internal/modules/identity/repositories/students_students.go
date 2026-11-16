@@ -96,9 +96,12 @@ func statusCondition(status domain.StudentStatus) string {
 	}
 }
 
-func selectStudents(classScope string) string {
+// selectStudents reads each student with only the memberships classScope lets
+// through, and whether the caller, whose id is in placeholder $actor, may
+// write to them (visibility.CanMessage, which scope.all does not widen).
+func selectStudents(classScope string, actor int) string {
 	return `
-		SELECT u.id::text, u.email, u.full_name,
+		SELECT u.id::text, u.email, u.full_name, ` + visibility.CanMessage("u", actor) + `,
 		       u.password_hash IS NOT NULL,
 		       coalesce((SELECT array_agg(i.provider::text)
 		                   FROM app.user_identities i WHERE i.user_id = u.id), '{}'),
@@ -118,7 +121,7 @@ func selectStudents(classScope string) string {
 func scanStudent(row pgx.Row) (domain.Student, error) {
 	var student domain.Student
 	var classes []byte
-	if err := row.Scan(&student.ID, &student.Email, &student.FullName,
+	if err := row.Scan(&student.ID, &student.Email, &student.FullName, &student.CanMessage,
 		&student.HasPassword, &student.LinkedProviders,
 		&student.MustChangePassword, &student.CreatedAt, &student.DisabledAt,
 		&student.LastActiveAt, &student.LastSignInAt,
@@ -145,8 +148,10 @@ func (s *Students) List(ctx context.Context, in domain.StudentQuery) ([]domain.S
 		return nil, paging.Page{}, fmt.Errorf("students: count: %w", err)
 	}
 
+	args = append(args, opt.String(in.Scope.UserID))
+	actor := len(args)
 	args = append(args, limit, offset)
-	rows, err := s.Query(ctx, selectStudents(classScope)+from+fmt.Sprintf(`
+	rows, err := s.Query(ctx, selectStudents(classScope, actor)+from+fmt.Sprintf(`
 		 ORDER BY u.id DESC
 		 LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
@@ -181,7 +186,7 @@ func (s *Students) get(ctx context.Context, scope access.Scope, id string, inclu
 		where += ` AND u.disabled_at IS NULL`
 	}
 
-	student, err := scanStudent(s.QueryRow(ctx, selectStudents(` AND ($2::boolean OR c.teacher_id = $3::uuid)`)+where,
+	student, err := scanStudent(s.QueryRow(ctx, selectStudents(` AND ($2::boolean OR c.teacher_id = $3::uuid)`, 3)+where,
 		id, scope.All, opt.String(scope.UserID)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Student{}, domain.ErrStudentNotFound
