@@ -30,6 +30,13 @@ func (a *Application) WithUnreadMessages(port ports.UnreadMessages) *Application
 	return a
 }
 
+// WithMail sets the email channel Notify hands each notice to, after its
+// in-app write (T-R7.13). Without it Notify sends no email.
+func (a *Application) WithMail(mailer ports.Mailer) *Application {
+	a.service.Mail = mailer
+	return a
+}
+
 type Commands struct {
 	Notify            cqrs.CommandHandler[command.Notify, cqrs.Nothing]
 	MaterialiseDue    cqrs.CommandHandler[command.MaterialiseDue, int]

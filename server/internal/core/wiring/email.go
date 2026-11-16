@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"time"
 
+	"quizzivy/internal/core/adapters"
 	"quizzivy/internal/core/jobs"
+	notificationsemail "quizzivy/internal/modules/notifications/application/email"
+	notificationsrepo "quizzivy/internal/modules/notifications/repositories"
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
 	organizationquery "quizzivy/internal/modules/organization/application/query"
 	"quizzivy/internal/platform/config"
@@ -51,7 +54,9 @@ type Branding = cqrs.QueryHandler[organizationquery.Branding, organizationmodel.
 // recipient belongs at. Every header names the centre by branding's short name, else
 // its name, else Quizzivy; until the settings have been read once, a batch
 // fails and logs ORGANIZATION_SETTINGS_UNAVAILABLE. A missing SECRETS_KEY leaves the outbox unable to
-// seal a secret and every sealed row failing closed.
+// seal a secret and every sealed row failing closed. The dispatcher holds the
+// notification emails' Preparers (T-R7.13), so the API's and the worker's
+// both send them, and it logs which of them NOTIFY_EMAIL_EVENTS leaves on.
 func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slog.Logger) (Mail, error) {
 	var sealer *secrets.Sealer
 	if cfg.SecretsKey != nil {
@@ -70,6 +75,7 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 	} else {
 		logger.Warn("email goes to the sink directory, not to a provider", "dir", cfg.Email.SinkDir)
 	}
+	logger.Info("notification emails", "events", cfg.Email.NotifyEvents())
 	return Mail{
 		Outbox: email.NewOutbox(sealer),
 		Dispatcher: &email.Dispatcher{
@@ -77,6 +83,7 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 			Org: organizationName(branding, logger), Hosts: cfg.Hosts, ReplyTo: cfg.Email.ReplyTo,
 			Limits: cfg.Limits, Interval: cfg.Email.SendInterval(),
 			Location: cfg.AppLocation, Logger: logger,
+			Prepare: adapters.NotificationPreparers(notificationsrepo.NewMail(dbx, nil), cfg.Email.Sends),
 		},
 	}, nil
 }
@@ -95,4 +102,11 @@ func organizationName(branding Branding, logger *slog.Logger) func(context.Conte
 		}
 		return fallbackOrganizationName, nil
 	}
+}
+
+// NotificationMail is the notifications module's email channel over mail's
+// outbox: Notify enqueues each notice's email there, under the recipient's
+// switch and NOTIFY_EMAIL_EVENTS.
+func NotificationMail(cfg config.Config, dbx db.Context, mail Mail) notificationsemail.Mailer {
+	return notificationsemail.Mailer{Outbox: notificationsrepo.NewMail(dbx, mail.Outbox), Sends: cfg.Email.Sends}
 }

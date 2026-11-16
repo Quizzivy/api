@@ -5,10 +5,12 @@ import (
 	"net/mail"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"quizzivy/internal/platform/email"
 	"quizzivy/internal/platform/secrets"
 )
 
@@ -16,6 +18,11 @@ import (
 // are one all-or-nothing group, required in production. Without the group
 // outside production the messages go to the sink directory SinkDir names
 // instead. A link in a message points into Config.Hosts.
+//
+// Events are the notification emails NOTIFY_EMAIL_EVENTS leaves on, by the
+// names email.NotifyEvents lists: every one when it is unset or empty, none
+// for "none", and otherwise those its comma list names. A Config built
+// without Load has nil Events, which sends every one, as unset does.
 type Email struct {
 	APIKey     Secret
 	From       string
@@ -23,6 +30,20 @@ type Email struct {
 	DailyLimit int
 	SendRate   int
 	SinkDir    string
+	Events     []string
+}
+
+// Sends reports whether NOTIFY_EMAIL_EVENTS leaves the notification email of
+// event on.
+func (e Email) Sends(event string) bool { return slices.Contains(e.NotifyEvents(), event) }
+
+// NotifyEvents lists the notification emails that are sent: Events, or every
+// one while Events is nil.
+func (e Email) NotifyEvents() []string {
+	if e.Events == nil {
+		return email.NotifyEvents()
+	}
+	return e.Events
 }
 
 // Enabled reports whether the Resend group is configured.
@@ -150,7 +171,35 @@ func loadEmailLimits(cfg *Config) error {
 	if e.SendRate < 1 || e.SendRate > maxEmailSendRate {
 		return fmt.Errorf("EMAIL_SEND_RATE must be between 1 and %d a second", maxEmailSendRate)
 	}
-	return nil
+	e.Events, err = notifyEmailEvents(os.Getenv("NOTIFY_EMAIL_EVENTS"))
+	return err
+}
+
+// notifyEmailEvents reads NOTIFY_EMAIL_EVENTS: a comma list of the names
+// email.NotifyEvents lists, every one when raw is empty, none for "none". A
+// name it does not know is refused, so a typo cannot leave an event on.
+func notifyEmailEvents(raw string) ([]string, error) {
+	known := email.NotifyEvents()
+	raw = strings.TrimSpace(raw)
+	switch raw {
+	case "":
+		return known, nil
+	case "none":
+		return []string{}, nil
+	}
+	var out []string
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		switch {
+		case name == "":
+			continue
+		case !slices.Contains(known, name):
+			return nil, fmt.Errorf("NOTIFY_EMAIL_EVENTS names %q, which is none of %s (or set it to none)", name, strings.Join(known, ", "))
+		case !slices.Contains(out, name):
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 func loadSecretsKey(cfg *Config) error {

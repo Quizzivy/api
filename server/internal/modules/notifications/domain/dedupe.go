@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -120,4 +121,36 @@ const MessageKeyPrefix = "msg:"
 // the conversation conversationID: one per reader per thread.
 func MessageKey(conversationID string) string {
 	return MessageKeyPrefix + conversationID
+}
+
+// ConversationOf is the conversation a MessageKey names, and false for a key
+// that is not a message item's.
+func ConversationOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, MessageKeyPrefix)
+	return id, ok && id != ""
+}
+
+// SharedOf is the kind and the id of the content a SharedKey names, and false
+// for a key that is not a share's.
+func SharedOf(key string) (kind, resourceID string, ok bool) {
+	rest, ok := strings.CutPrefix(key, "shared:")
+	if !ok {
+		return "", "", false
+	}
+	kind, resourceID, ok = strings.Cut(rest, ":")
+	return kind, resourceID, ok && kind != "" && resourceID != ""
+}
+
+// TeacherChangedOf is the class a TeacherChangedKey names, and false for a
+// key that is not a change of teacher's.
+func TeacherChangedOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "teacher_changed:")
+	return id, ok && id != ""
+}
+
+// SubmittedBucketOf is the start of the fifteen-minute bucket SubmittedKey
+// puts at in.
+func SubmittedBucketOf(at time.Time) time.Time {
+	size := int64(SubmittedBucket / time.Second)
+	return time.Unix(at.Unix()/size*size, 0).UTC()
 }

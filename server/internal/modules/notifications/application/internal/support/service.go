@@ -8,13 +8,14 @@ import (
 )
 
 // Service carries what the handlers share: the store, the clock, the
-// throttle on materialising due items and the messaging context's count of
-// a student's unread messages.
+// throttle on materialising due items, the messaging context's count of a
+// student's unread messages, and the email channel, nil until it is wired.
 type Service struct {
 	Repo     domain.Repository
 	Now      func() time.Time
 	Throttle *Throttle
 	Messages ports.UnreadMessages
+	Mail     ports.Mailer
 }
 
 func NewService(repo domain.Repository) *Service {

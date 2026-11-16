@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -130,6 +131,20 @@ func TestTheNoticesTheProductMakesReachTheRightPeopleAndNoOneElse(t *testing.T) 
 	if err != nil || wantErr != nil || !got.Equal(want) {
 		t.Errorf("the student is told the close is %v, the assignment says %v", got, want)
 	}
+	studentEmail := created["user"].(map[string]any)["email"].(string)
+	studentID, teacherID := id(created["user"].(map[string]any)), id(teacher.must(http.StatusOK, http.MethodGet, "/auth/me", nil))
+	if n := w.queued(t, studentID, "assignment_extended"); n != 1 {
+		t.Errorf("the two extensions queued the student %d emails, want the announced one's alone", n)
+	}
+	if n := w.queued(t, teacherID, "submissions_digest"); n != 0 {
+		t.Errorf("a teacher who never turned on the submissions' email is queued %d digests", n)
+	}
+	d, sender := w.dispatcherAt(t, time.Now().Add(time.Minute))
+	drain(t, d)
+	if mails := sender.to(studentEmail); len(mails) != 1 || !strings.Contains(mails[0].Text, "/assignments/"+id(open)+"\n") ||
+		!strings.Contains(mails[0].Text, "/settings/notifications\n") || strings.Contains(mails[0].Text, "/teacher/") {
+		t.Errorf("the extension's email to the student is %+v", mails)
+	}
 	for _, n := range student.inbox(t) {
 		raw := jsonNumber(n)
 		for _, leak := range []string{"score", "isCorrect", "sampleAnswer", "acceptedAnswers", "transcript"} {
@@ -138,4 +153,14 @@ func TestTheNoticesTheProductMakesReachTheRightPeopleAndNoOneElse(t *testing.T) 
 			}
 		}
 	}
+}
+
+// queued counts the outbox rows of template for userID, sent or not.
+func (w *world) queued(t *testing.T, userID, template string) int {
+	t.Helper()
+	var n int
+	if err := w.pool.QueryRow(context.Background(), `SELECT count(*) FROM app.email_outbox WHERE to_user_id = $1::uuid AND template = $2`, userID, template).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

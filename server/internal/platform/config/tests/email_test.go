@@ -3,16 +3,18 @@ package config_test
 import (
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"quizzivy/internal/platform/config"
+	"quizzivy/internal/platform/email"
 )
 
 var emailVariables = []string{
 	"RESEND_API_KEY", "EMAIL_FROM", "EMAIL_REPLY_TO", "EMAIL_DAILY_LIMIT", "EMAIL_SEND_RATE",
-	"EMAIL_SINK_DIR", "SECRETS_KEY", "APP_TIMEZONE",
+	"EMAIL_SINK_DIR", "SECRETS_KEY", "APP_TIMEZONE", "NOTIFY_EMAIL_EVENTS",
 }
 
 var secretsKey = base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
@@ -130,5 +132,48 @@ func TestTheImportWorkerLoadsTheSameEmailGroup(t *testing.T) {
 	workerEnvironment(t, map[string]string{"APP_ENV": "production"})
 	if _, err := config.LoadImportWorker(); err == nil {
 		t.Error("a production worker without the email group started")
+	}
+}
+
+// TestNotifyEmailEventsTurnsEachNotificationEmailOffByName fails when the
+// kill switch's default stops being every notification email, when "none"
+// sends something, or when a name it does not know is accepted (a typo would
+// leave an email on).
+func TestNotifyEmailEventsTurnsEachNotificationEmailOffByName(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Email.Events, email.NotifyEvents()) || !cfg.Email.Sends("message.received") {
+		t.Errorf("unset, the events are %v, want all of %v", cfg.Email.Events, email.NotifyEvents())
+	}
+	for raw, want := range map[string][]string{
+		"   ":             email.NotifyEvents(),
+		"none":            {},
+		"attempt.flagged": {"attempt.flagged"},
+		" result.ready , message.received,,result.ready ": {"result.ready", "message.received"},
+	} {
+		cfg, err := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": raw})
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if !slices.Equal(cfg.Email.Events, want) {
+			t.Errorf("%q gives %v, want %v", raw, cfg.Email.Events, want)
+		}
+	}
+	if !(config.Email{}).Sends("summary.weekly") || !slices.Equal((config.Email{}).NotifyEvents(), email.NotifyEvents()) {
+		t.Error("a Config built without Load sends no notification email")
+	}
+	if none, _ := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": "none"}); none.Email.Sends("attempt.flagged") || len(none.Email.NotifyEvents()) != 0 {
+		t.Error("none still sends a notification email")
+	}
+	cfg, _ = loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": "attempt.flagged"})
+	if cfg.Email.Sends("message.received") || !cfg.Email.Sends("attempt.flagged") {
+		t.Errorf("Sends does not follow the list: %v", cfg.Email.Events)
+	}
+	for _, raw := range []string{"message.recieved", "attempt.flagged,all", "message.from_teacher"} {
+		if _, err := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": raw}); err == nil || !strings.Contains(err.Error(), "NOTIFY_EMAIL_EVENTS") {
+			t.Errorf("%q: err = %v, want NOTIFY_EMAIL_EVENTS refused", raw, err)
+		}
 	}
 }

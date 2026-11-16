@@ -78,6 +78,9 @@ func TestASharedTestIsCoEditedWithAForkPublishedRevokedAndCopied(t *testing.T) {
 	if !lists(t, colleague, "/me/notifications", "content.shared") {
 		t.Error("the colleague was not told of the share")
 	}
+	if n := w.queued(t, colleagueID, "content_shared"); n != 1 {
+		t.Errorf("the share the owner asked to announce queued the colleague %d emails, want 1", n)
+	}
 	inbox := colleague.must(http.StatusOK, http.MethodGet, "/teacher/shared-with-me", nil)["items"].([]any)
 	if len(inbox) != 1 || inbox[0].(map[string]any)["resourceId"] != shared || inbox[0].(map[string]any)["access"] != "edit" {
 		t.Fatalf("the colleague's Shared with me reads %v, want the test at Can edit", inbox)
