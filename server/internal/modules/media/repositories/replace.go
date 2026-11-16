@@ -147,7 +147,7 @@ func replacementGraph(ctx context.Context, tx pgx.Tx, in domain.ReplaceInput, as
 	if _, err := tx.Exec(ctx, `UPDATE app.media_assets SET replaced_by=$2 WHERE id=$1`, in.ID, asset.ID); err != nil {
 		return result, err
 	}
-	rows, err := tx.Query(ctx, `UPDATE app.questions SET media_asset_id=$2 WHERE id=ANY($3::uuid[]) AND media_asset_id=$1 RETURNING id::text, context_group_id::text`, in.ID, asset.ID, questions)
+	rows, err := tx.Query(ctx, `UPDATE app.questions SET media_asset_id=$2, updated_by=$4::uuid WHERE id=ANY($3::uuid[]) AND media_asset_id=$1 RETURNING id::text, context_group_id::text`, in.ID, asset.ID, questions, opt.String(in.Asset.UploaderID))
 	if err != nil {
 		return result, err
 	}
@@ -169,7 +169,7 @@ func replacementGraph(ctx context.Context, tx pgx.Tx, in domain.ReplaceInput, as
 	if err != nil {
 		return result, err
 	}
-	if err := repointQuestionProse(ctx, tx, in.ID, asset.ID, questions, repointed, changed); err != nil {
+	if err := repointQuestionProse(ctx, tx, in.ID, asset.ID, in.Asset.UploaderID, questions, repointed, changed); err != nil {
 		return result, err
 	}
 	result.Repointed.Questions = len(repointed)
@@ -233,7 +233,7 @@ type replacementProse struct {
 // with them, as repointGroupContent does for a group's materials (DG-109). A
 // question counts once however many of its fields changed; frozen rows stay
 // as published.
-func repointQuestionProse(ctx context.Context, tx pgx.Tx, old, newID string, questions []string, repointed, changed map[string]bool) error {
+func repointQuestionProse(ctx context.Context, tx pgx.Tx, old, newID, actorID string, questions []string, repointed, changed map[string]bool) error {
 	rows, err := tx.Query(ctx, `SELECT q.id::text, q.context_group_id::text, q.prompt_content, q.explanation_content FROM app.questions q
 		WHERE q.id=ANY($2::uuid[]) AND EXISTS (SELECT 1 FROM app.question_media_references r WHERE r.question_id=q.id AND r.media_asset_id=$1) ORDER BY q.id`, old, questions)
 	if err != nil {
@@ -257,7 +257,7 @@ func repointQuestionProse(ctx context.Context, tx pgx.Tx, old, newID string, que
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE app.questions SET prompt_content=$2, explanation_content=$3 WHERE id=$1`, p.id, prompt, explanation); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE app.questions SET prompt_content=$2, explanation_content=$3, updated_by=$4::uuid WHERE id=$1`, p.id, prompt, explanation, opt.String(actorID)); err != nil {
 			return err
 		}
 		ids = append(ids, p.id)

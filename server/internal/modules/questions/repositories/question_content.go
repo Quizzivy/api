@@ -7,7 +7,9 @@ import (
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/shared/content"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/provenance"
 	"quizzivy/internal/shared/validation"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,15 +22,19 @@ func prepareQuestionContent(ctx context.Context, tx pgx.Tx, write *domain.WriteI
 	var prompt string
 	var explanation *string
 	var promptContent, explanationContent json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT prompt, explanation, prompt_content, explanation_content
-        FROM app.questions WHERE id = $1 AND deleted_at IS NULL
-          AND context_group_id IS NOT DISTINCT FROM $2::uuid AND ($3::boolean OR owner_id = $4::uuid) FOR UPDATE`,
+	var last provenance.Row
+	err := tx.QueryRow(ctx, `SELECT q.prompt, q.explanation, q.prompt_content, q.explanation_content, `+provenance.Columns("q")+`
+        FROM app.questions q WHERE q.id = $1 AND q.deleted_at IS NULL
+          AND q.context_group_id IS NOT DISTINCT FROM $2::uuid AND ($3::boolean OR q.owner_id = $4::uuid) FOR UPDATE OF q`,
 		write.ID, groupID, write.All || groupID != nil, opt.String(write.ActorID)).
-		Scan(&prompt, &explanation, &promptContent, &explanationContent)
+		Scan(append([]any{&prompt, &explanation, &promptContent, &explanationContent}, last.Dest()...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
 	}
 	if err != nil {
+		return err
+	}
+	if err := fresh(last.LastWrite(), write.ExpectedUpdatedAt); err != nil {
 		return err
 	}
 	if err := preserveProse("promptContent", content.ParsePromptWithMedia, &in.PromptContent, promptContent, &in.Prompt, &prompt); err != nil {
@@ -38,6 +44,16 @@ func prepareQuestionContent(ctx context.Context, tx pgx.Tx, write *domain.WriteI
 		return err
 	}
 	return validateStoredContent(write)
+}
+
+// fresh is nil when the update names no revision, as a v0.13 client's does,
+// or names the one it locked, and otherwise domain.ErrStaleWrite naming the
+// question's last write, which the editor had not seen.
+func fresh(last provenance.LastWrite, expected *time.Time) error {
+	if expected == nil || last.At.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {
+		return nil
+	}
+	return provenance.Stale(domain.ErrStaleWrite, last)
 }
 
 // validateStoredContent checks the prose the write will store, an omitted

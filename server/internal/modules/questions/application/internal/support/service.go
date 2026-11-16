@@ -48,16 +48,17 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 	}
 
 	in := domain.WriteInput{
-		ID:             req.ID,
-		Input:          req.Input,
-		MediaAssetKind: kind,
-		ActorID:        req.ActorID,
-		OwnerID:        req.OwnerID,
-		All:            req.All,
-		SourceMedia:    req.SourceMedia,
-		Now:            s.Now(),
-		IP:             req.IP,
-		UserAgent:      req.UserAgent,
+		ID:                req.ID,
+		Input:             req.Input,
+		MediaAssetKind:    kind,
+		ActorID:           req.ActorID,
+		OwnerID:           req.OwnerID,
+		All:               req.All,
+		SourceMedia:       req.SourceMedia,
+		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+		Now:               s.Now(),
+		IP:                req.IP,
+		UserAgent:         req.UserAgent,
 	}
 	write := s.Repo.Create
 	if update {

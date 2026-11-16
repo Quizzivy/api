@@ -228,6 +228,7 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 	if !ok {
 		return nil, httpx.ErrNotImplemented
 	}
+	req.ExpectedUpdatedAt = request.Body.ExpectedUpdatedAt
 
 	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req, SetID: uuidString(request.Params.SetId)})
 	if errors.Is(err, domain.ErrSetNotFound) {
@@ -243,6 +244,11 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 		return openapi.UpdateQuestion422JSONResponse(httpapi.Error(ctx, openapi.EDITCONTEXTREQUIRED,
 			httpx.Text(ctx, "Câu hỏi này thuộc ngân hàng của người khác. Hãy sửa nó trong đề hoặc bộ câu hỏi được chia sẻ với bạn.",
 				"This question belongs to someone else's bank. Edit it in the test or question set shared with you."))), nil
+	}
+	if errors.Is(err, domain.ErrStaleWrite) {
+		return openapi.UpdateQuestion409JSONResponse(httpapi.StaleWrite(ctx,
+			httpx.Text(ctx, "Câu hỏi đã được sửa ở nơi khác. Vui lòng tải lại trước khi lưu.",
+				"The question was edited elsewhere. Please reload before saving."), err)), nil
 	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(

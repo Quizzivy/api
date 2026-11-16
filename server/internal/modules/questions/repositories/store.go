@@ -222,14 +222,15 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 			       level = $18, skill = $19, media_alt = $20,
 			       audio_allow_pause = CASE WHEN $7::boolean IS NULL THEN NULL
 			                                ELSE coalesce($21::boolean, audio_allow_pause, true) END,
-			       select_count = $22, max_words = $23, match_allow_reuse = $24
+			       select_count = $22, max_words = $23, match_allow_reuse = $24,
+			       updated_by = $25::uuid
 			 WHERE id = $1 AND deleted_at IS NULL
 			 RETURNING id::text`,
 			id, string(in.Input.Type), in.Input.Prompt, in.Input.MediaAssetID, kind,
 			maxPlays, allowSeek, showTranscript, in.Input.Transcript,
 			in.Input.Points, in.Input.Explanation, in.Input.SampleAnswer,
 			in.Input.Tags, nullableContent(in.Input.PromptContent), nullableContent(in.Input.ExplanationContent), ordinal, optionOrder, in.Input.Level, in.Input.Skill, mediaAlt, allowPause,
-			in.Input.SelectCount, in.Input.MaxWords, in.Input.MatchAllowReuse).Scan(&id)
+			in.Input.SelectCount, in.Input.MaxWords, in.Input.MatchAllowReuse, in.ActorID).Scan(&id)
 	} else {
 		var createID *string
 		if ownership != nil {
@@ -239,11 +240,11 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 			INSERT INTO app.questions
 			       (type, prompt, media_asset_id, media_asset_kind,
 			        audio_max_plays, audio_allow_seek, audio_show_transcript_after,
-			        transcript, points, explanation, sample_answer, tags, created_by, prompt_content, explanation_content,
+			        transcript, points, explanation, sample_answer, tags, created_by, updated_by, prompt_content, explanation_content,
 			        id, context_group_id, context_ordinal, context_option_order, owner_id, level, skill, media_alt,
 			        audio_allow_pause, copied_from_id, select_count, max_words, match_allow_reuse)
 			VALUES ($1::app.question_type, $2, $3, $4::app.media_kind, $5, $6, $7,
-			        $8, $9::numeric, $10, $11, $12, $13, $14, $15,
+			        $8, $9::numeric, $10, $11, $12, $13, $13, $14, $15,
 			        coalesce($16::uuid, uuidv7()), $17, $18, $19,
 			        coalesce((SELECT g.owner_id FROM app.question_groups g WHERE g.id = $17), $20::uuid, $13), $21, $22, $23,
 			        CASE WHEN $6::boolean IS NULL THEN NULL ELSE coalesce($24::boolean, true) END, $25::uuid, $26, $27, $28)
@@ -335,7 +336,7 @@ func (s *Postgres) SoftDelete(ctx context.Context, in domain.WriteInput) error {
 	}
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE app.questions SET deleted_at = $2 WHERE id = $1`, in.ID, in.Now); err != nil {
+		`UPDATE app.questions SET deleted_at = $2, updated_by = $3::uuid WHERE id = $1`, in.ID, in.Now, in.ActorID); err != nil {
 		return fmt.Errorf("questions: soft delete: %w", err)
 	}
 	if err := audit.Write(ctx, tx, audit.Entry{
@@ -364,7 +365,8 @@ func (s *Postgres) AddTags(ctx context.Context, scope access.Scope, ids []string
 		         SELECT array_agg(DISTINCT t ORDER BY t)
 		           FROM unnest(q.tags || $2::text[]) AS t
 		       ),
-		       updated_at = now()
+		       updated_at = now(),
+		       updated_by = $4::uuid
 		 WHERE q.id = ANY($1::uuid[])
 		   AND q.deleted_at IS NULL
 		   AND q.context_group_id IS NULL

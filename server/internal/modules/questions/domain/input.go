@@ -66,16 +66,20 @@ type RubricCriterionInput struct {
 // owner it is. A group member still follows its group. SourceMedia marks an
 // Input whose media are those of a question the actor has just read, as a
 // duplicate copies them: reading the source authorized them, so they bind as
-// any live asset does.
+// any live asset does. ExpectedUpdatedAt, on an update, is the question's
+// updatedAt the editor last read: when the question has changed since, the
+// update is ErrStaleWrite and nothing is written. Without it the update is
+// not checked, as v0.13 clients send it (optional until R8).
 type WriteRequest struct {
-	ID          string
-	Input       Input
-	ActorID     string
-	OwnerID     string
-	All         bool
-	SourceMedia bool
-	IP          string
-	UserAgent   string
+	ID                string
+	Input             Input
+	ActorID           string
+	OwnerID           string
+	All               bool
+	SourceMedia       bool
+	ExpectedUpdatedAt *time.Time
+	IP                string
+	UserAgent         string
 }
 
 // Scope is the scope the request reads and binds under: ActorID's own, or
@@ -96,18 +100,20 @@ func (r WriteRequest) MediaScope() access.Scope {
 // WriteInput is a create or an update, depending on whether ID is set. An
 // update or delete of a bank question needs ActorID to own it unless All is
 // set; a group member's write is authorized by its group and ignores both.
-// OwnerID and SourceMedia apply as on WriteRequest.
+// OwnerID, SourceMedia and ExpectedUpdatedAt apply as on WriteRequest. Every
+// write records ActorID as the question's last writer (updated_by).
 type WriteInput struct {
-	ID             string
-	Input          Input
-	MediaAssetKind *string
-	ActorID        string
-	OwnerID        string
-	All            bool
-	SourceMedia    bool
-	Now            time.Time
-	IP             string
-	UserAgent      string
+	ID                string
+	Input             Input
+	MediaAssetKind    *string
+	ActorID           string
+	OwnerID           string
+	All               bool
+	SourceMedia       bool
+	ExpectedUpdatedAt *time.Time
+	Now               time.Time
+	IP                string
+	UserAgent         string
 }
 
 type OptionInput struct {
