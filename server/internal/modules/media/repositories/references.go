@@ -28,6 +28,12 @@ func References(ctx context.Context, q db.Querier, assetID string) ([]domain.Tes
 // is what the library list needs: a count and a name per row, without a round
 // trip per row.
 func ReferencesFor(ctx context.Context, q db.Querier, assetIDs []string) (map[string][]domain.TestRef, error) {
+	return referencesFor(ctx, q, assetIDs, nil)
+}
+
+// referencesFor is ReferencesFor, kept to the versions of tests ownerID owns
+// when ownerID is not nil.
+func referencesFor(ctx context.Context, q db.Querier, assetIDs []string, ownerID *string) (map[string][]domain.TestRef, error) {
 	rows, err := q.Query(ctx, `
 		WITH version_assets AS (
 		 SELECT media_asset_id,test_version_section_id FROM app.test_version_questions WHERE media_asset_id=ANY($1::uuid[])
@@ -46,7 +52,8 @@ func ReferencesFor(ctx context.Context, q db.Querier, assetIDs []string) (map[st
 		JOIN app.test_version_sections tvs ON tvs.id=a.test_version_section_id
 		JOIN app.test_versions tv ON tv.id=tvs.test_version_id
 		JOIN app.tests t ON t.id=tv.test_id
-		ORDER BY a.media_asset_id::text,t.title,tv.version,t.id::text`, assetIDs)
+		WHERE $2::uuid IS NULL OR t.owner_id=$2::uuid
+		ORDER BY a.media_asset_id::text,t.title,tv.version,t.id::text`, assetIDs, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("media: references: %w", err)
 	}

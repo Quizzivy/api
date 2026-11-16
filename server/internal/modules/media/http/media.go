@@ -359,6 +359,17 @@ func (h Media) DeleteMedia(ctx context.Context, request openapi.DeleteMediaReque
 		}
 		return openapi.DeleteMedia409JSONResponse(resp), nil
 
+	case errors.Is(err, domain.ErrInUseElsewhere):
+		resp := httpapi.Error(ctx, openapi.MEDIAINUSEELSEWHERE,
+			httpx.Text(ctx, "Tệp đang được dùng trong nội dung của giáo viên khác nên không thể xoá.",
+				"The file is used in another teacher's content, so it cannot be deleted."))
+		var elsewhere *domain.InUseElsewhereError
+		if errors.As(err, &elsewhere) {
+			details := map[string]interface{}{"count": elsewhere.Count}
+			resp.Error.Details = &details
+		}
+		return openapi.DeleteMedia409JSONResponse(resp), nil
+
 	case errors.Is(err, domain.ErrNotFound):
 		return openapi.DeleteMedia404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, httpx.Text(ctx, "Không tìm thấy tệp.", "The file was not found.")))}, nil

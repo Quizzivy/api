@@ -23,3 +23,13 @@ type GroupRef struct {
 func (e *ReferencedError) Error() string { return ErrReferenced.Error() }
 
 func (e *ReferencedError) Is(target error) bool { return target == ErrReferenced }
+
+// InUseElsewhereError is ErrInUseElsewhere carrying how many pieces of other
+// owners' content use the asset, which are never named.
+type InUseElsewhereError struct {
+	Count int
+}
+
+func (e *InUseElsewhereError) Error() string { return ErrInUseElsewhere.Error() }
+
+func (e *InUseElsewhereError) Is(target error) bool { return target == ErrInUseElsewhere }
