@@ -31434,7 +31434,17 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`MESSAGING_NOT_ALLOWED` — the teacher's account is disabled. The thread stays readable.",
+            "description": "`MESSAGING_NOT_ALLOWED` — the teacher's account is disabled or no longer staff, or the caller's is no longer a student. The thread stays readable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the body is blank once trimmed (`details.body`), or `clientId` already made a message in another thread (`details.clientId`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -31547,7 +31557,7 @@
         "tags": [
           "student-messages"
         ],
-        "description": "The announcements of a class the student is in. Read-only: a\nstudent's post here answers 403 (there is no post operation).\n",
+        "description": "The announcements of a class the student is in, archived or not.\nRead-only: there is no post operation on this path, so a `POST`\nanswers 405, and the channel's post operation,\n`postClassAnnouncement`, answers a student 403.\n",
         "parameters": [
           {
             "name": "before",
