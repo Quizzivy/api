@@ -73,11 +73,15 @@ func (s *Postgres) Update(ctx context.Context, in domain.UpdateRequest) (domain.
 // it, is the owner's (D4). Access is decided before the revision, so a reader
 // who may not make the change is refused whatever revision it read.
 func lockForAutosave(ctx context.Context, tx pgx.Tx, in domain.UpdateRequest) (reachedTest, error) {
-	reached, err := reachTest(ctx, tx, in.Scope, in.ID, domain.ActionEdit, testExclusive)
-	if err == nil && in.Input.Status != nil && *in.Input.Status != reached.status {
-		err = reached.access.Allows(domain.ActionOwn)
-	}
+	reached, err := reachTest(ctx, tx, in.Scope, in.ID, domain.ActionRead, testExclusive)
 	if err != nil {
+		return reachedTest{}, err
+	}
+	action := domain.ActionEdit
+	if in.Input.Status != nil && *in.Input.Status != reached.status {
+		action = domain.ActionOwn
+	}
+	if err := reached.access.Allows(action); err != nil {
 		return reachedTest{}, err
 	}
 	return reached, fresh(reached, in.Input.ExpectedUpdatedAt)
