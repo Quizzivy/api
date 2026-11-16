@@ -31261,7 +31261,7 @@
           "student-messages"
         ],
         "summary": "The student's Messages list",
-        "description": "The student's direct threads, and the channels of the classes they\nare in that have at least one post, newest first.\n",
+        "description": "The student's direct threads, and the channels of the classes they\nare in, not archived, that have at least one post, newest first. An\narchived class's channel stays readable by its members\n(`getStudentClassThread`) and is not listed.\n",
         "responses": {
           "200": {
             "description": "OK",
