@@ -20,12 +20,13 @@ import (
 // in.ID, which in.Scope must be able to read, becomes a new test owned by the
 // actor, independent of its source. In one transaction:
 //
-//  1. the source's row under a share lock (reachTest for a read), then its
-//     draft's groups and questions under share locks, as publish takes them;
+//  1. the source's row under a share lock (reachTest for a read);
 //  2. a new test of the actor's, titled and described as the source, as
 //     Duplicate names its copies;
-//  3. every standalone question of the draft as a new bank question of the
-//     actor's, through the questions module's copy (QuestionWrites), which
+//  3. the source draft's groups and questions under share locks, as publish
+//     takes them, then every standalone question of the draft as a new bank
+//     question of the actor's, through the questions module's copy
+//     (QuestionWrites), which
 //     locks each source and then each asset it names with
 //     media.LockForVersionUse before writing the copy, and copies its
 //     options, blanks, match items and rubric with fresh gap ids;
@@ -54,43 +55,8 @@ func (s *Postgres) Copy(ctx context.Context, in domain.DuplicateInput) (domain.T
 	if err != nil {
 		return domain.Test{}, err
 	}
-	var copyID string
-	if err := tx.QueryRow(ctx,
-		`INSERT INTO app.tests (title, description, created_by, updated_by, owner_id)
-		 SELECT title, description, $2, $2, $2 FROM app.tests WHERE id = $1
-		 RETURNING id::text`, in.ID, in.ActorID).Scan(&copyID); err != nil {
-		return domain.Test{}, fmt.Errorf("tests: copy test row: %w", err)
-	}
-	if len(source.Sections) > 0 {
-		if err := lockDraftContent(ctx, tx, in.ID, false); err != nil {
-			return domain.Test{}, err
-		}
-		draft, err := s.loadDraftSnapshot(ctx, tx, in.ID)
-		if err != nil {
-			return domain.Test{}, err
-		}
-		copyOf, err := s.copyDraftQuestions(ctx, tx, draft, in)
-		if err != nil {
-			return domain.Test{}, err
-		}
-		if err := s.copyDraftGraph(ctx, tx, copyID, in.ActorID, draft, in, copyOf); err != nil {
-			return domain.Test{}, err
-		}
-	}
-	diff, err := json.Marshal(map[string]string{"sourceId": in.ID})
+	copyID, err := s.copyTestRow(ctx, tx, in, len(source.Sections) > 0)
 	if err != nil {
-		return domain.Test{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		ActorUserID: &in.ActorID,
-		Action:      "share.copied",
-		Entity:      entityTest,
-		EntityID:    &copyID,
-		OccurredAt:  in.Now,
-		IP:          opt.String(in.IP),
-		UserAgent:   opt.String(in.UserAgent),
-		Diff:        diff,
-	}); err != nil {
 		return domain.Test{}, err
 	}
 	created, err := s.get(ctx, tx, copyID)
@@ -102,6 +68,56 @@ func (s *Postgres) Copy(ctx context.Context, in domain.DuplicateInput) (domain.T
 		return domain.Test{}, fmt.Errorf("tests: commit copy: %w", err)
 	}
 	return created, nil
+}
+
+// copyTestRow writes steps 2 to 5 of Copy for the source in.ID, whose draft
+// has sections when withDraft, and answers the new test's id.
+func (s *Postgres) copyTestRow(ctx context.Context, tx pgx.Tx, in domain.DuplicateInput, withDraft bool) (string, error) {
+	var copyID string
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO app.tests (title, description, created_by, updated_by, owner_id)
+		 SELECT title, description, $2, $2, $2 FROM app.tests WHERE id = $1
+		 RETURNING id::text`, in.ID, in.ActorID).Scan(&copyID); err != nil {
+		return "", fmt.Errorf("tests: copy test row: %w", err)
+	}
+	if withDraft {
+		if err := s.copyDraft(ctx, tx, copyID, in); err != nil {
+			return "", err
+		}
+	}
+	diff, err := json.Marshal(map[string]string{"sourceId": in.ID})
+	if err != nil {
+		return "", err
+	}
+	err = audit.Write(ctx, tx, audit.Entry{
+		ActorUserID: &in.ActorID,
+		Action:      "share.copied",
+		Entity:      entityTest,
+		EntityID:    &copyID,
+		OccurredAt:  in.Now,
+		IP:          opt.String(in.IP),
+		UserAgent:   opt.String(in.UserAgent),
+		Diff:        diff,
+	})
+	return copyID, err
+}
+
+// copyDraft writes the source in.ID's draft into the new test copyID, with a
+// copy of each of its standalone questions, under the share locks publish
+// takes on the draft's groups and questions.
+func (s *Postgres) copyDraft(ctx context.Context, tx pgx.Tx, copyID string, in domain.DuplicateInput) error {
+	if err := lockDraftContent(ctx, tx, in.ID, false); err != nil {
+		return err
+	}
+	draft, err := s.loadDraftSnapshot(ctx, tx, in.ID)
+	if err != nil {
+		return err
+	}
+	copyOf, err := s.copyDraftQuestions(ctx, tx, draft, in)
+	if err != nil {
+		return err
+	}
+	return s.copyDraftGraph(ctx, tx, copyID, in.ActorID, draft, in, copyOf)
 }
 
 // copyDraftQuestions copies every standalone question of draft, each once
