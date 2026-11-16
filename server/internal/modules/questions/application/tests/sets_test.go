@@ -304,6 +304,20 @@ func TestEachSetWriteIsAuditedWithWhatChanged(t *testing.T) {
 			return err
 		},
 		func() error {
+			_, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: by, Fields: domain.SetFields{Description: new("Cho lớp tối"), DescriptionSet: true}})
+			return err
+		},
+		func() error {
+			_, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: by, Fields: domain.SetFields{
+				Name: new("Bộ lớp tối"), Description: new("Cho lớp tối thứ Bảy"), DescriptionSet: true,
+			}})
+			return err
+		},
+		func() error {
+			_, err := w.svc.Commands.UpdateSet.Handle(ctx, command.UpdateSet{Write: by, Fields: domain.SetFields{DescriptionSet: true}})
+			return err
+		},
+		func() error {
 			_, err := w.svc.Commands.AddToSet.Handle(ctx, command.AddToSet{Write: by, QuestionIDs: []string{q2.ID}})
 			return err
 		},
@@ -331,6 +345,9 @@ func TestEachSetWriteIsAuditedWithWhatChanged(t *testing.T) {
 	want := []string{
 		`question_set.created {"added": ` + diffOf(q1.ID) + `}`,
 		`question_set.updated {"changed": {"name": {"new": "Bộ đã đổi tên", "old": "Bộ ghi nhật ký"}}}`,
+		`question_set.updated {"changed": {"description": {"new": "Cho lớp tối", "old": null}}}`,
+		`question_set.updated {"changed": {"name": {"new": "Bộ lớp tối", "old": "Bộ đã đổi tên"}, "description": {"new": "Cho lớp tối thứ Bảy", "old": "Cho lớp tối"}}}`,
+		`question_set.updated {"changed": {"description": {"new": null, "old": "Cho lớp tối thứ Bảy"}}}`,
 		`question_set.updated {"added": ` + diffOf(q2.ID) + `}`,
 		`question_set.updated {"removed": ` + diffOf(q1.ID) + `}`,
 		`question_set.deleted `,
