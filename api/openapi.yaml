@@ -11685,13 +11685,13 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: >-
-            `MESSAGING_NOT_ALLOWED` — the student's account is disabled or no longer a student, or no thread exists and the pair does not qualify. The thread stays readable.
+            `MESSAGING_NOT_ALLOWED` — a messaging peer whose account is disabled or no longer a student. The thread stays readable.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '422':
           description: >-
-            `VALIDATION_FAILED` — neither a body nor a file.
+            `VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -11806,7 +11806,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '422':
           description: >-
-            `VALIDATION_FAILED` — neither a body nor a file.
+            `VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
