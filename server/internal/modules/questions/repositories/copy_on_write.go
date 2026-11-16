@@ -86,8 +86,8 @@ func ContextUse(ctx context.Context, q db.Querier, questionID string, within dom
 // the question already binds bind whoever edits it, any other asset under the
 // editor's own scope, refused as a missing one when it cannot be read.
 // Either way the edit is checked against the question's revision
-// (ExpectedUpdatedAt) and keeps the question's stored prose where it omits it,
-// as updateQuestion does.
+// (ExpectedUpdatedAt) and keeps what it omits as updateQuestion does: the
+// stored prose, an option's formatting and the audio's allowPause.
 func (s *Postgres) WriteInContext(ctx context.Context, in domain.WriteInput, use domain.QuestionUse, within domain.EditContext) (domain.Question, bool, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -152,12 +152,16 @@ func (s *Postgres) attachmentKind(ctx context.Context, tx pgx.Tx, in domain.Writ
 
 // fork makes the edit a new question: R6's duplicate path with the edit
 // applied. The edit is first held to the original as an update would be,
-// under its row lock: its revision, and its stored prose kept where the edit
-// omits it. The copy then belongs to the original's owner, is created and
-// last written by the editor, takes fresh gap ids as a duplicate does, and is
-// audited as created and as forked from the original in context.
+// under its row lock: its revision, and what the edit omits kept from the
+// original (its prose, an option's formatting, the audio's allowPause). The
+// copy then belongs to the original's owner, is created and last written by
+// the editor, takes fresh gap ids as a duplicate does, and is audited as
+// created and as forked from the original in context.
 func (s *Postgres) fork(ctx context.Context, tx pgx.Tx, in domain.WriteInput, use domain.QuestionUse, within domain.EditContext) (domain.Question, error) {
 	if err := prepareQuestionContent(ctx, tx, &in, true, nil); err != nil {
+		return domain.Question{}, err
+	}
+	if err := keepOmitted(ctx, tx, &in.Input, use.ID); err != nil {
 		return domain.Question{}, err
 	}
 	in.ID, in.OwnerID, in.ExpectedUpdatedAt = "", use.OwnerID, nil
@@ -188,4 +192,33 @@ func (s *Postgres) fork(ctx context.Context, tx pgx.Tx, in domain.WriteInput, us
 		return domain.Question{}, err
 	}
 	return written, nil
+}
+
+// keepOmitted fills in, a fork's edit of the question originalID, with what
+// an update of the original would keep where the edit leaves it out, read
+// under the original's row lock: an option sent without content keeps the
+// formatting of the option it updates, or is refused as options[i].content as
+// an update refuses it (preserveOptionContent), and an audio policy without
+// allowPause keeps the stored one. The create path the copy is written by
+// would otherwise drop the formatting and store allowPause as true. The
+// options and audio policy are copied first, so the caller's input is left as
+// it was.
+func keepOmitted(ctx context.Context, tx pgx.Tx, in *domain.Input, originalID string) error {
+	if in.Type != domain.TFNG && in.Type.HasOptions() {
+		in.Options = slices.Clone(in.Options)
+		if err := preserveOptionContent(ctx, tx, originalID, in.Options); err != nil {
+			return err
+		}
+	}
+	if in.Audio == nil || in.Audio.AllowPause != nil {
+		return nil
+	}
+	var stored *bool
+	if err := tx.QueryRow(ctx, `SELECT audio_allow_pause FROM app.questions WHERE id = $1::uuid`, originalID).Scan(&stored); err != nil {
+		return fmt.Errorf("questions: fork audio policy: %w", err)
+	}
+	audio := *in.Audio
+	audio.AllowPause = stored
+	in.Audio = &audio
+	return nil
 }
