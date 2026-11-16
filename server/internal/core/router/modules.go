@@ -17,6 +17,7 @@ import (
 	notificationshttp "quizzivy/internal/modules/notifications/http"
 	organizationhttp "quizzivy/internal/modules/organization/http"
 	questionshttp "quizzivy/internal/modules/questions/http"
+	sharinghttp "quizzivy/internal/modules/sharing/http"
 	testshttp "quizzivy/internal/modules/tests/http"
 )
 
@@ -39,4 +40,5 @@ type Modules struct {
 	Organization  organizationhttp.Organization
 	Exports       exportshttp.Exports
 	Leads         leadshttp.Leads
+	Sharing       sharinghttp.Sharing
 }

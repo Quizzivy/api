@@ -14,7 +14,7 @@ import (
 
 var computedActions = []string{"ai.credit_request.approved", "ai.credit_request.declined"}
 
-var pendingActions = []string{"question.forked", "share.changed", "share.copied", "share.granted", "share.removed", "share.revoked"}
+var pendingActions = []string{"question.forked", "share.copied"}
 
 func catalogued() map[string]domain.Action {
 	out := map[string]domain.Action{}

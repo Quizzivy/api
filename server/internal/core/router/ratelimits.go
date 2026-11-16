@@ -75,7 +75,8 @@ var aiConsoleWrites = []string{
 // perActor, keyed by ratelimit.PrincipalKey. They are applied after the
 // permission gate, so an entry may name only an operation that requires a
 // token; New refuses any other. The authenticated operations that mint a
-// credential are here, and so are the uploads that store a file per call.
+// credential are here, so are the uploads that store a file per call, and so
+// are the share dialog's directory of colleagues and its grants.
 func PrincipalRateLimits() *ratelimit.Registry {
 	reg := ratelimit.NewRegistry()
 	const capacity = 10_000
@@ -114,6 +115,8 @@ func PrincipalRateLimits() *ratelimit.Registry {
 	perActor("PUT /me/avatar", ratelimit.PerHour(10))
 	perActor("POST /admin/settings/logo", ratelimit.PerHour(20))
 	perActor("POST /teacher/media/{id}/replace", ratelimit.PerMinute(10), ratelimit.PerHour(60))
+	perActor("GET /teacher/directory/teachers", ratelimit.PerMinute(60))
+	perActor("POST /teacher/shares", ratelimit.PerHour(30))
 	for _, pattern := range aiSuggestions {
 		perActor(pattern, ratelimit.PerMinute(10), ratelimit.PerHour(100))
 	}

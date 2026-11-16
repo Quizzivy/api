@@ -90,8 +90,10 @@ type Activity struct {
 	Flagged              bool
 }
 
-// Nav is the caller's permission-aware shell counts.
+// Nav is the caller's permission-aware shell counts. SharedWithMe counts the
+// live grants to the caller.
 type Nav struct {
 	LiveAssignments, AnswersToGrade *int
 	UnreadNotifications             int
+	SharedWithMe                    int
 }
