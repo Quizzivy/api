@@ -254,27 +254,102 @@ func TestATransferIsRefusedForEachWrongPartyAndMovesNothing(t *testing.T) {
 	}
 }
 
+// A failure at any step rolls back every step before it: the assignments,
+// and the grant deletion this task added after them, which runs last.
 func TestAFailingStepMovesNothingAndADeadlockIsAContendedWrite(t *testing.T) {
-	w := newTransferWorld(t)
-	from, fromRole := w.user(t, "teacher", true)
-	to, _ := w.user(t, "teacher", false)
-	w.content(t, from)
 	deadlock := &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+	for step, fail := range map[string]func(*adapters.ContentMovers){
+		"assignments": func(m *adapters.ContentMovers) {
+			m.Assignments = cqrs.HandlerFunc[assignmentscmd.TransferOwnership, int](func(context.Context, assignmentscmd.TransferOwnership) (int, error) {
+				return 0, deadlock
+			})
+		},
+		"the grants, last": func(m *adapters.ContentMovers) {
+			drop := m.Shares
+			m.Shares = cqrs.HandlerFunc[sharingcmd.TransferOwnership, int](func(ctx context.Context, cmd sharingcmd.TransferOwnership) (int, error) {
+				if _, err := drop.Handle(ctx, cmd); err != nil {
+					return 0, err
+				}
+				return 0, deadlock
+			})
+		},
+	} {
+		t.Run(step, func(t *testing.T) {
+			w := newTransferWorld(t)
+			from, fromRole := w.user(t, "teacher", true)
+			to, _ := w.user(t, "teacher", false)
+			w.content(t, from)
+			test := w.insert(t, `SELECT id::text FROM app.tests WHERE owner_id = $1::uuid AND deleted_at IS NULL`, from)
+			set := w.insert(t, `SELECT id::text FROM app.question_sets WHERE owner_id = $1::uuid AND deleted_at IS NULL`, from)
+			grants := []string{w.grant(t, "test", test, to, "edit", from), w.grant(t, "question_set", set, to, "use", from)}
 
-	_, err := w.move(from, fromRole, to, func(m *adapters.ContentMovers) {
-		m.Assignments = cqrs.HandlerFunc[assignmentscmd.TransferOwnership, int](func(context.Context, assignmentscmd.TransferOwnership) (int, error) {
-			return 0, deadlock
+			_, err := w.move(from, fromRole, to, fail)
+
+			if !errors.Is(err, identitydomain.ErrWriteContended) || !errors.Is(err, deadlock) {
+				t.Errorf("a deadlock on %s: %v, want ErrWriteContended keeping the database error", step, err)
+			}
+			if n := w.owned(t, from); n != [6]int{2, 2, 3, 2, 1, 2} {
+				t.Errorf("a failed transfer moved rows: the source owns %v", n)
+			}
+			if n := w.audits(t, from); n != 0 {
+				t.Errorf("a failed transfer wrote %d audit rows", n)
+			}
+			if left := w.texts(t, `SELECT id::text FROM app.content_shares WHERE id = ANY($1::uuid[])`, grants); len(left) != len(grants) {
+				t.Errorf("a failed transfer deleted grants: %d of %d remain", len(left), len(grants))
+			}
+			if n := w.texts(t, `SELECT id::text FROM app.audit_log WHERE action = 'share.revoked' AND actor_user_id = $1::uuid`, to); len(n) != 0 {
+				t.Errorf("a failed transfer wrote %d share.revoked rows", len(n))
+			}
 		})
-	})
+	}
+}
 
-	if !errors.Is(err, identitydomain.ErrWriteContended) || !errors.Is(err, deadlock) {
-		t.Errorf("a deadlock on the last step: %v, want ErrWriteContended keeping the database error", err)
-	}
-	if n := w.owned(t, from); n != [6]int{2, 2, 3, 2, 1, 2} {
-		t.Errorf("a failed transfer moved rows: the source owns %v", n)
-	}
-	if n := w.audits(t, from); n != 0 {
-		t.Errorf("a failed transfer wrote %d audit rows", n)
+// A grant keeps a disabled owner's sets open, so a grantee's write in a set's
+// context can run beside the transfer. That write locks the set and then the
+// question (UpdateInSet: FOR UPDATE, then LockForDraftUse; CopySet: FOR SHARE,
+// then FOR SHARE OF q); the transfer must take them in the same order, or
+// each holds what the other awaits.
+func TestATransferLocksASetBeforeItsQuestionsAsASetWriteDoes(t *testing.T) {
+	for write, strength := range map[string]string{"an edit in the set": "FOR UPDATE", "a copy of the set": "FOR SHARE"} {
+		t.Run(write, func(t *testing.T) {
+			w := newTransferWorld(t)
+			ctx := context.Background()
+			from, fromRole := w.user(t, "teacher", true)
+			to, _ := w.user(t, "teacher", false)
+			w.content(t, from)
+			set := w.insert(t, `SELECT id::text FROM app.question_sets WHERE owner_id = $1::uuid AND deleted_at IS NULL`, from)
+			question := w.insert(t, `SELECT id::text FROM app.questions WHERE owner_id = $1::uuid AND deleted_at IS NULL ORDER BY id LIMIT 1`, from)
+			holder, err := w.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = holder.Rollback(ctx) }()
+			if _, err := holder.Exec(ctx, `SELECT 1 FROM app.question_sets WHERE id = $1::uuid `+strength, set); err != nil {
+				t.Fatal(err)
+			}
+
+			moved := make(chan error, 1)
+			go func() {
+				_, err := w.move(from, fromRole, to, nil)
+				moved <- err
+			}()
+			w.waitBlockedBy(t, w.backend(t, holder))
+			_, probed := holder.Exec(ctx, `SELECT 1 FROM app.questions WHERE id = $1::uuid `+strength+` NOWAIT`, question)
+			if err := holder.Commit(ctx); err != nil && probed == nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-moved:
+				if err != nil {
+					t.Errorf("the transfer: %v, want it done once the set write ends", err)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("the transfer never finished")
+			}
+			if probed != nil {
+				t.Errorf("%s could not take its question while the transfer waited on the set (%v): the transfer locks questions before sets, and the two deadlock", write, probed)
+			}
+		})
 	}
 }
 

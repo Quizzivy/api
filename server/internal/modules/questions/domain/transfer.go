@@ -12,10 +12,12 @@ type Transferred struct {
 // OwnershipTransfer gives every question and question set one account owns to
 // another.
 type OwnershipTransfer interface {
-	// TransferOwnership moves the questions of from to to and then its
-	// question sets, deleted ones too, locking each table's rows in id order,
-	// and counts those not deleted. A set's items name questions of from,
-	// which move in the same call, so a set still holds only its owner's
-	// questions. The grants to the sets follow them: a grant stores no owner.
+	// TransferOwnership moves the question sets of from to to and then its
+	// questions, deleted ones too, locking each table's rows in id order, and
+	// counts those not deleted. Sets go first because a write in a set's
+	// context locks the set before its question. A set's items name questions
+	// of from, which move in the same call, so a set still holds only its
+	// owner's questions. The grants to the sets follow them: a grant stores no
+	// owner.
 	TransferOwnership(ctx context.Context, from, to string) (Transferred, error)
 }

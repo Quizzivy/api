@@ -33,7 +33,7 @@ type ContentMovers struct {
 
 // ContentTransfer implements the identity module's ContentMover: it locks both
 // accounts through the ledger, moves classes, tests and question groups,
-// questions and question sets, media and assignments in that order, deletes
+// question sets and questions, media and assignments in that order, deletes
 // the grants whose grantee now owns what they name, and records the audit row,
 // all in one transaction, so a failure at any step moves nothing. The other
 // grants to the moved tests and sets follow them unwritten: a grant stores no
