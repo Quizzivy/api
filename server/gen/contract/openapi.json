@@ -19813,15 +19813,14 @@
           "teacher-sharing"
         ],
         "summary": "Find colleagues to share with",
-        "description": "The share dialog's picker. Lists accounts that hold the teaching\nworkspace, active or disabled, never the caller, never a student.\n`q` matches the full name, the display name and the email,\naccent-insensitively (`duc` finds `Đức`). At most `limit` rows, best\nmatch first.\n\nThis is not a list of owned resources, so its rows are under\n`teachers`, not `items`: a colleague's name and email reach holders\nof `content.share` by design (the deck draws them), and never a\nstudent, whom `x-permission` excludes.\n\nLimited to 60 a minute per signed-in user.\n",
+        "description": "The share dialog's picker. Lists accounts that hold the teaching\nworkspace, active or disabled, never the caller, never a student.\n`q` matches the full name, the display name and the email,\naccent-insensitively (`duc` finds `Đức`), best match first. Without\n`q` (the picker just opened) it lists colleagues by name. At most\n`limit` rows.\n\nThis is not a list of owned resources, so its rows are under\n`teachers`, not `items`: a colleague's name and email reach holders\nof `content.share` by design (the deck draws them), and never a\nstudent, whom `x-permission` excludes.\n\nLimited to 60 a minute per signed-in user.\n",
         "parameters": [
           {
             "name": "q",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
-              "minLength": 1,
               "maxLength": 200
             }
           },
