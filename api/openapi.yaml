@@ -7437,7 +7437,7 @@ components:
         | `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |
         | `message.received` | a teacher | `senderName`, `count`, `excerpt` |
         | `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |
-        | `summary.weekly` | a teacher | `count` (papers handed in last week), `toGrade`, `flagged`, `classNames` |
+        | `summary.weekly` | a teacher | `count`, `toGrade`, `flagged`, `classNames` |
 
         A message item is one per reader per thread: it is written again,
         unread, with the new `count` while the thread stays unread, and marked
@@ -7533,7 +7533,7 @@ components:
         count:
           type: integer
           minimum: 0
-          description: Papers handed in (`attempt.submitted`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`).
+          description: Papers handed in (`attempt.submitted`, and last week's on the teacher's classes for `summary.weekly`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`).
         toGrade: { type: integer, minimum: 0, description: 'Of the papers handed in, those with an answer waiting for a mark.' }
         focusLost: { type: integer, minimum: 0, description: Times the student left the test. }
         notSubmitted: { type: integer, minimum: 0, description: Students who have not handed in. }
@@ -7543,7 +7543,7 @@ components:
           type: array
           maxItems: 5
           items: { type: string, minLength: 1, maxLength: 200 }
-          description: At most five names; `count` holds how many classes there are.
+          description: At most five names. For `join_codes.rotated`, `count` holds how many classes there are; for `summary.weekly`, they are the classes the week's figures cover.
         closesAt: { $ref: '#/components/schemas/Timestamp' }
         used: { type: integer, minimum: 0, description: AI credits the teacher has used this month. }
         allowance: { type: integer, minimum: 0, description: "The teacher's AI allowance this month, in credits." }
@@ -8867,18 +8867,22 @@ paths:
         list, and no more mail goes to it; every other event type is accepted
         and ignored. A replayed `svix-id` changes nothing.
 
-        **Leak review (§6.5).** A request without the three headers, or
-        whose body is not a JSON object, is refused with `400` by request
-        validation before the signature is read, as on every operation. Past
-        that, the answer is `204` or `401`, both empty, whatever the body
-        says: nothing tells a caller whether an address is
+        The three headers are optional in the schema so that a request
+        without them is refused by the signature check, `401`, after the
+        rate limit has counted it, and not by parameter binding.
+
+        **Leak review (§6.5).** A body that is not a JSON object, or a header
+        over its length, is refused with `400` by request validation before
+        the signature is read, as on every operation. Past that, the answer
+        is `204` or `401`, both empty, whatever the body says: nothing tells
+        a caller whether an address is
         known or already suppressed. A forged request cannot suppress an
         address, because it cannot sign; the address stored is one Quizzivy
         already sent to. The limit is per address: 120 a minute.
       parameters:
-        - { name: svix-id, in: header, required: true, schema: { type: string, maxLength: 200 } }
-        - { name: svix-timestamp, in: header, required: true, schema: { type: string, maxLength: 20 } }
-        - { name: svix-signature, in: header, required: true, schema: { type: string, maxLength: 2000 } }
+        - { name: svix-id, in: header, required: false, schema: { type: string, maxLength: 200 }, description: 'Resend''s delivery id; without it the answer is `401`.' }
+        - { name: svix-timestamp, in: header, required: false, schema: { type: string, maxLength: 20 }, description: 'Unix seconds; without it the answer is `401`.' }
+        - { name: svix-signature, in: header, required: false, schema: { type: string, maxLength: 2000 }, description: 'One or more `v1,<base64>` signatures; without it the answer is `401`.' }
       requestBody:
         required: true
         content:
