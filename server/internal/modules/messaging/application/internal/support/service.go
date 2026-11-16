@@ -30,19 +30,35 @@ type Service struct {
 // Ring tells the readers of a message just posted, once it has committed,
 // through the bell: one Notice each (domain.Delivery). A replayed post tells
 // nobody again. Telling never fails the post: a failure is logged.
+//
+// A reader whose pointer moves past the message after Delivery left them in
+// but before their Notice is written has the item cleared by their own Seen
+// too early, against a row that is not written yet or is older. So once every
+// Notice is written, Ring reads again which of the readers have caught up
+// (domain.Repository.CaughtUp) and clears their items as Seen would.
 func (s *Service) Ring(ctx context.Context, posted domain.Posted) {
 	if s.Bell == nil || !posted.Created {
 		return
 	}
+	var delivery domain.Delivery
 	ring := cqrs.HandlerFunc[domain.Notice, cqrs.Nothing](func(ctx context.Context, n domain.Notice) (cqrs.Nothing, error) {
 		return cqrs.Nothing{}, s.Bell.Ring(ctx, n)
 	})
 	cqrs.Announce(ctx, ring, s.Logger, "message posted", func(ctx context.Context) ([]domain.Notice, error) {
-		delivery, err := s.Repo.Delivery(ctx, posted.Message.ID)
-		if err != nil {
+		var err error
+		if delivery, err = s.Repo.Delivery(ctx, posted.Message.ID); err != nil {
 			return nil, err
 		}
 		return delivery.Notices(), nil
+	})
+	if len(delivery.Readers) == 0 {
+		return
+	}
+	seen := cqrs.HandlerFunc[domain.Caught, cqrs.Nothing](func(ctx context.Context, c domain.Caught) (cqrs.Nothing, error) {
+		return cqrs.Nothing{}, s.Bell.Seen(ctx, c.ReaderID, c.State.ConversationID, c.State.At)
+	})
+	cqrs.Announce(ctx, seen, s.Logger, "message read while rung", func(ctx context.Context) ([]domain.Caught, error) {
+		return s.Repo.CaughtUp(ctx, delivery.ConversationID, delivery.Readers)
 	})
 }
 

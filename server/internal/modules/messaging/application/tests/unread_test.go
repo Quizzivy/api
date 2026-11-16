@@ -330,3 +330,76 @@ func TestAThreadsItemCountsItsMessagesUntilThePointerPassesIt(t *testing.T) {
 		t.Errorf("the teacher holds %+v, want one message.received leading to An's thread", got)
 	}
 }
+
+// readingBell is the real bell, but before it rings reader it runs read, as a
+// reader who opens the thread between Delivery and their Notify would.
+type readingBell struct {
+	adapters.MessagingBell
+	reader string
+	read   func(conversationID string)
+}
+
+func (b readingBell) Ring(ctx context.Context, n domain.Notice) error {
+	if n.ReaderID == b.reader {
+		b.read(n.ConversationID)
+	}
+	return b.MessagingBell.Ring(ctx, n)
+}
+
+// TestAReaderWhoReadsWhileTheMessageIsRungKeepsNoUnreadItem interleaves
+// Delivery, the reader's pointer and their Notify. It fails when the item of
+// a reader who caught up between the two is left unread, whether they held
+// no item yet or an older unread one, or when another reader's item is
+// cleared with it.
+func TestAReaderWhoReadsWhileTheMessageIsRungKeepsNoUnreadItem(t *testing.T) {
+	w := newWorld(t)
+	notifications := notificationsapp.New(notificationsrepo.NewPostgres(db.NewContext(w.tx)))
+	plain := adapters.MessagingBell{Notify: notifications.Commands.Notify, MarkKeyRead: notifications.Commands.MarkKeyRead}
+	teacher := w.user("Cô Uyên", "teacher")
+	uyen := by(teacher)
+	class := w.class(teacher, "Lớp 5A")
+	an, binh := w.user("Học viên An", "student"), w.user("Học viên Bình", "student")
+	w.enrol(class, an)
+	w.enrol(class, binh)
+	newest := func(conversationID string) string {
+		var id string
+		if err := w.tx.QueryRow(context.Background(), `SELECT id::text FROM app.messages WHERE conversation_id = $1::uuid ORDER BY id DESC LIMIT 1`, conversationID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	interleaved := readingBell{MessagingBell: plain, reader: an, read: func(conversationID string) {
+		if err := w.studentRead(an, command.MarkReadAsStudent{ClassID: class, MessageID: newest(conversationID)}); err != nil {
+			t.Fatal(err)
+		}
+	}}
+
+	w.app.WithBell(plain, nil)
+	w.mustAnnounce(uyen, class, "Chào lớp")
+	w.app.WithBell(interleaved, nil)
+	w.mustAnnounce(uyen, class, "Mai lớp nghỉ.")
+	if got := w.items(an); len(got) != 1 || !got[0].read {
+		t.Errorf("An read the channel while the second post was rung and holds %+v, want the item read", got)
+	}
+	if got := w.items(binh); len(got) != 1 || got[0].read || got[0].params["count"] != float64(2) {
+		t.Errorf("Bình read nothing and holds %+v, want one unread item counting two", got)
+	}
+
+	interleaved.read = func(conversationID string) {
+		if err := w.studentRead(an, command.MarkReadAsStudent{TeacherID: teacher, MessageID: newest(conversationID)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.app.WithBell(interleaved, nil)
+	w.mustDirect(uyen, an, "Em làm bài chưa?")
+	got := w.items(an)
+	if len(got) != 2 || !got[0].read || got[0].target["teacherId"] != teacher {
+		t.Errorf("An read the teacher's first message while it was rung and holds %+v, want its new item read", got)
+	}
+
+	w.app.WithBell(plain, nil)
+	w.mustAnnounce(uyen, class, "Nhớ mang sách.")
+	if got := w.items(an); len(got) != 2 || got[0].read || got[0].params["count"] != float64(1) || got[0].target["classId"] != class {
+		t.Errorf("a post An has not read left %+v, want the channel's item unread, counting one", got)
+	}
+}

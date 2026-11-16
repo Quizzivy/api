@@ -52,6 +52,36 @@ func (p *Postgres) Delivery(ctx context.Context, messageID string) (domain.Deliv
 	return d, nil
 }
 
+// CaughtUp reads which of readerIDs have nothing past their pointer in the
+// thread conversationID but their own messages (domain.Repository), in one
+// statement that judges at its own start, as markRead's does: a message it
+// does not count committed after that. A reader without a pointer is never
+// caught up, since the thread holds a message they did not write.
+func (p *Postgres) CaughtUp(ctx context.Context, conversationID string, readerIDs []string) ([]domain.Caught, error) {
+	if len(readerIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := p.Query(ctx, `
+		SELECT r.user_id::text, statement_timestamp()
+		  FROM app.conversation_reads r
+		 WHERE r.conversation_id = $1::uuid AND r.user_id = ANY($2::uuid[])
+		   AND NOT EXISTS (SELECT 1 FROM app.messages um
+		                    WHERE um.conversation_id = r.conversation_id AND um.sender_id <> r.user_id
+		                      AND um.id > r.last_read_message_id)
+		 ORDER BY r.user_id`, conversationID, readerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("messaging: caught up: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Caught, error) {
+		c := domain.Caught{State: domain.ReadState{ConversationID: conversationID, CaughtUp: true}}
+		return c, row.Scan(&c.ReaderID, &c.State.At)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("messaging: caught up: %w", err)
+	}
+	return out, nil
+}
+
 // StaffUnread counts the messages past scope.UserID's read pointers, not
 // counting their own, over their direct threads and the channels of the
 // classes scope reaches that are not archived (domain.Repository): the sum of

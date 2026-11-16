@@ -77,3 +77,11 @@ type ReadState struct {
 	CaughtUp       bool
 	At             time.Time
 }
+
+// Caught is a reader whose thread is in ReadState State, read again after a
+// new message was rung, so that a reader who caught up while it was being
+// rung has the item cleared.
+type Caught struct {
+	ReaderID string
+	State    ReadState
+}

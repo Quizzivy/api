@@ -50,6 +50,10 @@ type Repository interface {
 	MarkChannelRead(ctx context.Context, classID string, mark ReadMark) (ReadState, error)
 	// Delivery reads what the message messageID tells its thread's readers.
 	Delivery(ctx context.Context, messageID string) (Delivery, error)
+	// CaughtUp reads which of readerIDs have nothing left past their pointer
+	// in the thread conversationID but their own messages, each with that
+	// ReadState, all judged at one statement's start.
+	CaughtUp(ctx context.Context, conversationID string, readerIDs []string) ([]Caught, error)
 	// StaffUnread counts the messages past scope.UserID's read pointers, not
 	// counting their own, over their direct threads and the channels of the
 	// classes scope reaches that are not archived.
