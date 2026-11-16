@@ -239,11 +239,21 @@ type SetRepository interface {
 	RemoveFromSet(ctx context.Context, w SetWrite, questionIDs []string) (QuestionSet, error)
 }
 
-// WriteContexts resolves the set a bank write is made in the context of
-// (setId). The test a write is made for (forTestId) is the tests module's,
-// reached through ports.EditableTests.
+// WriteContexts writes a bank edit made in the context of a set (setId). The
+// test a write is made for (forTestId) is the tests module's, reached through
+// ports.EditableTests, and so is an edit in a test's context
+// (editTestQuestion).
 type WriteContexts interface {
-	// SetHolds is nil when the scope can edit the live set setID and it holds
-	// questionID; ErrSetNotFound, or the refusal of Access.Allows, otherwise.
-	SetHolds(ctx context.Context, scope access.Scope, setID, questionID string) error
+	// UpdateInSet edits the question in.ID in the set setID's context, under
+	// the copy-on-write rule (QuestionUse.Forks), and answers the question as
+	// saved, the copy on a fork. ErrSetNotFound when the actor cannot read the
+	// set or it does not hold the question; the refusal of Access.Allows for a
+	// reader who may not change it.
+	UpdateInSet(ctx context.Context, in WriteInput, setID string) (Question, error)
+}
+
+// IsSetRefusal reports whether err is a reader's refusal to change a set
+// (Access.Allows): ErrSetReadOnly or ErrSetOwnerOnly.
+func IsSetRefusal(err error) bool {
+	return errors.Is(err, ErrSetReadOnly) || errors.Is(err, ErrSetOwnerOnly)
 }

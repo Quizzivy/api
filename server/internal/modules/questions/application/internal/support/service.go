@@ -47,19 +47,8 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 		return domain.Question{}, err
 	}
 
-	in := domain.WriteInput{
-		ID:                req.ID,
-		Input:             req.Input,
-		MediaAssetKind:    kind,
-		ActorID:           req.ActorID,
-		OwnerID:           req.OwnerID,
-		All:               req.All,
-		SourceMedia:       req.SourceMedia,
-		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
-		Now:               s.Now(),
-		IP:                req.IP,
-		UserAgent:         req.UserAgent,
-	}
+	in := s.InputOf(req)
+	in.MediaAssetKind = kind
 	write := s.Repo.Create
 	if update {
 		write = s.Repo.Update
@@ -70,4 +59,21 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 	}
 	written.Access = domain.WriterAccess(req)
 	return written, nil
+}
+
+// InputOf is req as the repository's write input, stamped now, with no media
+// kind resolved yet.
+func (s *Service) InputOf(req domain.WriteRequest) domain.WriteInput {
+	return domain.WriteInput{
+		ID:                req.ID,
+		Input:             req.Input,
+		ActorID:           req.ActorID,
+		OwnerID:           req.OwnerID,
+		All:               req.All,
+		SourceMedia:       req.SourceMedia,
+		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+		Now:               s.Now(),
+		IP:                req.IP,
+		UserAgent:         req.UserAgent,
+	}
 }

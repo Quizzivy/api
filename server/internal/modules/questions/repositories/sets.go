@@ -350,19 +350,76 @@ func RemoveFromSets(ctx context.Context, tx pgx.Tx, questionID string) error {
 	return nil
 }
 
-// SetHolds answers ErrSetNotFound unless the scope can edit the live set
-// setID and it holds questionID: updateQuestion's set context (T-R7.6 forks
-// within it).
-func (s *Postgres) SetHolds(ctx context.Context, scope access.Scope, setID, questionID string) error {
-	var granted *string
-	err := s.QueryRow(ctx, `SELECT `+SetAccess(2, 3)+` FROM app.question_sets s
-		 JOIN app.question_set_items i ON i.set_id = s.id AND i.question_id = $4::uuid
-		 WHERE s.id = $1::uuid AND s.deleted_at IS NULL`, setID, scope.All, opt.String(scope.UserID), questionID).Scan(&granted)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && granted == nil {
-		return domain.ErrSetNotFound
-	}
+// UpdateInSet writes in, an edit of the bank question in.ID made in the
+// context of the set setID (updateQuestion?setId), and answers the question as
+// saved: the copy when the edit forks it (copy-on-write, D4). The set's row is
+// locked first, then the question's (LockForDraftUse), the order autosave and
+// add-to-set take. The set must be one the actor can read and must hold the
+// question, or the edit answers ErrSetNotFound, as a missing set does; a
+// reader who may not change it gets the refusal of Access.Allows. On a fork
+// only this set's item is pointed at the copy, which LockForDraftUse locks
+// first, and the set records the editor.
+func (s *Postgres) UpdateInSet(ctx context.Context, in domain.WriteInput, setID string) (domain.Question, error) {
+	tx, err := s.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("questions: set context: %w", err)
+		return domain.Question{}, fmt.Errorf("questions: begin set edit: %w", err)
 	}
-	return domain.Access(*granted).Allows(domain.SetChange)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, refused := lockSet(ctx, tx, domain.SetWrite{ID: setID, ActorID: in.ActorID, All: in.All}, domain.SetChange)
+	if errors.Is(refused, domain.ErrSetNotFound) || refused != nil && !domain.IsSetRefusal(refused) {
+		return domain.Question{}, refused
+	}
+	held, err := db.Exists(ctx, tx, `SELECT 1 FROM app.question_set_items WHERE set_id = $1::uuid AND question_id = $2::uuid`, setID, in.ID)
+	if err != nil {
+		return domain.Question{}, fmt.Errorf("questions: set context: %w", err)
+	}
+	if !held {
+		return domain.Question{}, domain.ErrSetNotFound
+	}
+	if refused != nil {
+		return domain.Question{}, refused
+	}
+	if err := LockForDraftUse(ctx, tx, in.ID); err != nil {
+		return domain.Question{}, err
+	}
+	within := domain.EditContext{Kind: domain.ContextSet, ID: setID}
+	use, err := ContextUse(ctx, tx, in.ID, within)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	inner := &Postgres{Repository: db.NewRepository(db.NewContext(tx)), media: s.media}
+	written, forked, err := inner.WriteInContext(ctx, in, use, within)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	if forked {
+		if err := repointSetItem(ctx, tx, setID, use.ID, written.ID, in.ActorID); err != nil {
+			return domain.Question{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Question{}, fmt.Errorf("questions: commit set edit: %w", err)
+	}
+	return written, nil
+}
+
+// repointSetItem points the set's item for the question from at its fork to,
+// in place, so the item keeps its ordinal, and records the editor on the set.
+// The fork is locked first, as every insert of a set item locks its question.
+func repointSetItem(ctx context.Context, tx pgx.Tx, setID, from, to, actorID string) error {
+	if err := LockForDraftUse(ctx, tx, to); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH moved AS (
+		  UPDATE app.question_set_items SET question_id = $3::uuid
+		   WHERE set_id = $1::uuid AND question_id = $2::uuid
+		  RETURNING set_id
+		)
+		UPDATE app.question_sets SET updated_by = $4::uuid WHERE id IN (SELECT set_id FROM moved)`,
+		setID, from, to, actorID); err != nil {
+		return fmt.Errorf("questions: repoint set item: %w", err)
+	}
+	return nil
 }

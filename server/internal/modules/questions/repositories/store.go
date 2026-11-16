@@ -24,6 +24,9 @@ var anyOwner = access.Scope{All: true}
 
 const purgedMediaBinding = "media_assets_purged_binding"
 
+// entityQuestion is the audit log's entity for a bank question.
+const entityQuestion = "question"
+
 const questionColumns = `
 	       q.id::text, q.type::text, q.prompt, q.prompt_content, q.explanation_content,
 	       q.media_asset_id::text, q.media_asset_kind::text, q.media_alt,
@@ -271,7 +274,7 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 	if err := audit.Write(ctx, tx, audit.Entry{
 		ActorUserID: &in.ActorID,
 		Action:      action,
-		Entity:      "question",
+		Entity:      entityQuestion,
 		EntityID:    &id,
 		OccurredAt:  in.Now,
 		IP:          opt.String(in.IP),
@@ -342,7 +345,7 @@ func (s *Postgres) SoftDelete(ctx context.Context, in domain.WriteInput) error {
 	if err := audit.Write(ctx, tx, audit.Entry{
 		ActorUserID: &in.ActorID,
 		Action:      "question.deleted",
-		Entity:      "question",
+		Entity:      entityQuestion,
 		EntityID:    &in.ID,
 		OccurredAt:  in.Now,
 		IP:          opt.String(in.IP),

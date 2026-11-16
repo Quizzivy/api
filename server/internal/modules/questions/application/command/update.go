@@ -8,10 +8,13 @@ import (
 
 // Update edits a bank question. With SetID the edit is made in that set's
 // context, which the actor must be able to edit and which must hold the
-// question; the question's owner and scope.all edit it in place. Anyone else
-// who reads it, through a test or a set shared with them, gets ErrReadOnly
-// when they may only use it and ErrEditContextRequired when they may edit
-// it, since such an edit is made in its test's or set's context (D4).
+// question, under the copy-on-write rule (domain.QuestionUse.Forks): a
+// non-owner's edit of a question something else uses makes a copy that only
+// this set is pointed at, and the answer is the copy. Without it, the
+// question's owner and scope.all edit it in place. Anyone else who reads it,
+// through a test or a set shared with them, gets ErrReadOnly when they may
+// only use it and ErrEditContextRequired when they may edit it, since such an
+// edit is made in its test's or set's context (D4).
 type Update struct {
 	Request domain.WriteRequest
 	SetID   string
@@ -25,15 +28,13 @@ func (s UpdateHandler) Handle(ctx context.Context, cmd Update) (domain.Question,
 	if cmd.Request.ID == "" {
 		return domain.Question{}, domain.ErrNotFound
 	}
-	if cmd.SetID != "" {
-		if s.Contexts == nil {
-			return domain.Question{}, domain.ErrSetNotFound
-		}
-		if err := s.Contexts.SetHolds(ctx, cmd.Request.Scope(), cmd.SetID, cmd.Request.ID); err != nil {
+	if cmd.SetID != "" && s.Contexts == nil {
+		return domain.Question{}, domain.ErrSetNotFound
+	}
+	if cmd.SetID == "" {
+		if err := s.inPlace(ctx, cmd.Request); err != nil {
 			return domain.Question{}, err
 		}
-	} else if err := s.inPlace(ctx, cmd.Request); err != nil {
-		return domain.Question{}, err
 	}
 	input, err := cmd.Request.Input.Composed()
 	if err != nil {
@@ -42,6 +43,9 @@ func (s UpdateHandler) Handle(ctx context.Context, cmd Update) (domain.Question,
 	cmd.Request.Input = input
 	if err := cmd.Request.Input.ValidateAuthoring(); err != nil {
 		return domain.Question{}, err
+	}
+	if cmd.SetID != "" {
+		return s.Contexts.UpdateInSet(ctx, s.InputOf(cmd.Request), cmd.SetID)
 	}
 	return s.Write(ctx, cmd.Request, true)
 }

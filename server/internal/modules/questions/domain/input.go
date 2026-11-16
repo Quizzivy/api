@@ -101,7 +101,12 @@ func (r WriteRequest) MediaScope() access.Scope {
 // update or delete of a bank question needs ActorID to own it unless All is
 // set; a group member's write is authorized by its group and ignores both.
 // OwnerID, SourceMedia and ExpectedUpdatedAt apply as on WriteRequest. Every
-// write records ActorID as the question's last writer (updated_by).
+// write records ActorID as the question's last writer (updated_by). InContext
+// marks an update the edit's test or set context has authorized (T-R7.6): the
+// caller locked that context, found the question in it and may edit it, so
+// the update needs no ownership. KeptMedia are the assets the question
+// already binds, which such an edit may keep whoever makes it
+// (QuestionUse.Keeps); every other asset binds under the actor's scope.
 type WriteInput struct {
 	ID                string
 	Input             Input
@@ -110,6 +115,8 @@ type WriteInput struct {
 	OwnerID           string
 	All               bool
 	SourceMedia       bool
+	InContext         bool
+	KeptMedia         []string
 	ExpectedUpdatedAt *time.Time
 	Now               time.Time
 	IP                string

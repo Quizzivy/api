@@ -26,7 +26,7 @@ func prepareQuestionContent(ctx context.Context, tx pgx.Tx, write *domain.WriteI
 	err := tx.QueryRow(ctx, `SELECT q.prompt, q.explanation, q.prompt_content, q.explanation_content, `+provenance.Columns("q")+`
         FROM app.questions q WHERE q.id = $1 AND q.deleted_at IS NULL
           AND q.context_group_id IS NOT DISTINCT FROM $2::uuid AND ($3::boolean OR q.owner_id = $4::uuid) FOR UPDATE OF q`,
-		write.ID, groupID, write.All || groupID != nil, opt.String(write.ActorID)).
+		write.ID, groupID, write.All || write.InContext || groupID != nil, opt.String(write.ActorID)).
 		Scan(append([]any{&prompt, &explanation, &promptContent, &explanationContent}, last.Dest()...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
