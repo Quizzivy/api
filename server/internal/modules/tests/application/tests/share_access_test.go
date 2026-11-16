@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	mediadomain "quizzivy/internal/modules/media/domain"
 	notificationscommand "quizzivy/internal/modules/notifications/application/command"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/modules/tests/application"
@@ -234,13 +233,12 @@ func TestAMoveAnswersTheTestAsItsCallerReadsIt(t *testing.T) {
 	}
 }
 
-// TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven pins a
-// known gap T-R7.7 closes: the media binding check still reads assets with the
-// writer's own scope, so B, with Can edit, is refused the owner's audio as if
-// it were missing, on a resave of the test's group and on a restore of a
-// version that holds it. T-R7.7's "readable asset" (an asset referenced by
-// content the actor can read) turns both into successes; flip them there.
-func TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven(t *testing.T) {
+// TestAnEditGranteesGroupWriteBindsTheOwnersMedia: the media binding check
+// reads assets as the media module defines a readable one (T-R7.7), content
+// the writer can read through a share included, so B, with Can edit, resaves
+// the test's audio group and restores a version that holds it, both binding
+// A's audio. T-R7.4 pinned both as refusals until this definition landed.
+func TestAnEditGranteesGroupWriteBindsTheOwnersMedia(t *testing.T) {
 	ctx := context.Background()
 	w := newShareWorld(t, levelEdit)
 	audio, err := w.groups.Create(ctx, domain.CreateGroupInput{Bundle: storedGroupFixture(t, storedGroupAsset(t, w.tx, w.a, "audio")), OwnerSectionID: &w.sectionA,
@@ -248,13 +246,13 @@ func TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: audio.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
+	resaved, err := w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: audio.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
 		ExpectedRevision: audio.Revision, ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.b, Now: time.Now(), Scope: w.scopeB, Grants: bothKeys}})
-	if !errors.Is(err, mediadomain.ErrNotFound) {
-		t.Errorf("B resaving the test's audio group: %v, want the media not-found until T-R7.7", err)
+	if err != nil {
+		t.Fatalf("B resaving the test's audio group: %v", err)
 	}
-	if _, err := w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: audio.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
-		ExpectedRevision: audio.Revision, ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys}}); err != nil {
+	if _, err := w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: resaved.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
+		ExpectedRevision: resaved.Revision, ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys}}); err != nil {
 		t.Errorf("A resaving the same group: %v", err)
 	}
 
@@ -267,8 +265,8 @@ func TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven(t *testi
 			ExpectedUpdatedAt: w.current(t, w.testA).UpdatedAt}, time.Now())
 		return err
 	}
-	if err := restore(w.scopeB, w.b); !errors.Is(err, mediadomain.ErrNotFound) {
-		t.Errorf("B restoring a version with A's audio group: %v, want the media not-found until T-R7.7", err)
+	if err := restore(w.scopeB, w.b); err != nil {
+		t.Errorf("B restoring a version with A's audio group: %v", err)
 	}
 	if err := restore(w.scopeA, w.a); err != nil {
 		t.Errorf("A restoring the same version: %v", err)

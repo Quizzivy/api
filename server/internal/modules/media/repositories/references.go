@@ -8,6 +8,7 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/visibility"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -162,7 +163,7 @@ func ReachableByStudent(ctx context.Context, q db.Querier, studentID, assetID st
 	return reachable, nil
 }
 
-const readableAssets = `
+var readableAssets = `
 	SELECT a.id::text, a.kind::text
 	  FROM app.media_assets a
 	 WHERE a.id = ANY($1::uuid[])
@@ -175,7 +176,7 @@ const readableAssets = `
 	                               UNION ALL
 	                               SELECT question_id FROM app.question_media_references WHERE media_asset_id = a.id)
 	                  AND q.context_group_id IS NULL
-	                  AND q.deleted_at IS NULL AND q.owner_id = $3::uuid)
+	                  AND q.deleted_at IS NULL AND ` + visibility.QuestionAccess("q", 2, 3) + ` IS NOT NULL)
 	    OR EXISTS (SELECT 1
 	                 FROM app.question_groups g
 	                 LEFT JOIN app.test_sections s ON s.id = g.owner_section_id
@@ -190,7 +191,8 @@ const readableAssets = `
 	                               SELECT q.context_group_id FROM app.question_media_references r
 	                                 JOIN app.questions q ON q.id = r.question_id
 	                                WHERE r.media_asset_id = a.id AND q.context_group_id IS NOT NULL)
-	                  AND CASE WHEN g.owner_section_id IS NULL THEN g.owner_id ELSE t.owner_id END = $3::uuid)
+	                  AND CASE WHEN g.owner_section_id IS NULL THEN g.owner_id = $3::uuid
+	                           ELSE ` + visibility.TestAccess("t", 2, 3) + ` IS NOT NULL END)
 	    OR EXISTS (SELECT 1
 	                 FROM app.test_version_sections vs
 	                 JOIN app.test_versions tv ON tv.id = vs.test_version_id
@@ -208,13 +210,17 @@ const readableAssets = `
 	                                SELECT vq.test_version_section_id FROM app.test_version_question_media_references vm
 	                                  JOIN app.test_version_questions vq ON vq.id = vm.test_version_question_id
 	                                 WHERE vm.media_asset_id = a.id)
-	                  AND t.deleted_at IS NULL AND t.owner_id = $3::uuid))`
+	                  AND t.deleted_at IS NULL AND ` + visibility.TestAccess("t", 2, 3) + ` IS NOT NULL))`
 
 // Readable is the one definition of which assets a staff scope may read, and
-// so bind or sign: its own, every asset under scope.all, and any asset already
-// used by one of its live bank questions, by a group it owns (a section group
-// through its live test), or by a published version of one of its live tests.
-// A question uses an asset it attaches or shows in its prose (DG-109).
+// so bind or sign (T-R2.12b, T-R7.7): its own, every asset under scope.all,
+// and any asset already used by content the scope can read, under the rules
+// shared/visibility holds, a share included: a live bank question it can read
+// (QuestionAccess), a bank group it owns, a section group of a live test it
+// can read (TestAccess), or a published version of one. A question uses an
+// asset it attaches or shows in its prose (DG-109). So a co-editor binds the
+// owner's audio in the shared test, and a copier's later edit of a copy keeps
+// the media the copy names, which are then its own question's.
 // It returns the kind of each readable id, keyed by the id's canonical text; an
 // id it leaves out is missing, deleted or unreadable, and callers must answer
 // the three alike. A zero scope reads nothing. It takes no lock.

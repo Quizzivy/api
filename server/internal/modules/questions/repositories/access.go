@@ -23,27 +23,13 @@ func SetAccess(all, user int) string {
 	return visibility.SetAccess("s", all, user)
 }
 
-// questionAccess is this module's predicate for a bank question q (D4,
-// T-R7.4), as the contract's AdminQuestion.access reads: 'owner' for its owner
-// and for scope.all; 'edit' when the draft of a live test, or a live set, that
-// the caller can edit holds it; 'use' when only one the caller can read does;
-// NULL for anyone else. A question is never shared on its own: it is read
-// through the test or set that holds it, so the grants are those of the
-// caller's on the tests whose draft names it and on the sets that hold it.
-// all and user are the placeholders of the caller's scope.all and user id.
-// Every read of a bank question by id decides access here.
+// questionAccess is this module's predicate for a bank question q, as the
+// contract's AdminQuestion.access reads it: visibility.QuestionAccess over q,
+// the one definition the media module's readable assets share. all and user
+// are the placeholders of the caller's scope.all and user id. Every read of a
+// bank question by id decides access here.
 func questionAccess(all, user int) string {
-	return fmt.Sprintf(`(CASE WHEN $%[1]d::boolean OR q.owner_id = $%[2]d::uuid THEN 'owner'
-	  ELSE (SELECT CASE WHEN count(*) = 0 THEN NULL WHEN bool_or(g.access = 'edit') THEN 'edit' ELSE 'use' END
-	          FROM app.content_shares g
-	         WHERE g.grantee_id = $%[2]d::uuid
-	           AND (g.test_id IN (SELECT section.test_id FROM app.test_section_questions sq
-	                                JOIN app.test_sections section ON section.id = sq.test_section_id
-	                                JOIN app.tests t ON t.id = section.test_id AND t.deleted_at IS NULL
-	                               WHERE sq.question_id = q.id)
-	             OR g.question_set_id IN (SELECT i.set_id FROM app.question_set_items i
-	                                        JOIN app.question_sets st ON st.id = i.set_id AND st.deleted_at IS NULL
-	                                       WHERE i.question_id = q.id))) END)`, all, user)
+	return visibility.QuestionAccess("q", all, user)
 }
 
 // readableTest is the condition, over the tests row t, that the caller may
