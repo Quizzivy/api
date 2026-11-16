@@ -54,7 +54,10 @@ func (c *clauses) search(f domain.Filter) string {
 			matches("sa.full_name") + ` OR ` + matches("sa.display_name") + ` OR ` + matches("sa.email") + `))`,
 	}
 	if f.System {
-		alternatives = append(alternatives, "a.actor_user_id IS NULL")
+		alternatives = append(alternatives, systemActor("a"))
+	}
+	if f.Removed {
+		alternatives = append(alternatives, removedActor("a"))
 	}
 	if len(f.Actions) > 0 {
 		alternatives = append(alternatives, "a.action = ANY("+c.arg(f.Actions)+"::text[])")

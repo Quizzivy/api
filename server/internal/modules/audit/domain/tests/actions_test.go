@@ -102,3 +102,16 @@ func TestTheSystemIsNamedInEitherLanguageWithoutCaseOrAccents(t *testing.T) {
 		}
 	}
 }
+
+func TestADeletedUserIsNamedInEitherLanguageWithoutCaseOrAccents(t *testing.T) {
+	for _, q := range []string{"Deleted user", "deleted", "Người dùng đã xoá", "nguoi dung", "NGƯỜI DÙNG ĐÃ XOÁ"} {
+		if !domain.NamesRemoved(q) {
+			t.Errorf("%q does not name a deleted user", q)
+		}
+	}
+	for _, q := range []string{"", " ", "user", "dùng", "System"} {
+		if domain.NamesRemoved(q) {
+			t.Errorf("%q names a deleted user", q)
+		}
+	}
+}

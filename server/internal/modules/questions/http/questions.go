@@ -277,9 +277,9 @@ func ToQuestionInput(body openapi.QuestionInput) domain.Input {
 		ExplanationContent: body.ExplanationContent,
 		SampleAnswer:       body.SampleAnswer,
 		SelectCount:        body.SelectCount,
-		MaxWords:           body.MaxWords,
 		MatchAllowReuse:    body.MatchAllowReuse,
 	}
+	in.MaxWords, in.MisplacedWordLimit = httpapi.WordLimitIn(in.Type == domain.Essay, body.MaxWords, body.EssayMaxWords)
 	in.MatchItems, in.Rubric = typeInputs(body)
 	if body.MediaAssetId != nil {
 		id := body.MediaAssetId.String()
@@ -345,11 +345,11 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		UsedInTests:        &q.UsedInTests,
 		Transcript:         q.Transcript,
 		SelectCount:        q.SelectCount,
-		MaxWords:           q.MaxWords,
 		MatchAllowReuse:    q.MatchAllowReuse,
 		CreatedAt:          q.CreatedAt,
 		UpdatedAt:          q.UpdatedAt,
 	}
+	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == domain.Essay, q.MaxWords)
 	if out.Tags == nil {
 		out.Tags = []string{}
 	}

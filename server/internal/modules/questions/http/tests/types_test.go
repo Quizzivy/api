@@ -55,6 +55,7 @@ func TestAFieldOfAnotherTypeIsRefusedByName(t *testing.T) {
 	for field, raw := range map[string]string{
 		"selectCount":     `{"type":"single_choice","prompt":"p","points":1,` + choice + `,"selectCount":2}`,
 		"maxWords":        `{"type":"essay","prompt":"p","points":1,"maxWords":200}`,
+		"essayMaxWords":   `{"type":"short_answer","prompt":"p","points":1,"essayMaxWords":3}`,
 		"matchAllowReuse": `{"type":"short_answer","prompt":"p","points":1,"matchAllowReuse":false}`,
 		"matchItems":      `{"type":"single_choice","prompt":"p","points":1,` + choice + `,"matchItems":[{"text":"x","correctOption":0}]}`,
 		"rubric":          `{"type":"short_answer","prompt":"p","points":1,"rubric":[{"label":"Grammar"}]}`,
@@ -132,5 +133,39 @@ func TestStoredInputCarriesEveryNewField(t *testing.T) {
 			!reflect.DeepEqual(back.MatchAllowReuse, in.MatchAllowReuse) {
 			t.Errorf("%s came back as %+v", in.Type, back)
 		}
+	}
+}
+
+// The essay word limit (the owner, 2026-11-15): an essay's limit is sent and
+// answered as `essayMaxWords`, stored as its one word limit, and never read
+// or written as `maxWords`, which stays a short answer's.
+func TestAnEssaysWordLimitTravelsAsEssayMaxWords(t *testing.T) {
+	ctx := contextAs(t, access.Principal{UserID: uuid.NewString(), Permissions: access.NewSet(access.ContentQuestionsWrite)})
+	repo := &typesRepository{}
+	handler := questionshttp.NewQuestions(application.New(repo, fixedKind("image")), nil)
+	response, err := handler.CreateQuestion(ctx, createBody(t, `{"type":"essay","prompt":"Write about a city.","points":9,"essayMaxWords":250}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body := visitJSON(t, response.VisitCreateQuestionResponse)
+	if status != http.StatusCreated || len(repo.written) != 1 {
+		t.Fatalf("answered %d %v", status, body)
+	}
+	if limit := repo.written[0].Input.MaxWords; limit == nil || *limit != 250 {
+		t.Errorf("the store was sent the word limit %v, want 250", limit)
+	}
+	if body["essayMaxWords"] != float64(250) {
+		t.Errorf("answered essayMaxWords %v, want 250", body["essayMaxWords"])
+	}
+	if got, has := body["maxWords"]; has && got != nil {
+		t.Errorf("an essay answered maxWords %v", got)
+	}
+
+	short, err := handler.CreateQuestion(ctx, createBody(t, `{"type":"short_answer","prompt":"Name it.","points":1,"maxWords":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, answered := visitJSON(t, short.VisitCreateQuestionResponse); answered["maxWords"] != float64(3) || answered["essayMaxWords"] != nil {
+		t.Errorf("a short answer answered maxWords %v, essayMaxWords %v; want 3 and none", answered["maxWords"], answered["essayMaxWords"])
 	}
 }

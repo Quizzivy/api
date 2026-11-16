@@ -17,7 +17,8 @@ func ToAPIInput(in domain.Input) (openapi.StoredQuestionInput, error) {
 	tags := append([]string{}, in.Tags...)
 	out := openapi.StoredQuestionInput{Level: (*openapi.QuestionLevel)(in.Level), Skill: (*openapi.QuestionSkill)(in.Skill), Type: openapi.QuestionType(in.Type), Prompt: in.Prompt, PromptContent: in.PromptContent, Points: points,
 		Explanation: in.Explanation, ExplanationContent: in.ExplanationContent, SampleAnswer: in.SampleAnswer, Transcript: in.Transcript, MediaAlt: in.MediaAlt, Tags: &tags,
-		SelectCount: in.SelectCount, MaxWords: in.MaxWords, MatchAllowReuse: in.MatchAllowReuse}
+		SelectCount: in.SelectCount, MatchAllowReuse: in.MatchAllowReuse}
+	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(in.Type == domain.Essay, in.MaxWords)
 	out.MatchItems, out.Rubric = apiTypeInputs(in)
 	if in.MediaAssetID != nil {
 		out.MediaAssetId = httpapi.Ptr(httpapi.ParseUUID(*in.MediaAssetID))

@@ -52,14 +52,36 @@ func makeAuthor(t *testing.T, pool *pgxpool.Pool) string {
 		email).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM app.audit_log WHERE actor_user_id = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.tests WHERE created_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.questions WHERE created_by = $1`, id)
-		_, _ = pool.Exec(c, `DELETE FROM app.users WHERE id = $1`, id)
-	})
+	t.Cleanup(func() { removeAuthor(t, pool, id) })
 	return id
+}
+
+// removeAuthor deletes what an author made and then the author, reporting a
+// row it could not remove. The author is an Admin: on a fresh database the
+// users_last_admin guard keeps the only active one, which is logged, not a
+// failure.
+func removeAuthor(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	c := context.Background()
+	for _, sql := range []string{
+		`DELETE FROM app.audit_log WHERE actor_user_id = $1`,
+		`DELETE FROM app.test_versions WHERE published_by = $1`,
+		`DELETE FROM app.tests WHERE created_by = $1`,
+		`DELETE FROM app.questions WHERE created_by = $1`,
+		// Media go after the questions and versions that name them.
+		`DELETE FROM app.media_assets WHERE uploaded_by = $1`,
+	} {
+		if _, err := pool.Exec(c, sql, id); err != nil {
+			t.Errorf("clean up %q: %v", sql, err)
+		}
+	}
+	_, err := pool.Exec(c, `DELETE FROM app.users WHERE id = $1`, id)
+	switch {
+	case db.IsCheckViolation(err, "users_last_admin"):
+		t.Logf("kept the Admin %s: it is the only active Admin, which the users_last_admin guard never lets go", id)
+	case err != nil:
+		t.Errorf("clean up: %v", err)
+	}
 }
 
 func newService(t *testing.T, pool *pgxpool.Pool) *application.Application {

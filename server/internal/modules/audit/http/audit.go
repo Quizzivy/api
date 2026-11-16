@@ -136,6 +136,9 @@ func ToAPIEntry(e domain.Entry) openapi.AuditEntry {
 	if e.EntityID != nil {
 		out.Entity.Id = new(httpapi.ParseUUID(*e.EntityID))
 	}
+	if e.ActorRemoved {
+		out.ActorRemoved = new(true)
+	}
 	if e.Actor != nil {
 		out.Actor = &openapi.AuditActor{Id: httpapi.ParseUUID(e.Actor.ID), Name: e.Actor.Name}
 		if e.AvatarURL != "" {

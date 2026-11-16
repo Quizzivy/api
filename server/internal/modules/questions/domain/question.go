@@ -106,6 +106,8 @@ const (
 	MaxRubricLabel     = 80
 	MaxSelectCount     = 7
 	MaxWordsLimit      = 100
+	// MaxEssayWordsLimit is the most an essay's word limit may be (00158).
+	MaxEssayWordsLimit = 1000
 )
 
 // AudioPolicy is present if and only if the attached asset is audio.

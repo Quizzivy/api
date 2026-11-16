@@ -3,6 +3,7 @@ package anthropic
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -150,7 +151,7 @@ func orDefault(d, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// Complete sends the request and returns the provider's answer as one JSON object. It streams when MaxTokens exceeds StreamingThreshold, sends a 429 or a 5xx again up to MaxRetries times with a doubling back-off that honours Retry-After, never sends a 4xx again, and gives every attempt together the client's Timeout (DocumentTimeout when a block is a PDF). A cancelled ctx returns context.Canceled; every other failure is an *Error whose Kind is one of the package's sentinels. With ErrRefused and ErrInvalidResponse the Response still carries Usage and RequestID, because the provider billed those tokens and a caller that meters usage settles what was spent; with any other error it is the zero value.
+// Complete sends the request and returns the provider's answer as one JSON object. It streams when MaxTokens exceeds StreamingThreshold, sends a 429 or a 5xx again up to MaxRetries times with a doubling back-off that honours Retry-After, never sends a 4xx again, and gives every attempt together the client's Timeout (DocumentTimeout when a block is a PDF). A cancelled ctx returns context.Canceled; every other failure is an *Error whose Kind is one of the package's sentinels. With ErrRefused and ErrInvalidResponse the Response still carries Usage, because the provider billed those tokens and a caller that meters usage settles what was spent; with any other error its Usage is zero. Whatever the error, its RequestID (and the *Error's) is the id of the last attempt the provider answered, so a failed or timed-out call can be found in the provider's logs; it is empty only when no attempt got an answer.
 func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 	params, err := buildParams(req)
 	if err != nil {
@@ -163,38 +164,62 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 	callCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	streamed := req.MaxTokens > StreamingThreshold
+	var answered string
 	for attempt := 0; ; attempt++ {
 		response, failed := c.attempt(callCtx, params, streamed)
 		if failed == nil {
 			return response, nil
 		}
+		answered = cmp.Or(requestIDOf(response, failed.err), answered)
 		if !failed.retryable || attempt == MaxRetries {
-			return response, failed.err
+			return withRequestID(response, failed.err, answered)
 		}
 		if !c.wait(callCtx, attempt, failed) {
-			if interrupted := c.interrupted(callCtx); interrupted != nil {
-				return Response{}, interrupted
+			if interrupted := c.interrupted(callCtx, answered); interrupted != nil {
+				return withRequestID(Response{}, interrupted, answered)
 			}
-			return response, failed.err
+			return withRequestID(response, failed.err, answered)
 		}
 	}
 }
 
-func (c *Client) interrupted(ctx context.Context) error {
+// requestIDOf is the provider's id for a failed attempt, read from its
+// response or its error; empty when the provider never answered it.
+func requestIDOf(response Response, err error) string {
+	var typed *Error
+	if response.RequestID == "" && errors.As(err, &typed) {
+		return typed.RequestID
+	}
+	return response.RequestID
+}
+
+// withRequestID gives a failed call the id of the last attempt the provider
+// answered, on the response and on the *Error, when the last attempt itself
+// has none: a timeout, a dropped connection.
+func withRequestID(response Response, err error, id string) (Response, error) {
+	var typed *Error
+	if errors.As(err, &typed) && typed.RequestID == "" {
+		typed.RequestID = id
+	}
+	response.RequestID = cmp.Or(response.RequestID, requestIDOf(response, err), id)
+	return response, err
+}
+
+func (c *Client) interrupted(ctx context.Context, requestID string) error {
 	switch err := ctx.Err(); {
 	case err == nil:
 		return nil
 	case errors.Is(err, context.Canceled):
 		return context.Canceled
 	default:
-		return c.scrub.newError(ErrTimeout, 0, "", "")
+		return c.scrub.newError(ErrTimeout, 0, requestID, "")
 	}
 }
 
 func (c *Client) attempt(ctx context.Context, params sdk.MessageNewParams, streamed bool) (Response, *failure) {
 	message, requestID, err := c.send(ctx, params, streamed)
 	if err != nil {
-		if interrupted := c.interrupted(ctx); interrupted != nil {
+		if interrupted := c.interrupted(ctx, requestID); interrupted != nil {
 			return Response{}, &failure{err: interrupted}
 		}
 		failed := c.scrub.fromSDK(err, requestID)

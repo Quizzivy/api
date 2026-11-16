@@ -23,6 +23,15 @@ type GenerateInput struct {
 	Language     domain.Language
 	Standalone   bool
 	Section      *domain.Section
+	// ChooseN writes each multiple_choice question as "Choose N", and keeps
+	// on each draft its SelectCount.
+	ChooseN bool
+	// MaxWords, above zero, is the word limit of the short_answer questions:
+	// each is written to be answered within it, and its draft carries it.
+	MaxWords int
+	// EssayMaxWords, above zero, is the word limit of the essay questions:
+	// each task is written for an answer within it, and its draft carries it.
+	EssayMaxWords int
 }
 
 // Question is a draft question the assistant wrote. For a choice type Options are in order and AnswerKey holds the text of each correct one exactly as written in Options; a true/false question has the options True and False, and a tfng question True, False and Not given; for fill_blank Prompt holds one ___ and AnswerKey the accepted answers; for short_answer AnswerKey holds the sample answers, and for an essay, whose Prompt is the writing task, one line on what a strong answer covers. For matching Options are the choices, MatchItems the items in order, each answered by one of Options exactly as written, and AnswerKey the choices the items use.
@@ -33,6 +42,12 @@ type Question struct {
 	AnswerKey   []string
 	MatchItems  []MatchPair
 	Explanation string
+	// SelectCount is the N of a multiple_choice draft written as "Choose N",
+	// the number of its correct options; nil otherwise.
+	SelectCount *int
+	// MaxWords is the word limit of a short_answer or essay draft the
+	// request gave one; nil otherwise.
+	MaxWords *int
 }
 
 // MatchPair is one item of a drafted matching question and the choice that answers it.
@@ -79,6 +94,31 @@ var standaloneRules = map[string]string{
 	Essay:          "essay = the prompt is a writing task with its purpose and length (such as 150-250 words); answers holds one line on what a strong answer covers.",
 }
 
+// MaxShortAnswerWords is the most a short answer's word limit may be, as the bank holds it.
+const MaxShortAnswerWords = 100
+
+// The most correct options a "Choose N" draft keeps, within what the bank takes (SelectCount, 2 to 7).
+const (
+	MinSelectCount = 2
+	MaxSelectCount = 7
+)
+
+// chooseNRule is the multiple_choice rule of a request that asks for "Choose N".
+const chooseNRule = "multiple_choice = 5 options, two or three correct; the prompt says how many to choose (such as \"Choose TWO answers.\")."
+
+// ruleFor is the rule for type t, from rules, as the request's ChooseN and MaxWords change it.
+func ruleFor(t string, rules map[string]string, in GenerateInput) string {
+	switch {
+	case t == MultipleChoice && in.ChooseN:
+		return chooseNRule
+	case t == Essay && in.EssayMaxWords > 0:
+		return fmt.Sprintf("essay = the prompt is a writing task with its purpose, for an answer of no more than %[1]d words, and says so (such as \"Write no more than %[1]d words.\"); answers holds one line on what a strong answer covers.", in.EssayMaxWords)
+	case t == ShortAnswer && in.MaxWords > 0:
+		return fmt.Sprintf("short_answer = a question whose answer is no more than %d words; the prompt ends with %q, and every answer keeps to it.", in.MaxWords, WordLimitRule(in.MaxWords))
+	}
+	return rules[t]
+}
+
 // itemsRule says how a matching question writes its items, and that every other type writes none.
 const itemsRule = "For matching, items holds each thing to match with its answer, and answers lists the choices the items use; for every other type, items is an empty array."
 
@@ -89,7 +129,7 @@ func Generate(in GenerateInput) Prompt {
 	}
 	var rules []string
 	for _, t := range in.Types {
-		rules = append(rules, typeRules[t])
+		rules = append(rules, ruleFor(t, typeRules, in))
 	}
 	explain := "Leave every explanation empty."
 	if in.Explanations {
@@ -105,7 +145,7 @@ func Generate(in GenerateInput) Prompt {
 func standalone(in GenerateInput) Prompt {
 	var rules []string
 	for _, t := range in.Types {
-		rules = append(rules, standaloneRules[t])
+		rules = append(rules, ruleFor(t, standaloneRules, in))
 	}
 	explain := "Leave every explanation empty."
 	if in.Explanations {
@@ -218,7 +258,44 @@ func tidyQuestion(q rawQuestion, in GenerateInput) (Question, bool) {
 	if in.Explanations {
 		out.Explanation = clip(q.Explanation, 2000)
 	}
-	return withKey(out, q)
+	out, ok := withKey(out, q)
+	if !ok {
+		return out, false
+	}
+	return withLimits(out, in)
+}
+
+// withLimits applies the request's ChooseN and MaxWords to a kept draft. A
+// multiple_choice draft under ChooseN keeps its correct options as its
+// SelectCount, and is dropped when they are fewer than MinSelectCount or more
+// than MaxSelectCount. An essay draft under EssayMaxWords carries it as its
+// MaxWords. A short_answer draft under MaxWords keeps only the
+// answers within the limit, and is dropped when none is.
+func withLimits(out Question, in GenerateInput) (Question, bool) {
+	switch {
+	case out.Type == MultipleChoice && in.ChooseN:
+		n := len(out.AnswerKey)
+		if n < MinSelectCount || n > MaxSelectCount {
+			return out, false
+		}
+		out.SelectCount = &n
+	case out.Type == Essay && in.EssayMaxWords > 0:
+		limit := in.EssayMaxWords
+		out.MaxWords = &limit
+	case out.Type == ShortAnswer && in.MaxWords > 0:
+		kept := out.AnswerKey[:0:0]
+		for _, answer := range out.AnswerKey {
+			if len(strings.Fields(answer)) <= in.MaxWords {
+				kept = append(kept, answer)
+			}
+		}
+		if len(kept) == 0 {
+			return out, false
+		}
+		limit := in.MaxWords
+		out.AnswerKey, out.MaxWords = kept, &limit
+	}
+	return out, true
 }
 
 func withKey(out Question, q rawQuestion) (Question, bool) {

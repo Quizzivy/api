@@ -307,33 +307,33 @@
     },
     {
       "key": "question_group.archived",
-      "vi": "Đã lưu trữ nhóm câu hỏi",
-      "en": "Archived a question group"
+      "vi": "Đã lưu trữ bài đọc, điền từ hoặc bài nghe",
+      "en": "Archived a passage, cloze or recording"
     },
     {
       "key": "question_group.created",
-      "vi": "Đã tạo nhóm câu hỏi",
-      "en": "Created a question group"
+      "vi": "Đã tạo bài đọc, điền từ hoặc bài nghe",
+      "en": "Created a passage, cloze or recording"
     },
     {
       "key": "question_group.deleted",
-      "vi": "Đã xoá nhóm câu hỏi",
-      "en": "Deleted a question group"
+      "vi": "Đã xoá bài đọc, điền từ hoặc bài nghe",
+      "en": "Deleted a passage, cloze or recording"
     },
     {
       "key": "question_group.removed",
-      "vi": "Đã gỡ nhóm câu hỏi khỏi bài kiểm tra",
-      "en": "Removed a question group from a test"
+      "vi": "Đã gỡ bài đọc, điền từ hoặc bài nghe khỏi bài kiểm tra",
+      "en": "Removed a passage, cloze or recording from a test"
     },
     {
       "key": "question_group.restored",
-      "vi": "Đã khôi phục nhóm câu hỏi",
-      "en": "Restored a question group"
+      "vi": "Đã khôi phục bài đọc, điền từ hoặc bài nghe",
+      "en": "Restored a passage, cloze or recording"
     },
     {
       "key": "question_group.updated",
-      "vi": "Đã cập nhật nhóm câu hỏi",
-      "en": "Updated a question group"
+      "vi": "Đã cập nhật bài đọc, điền từ hoặc bài nghe",
+      "en": "Updated a passage, cloze or recording"
     },
     {
       "key": "refresh_token.reuse_detected",

@@ -201,3 +201,24 @@ func TestAnExportOfASearchForTheSystemHoldsTheSameEntries(t *testing.T) {
 		t.Errorf("counted %d, read %d entries; want the one entry with no actor, %d", counted.Rows, len(batch), bySystem)
 	}
 }
+
+// AO-11: a search for the system finds only its own entries, and one for a
+// deleted user finds the entries of accounts since removed.
+func TestASearchTellsTheSystemFromAnAccountSinceRemoved(t *testing.T) {
+	w := newWorld(t)
+	actor := w.user("teacher", "Người đã xoá "+w.nonce, "")
+	removed := w.write(entry{actor: actor, at: march(10, 9, 0), ip: "203.0.113.7"})
+	system := w.write(entry{action: "x.y", at: march(10, 10, 0)})
+	w.exec(`DELETE FROM app.users WHERE id = $1::uuid`, actor)
+
+	for _, text := range []string{"System", "hệ thống"} {
+		if got := w.search(text); !slices.Equal(ids(got.Entries), []int64{system}) {
+			t.Errorf("%q reads %v, want only the system's entry %d", text, ids(got.Entries), system)
+		}
+	}
+	for _, text := range []string{"Deleted user", "người dùng đã xoá", "nguoi dung da xoa", "deleted"} {
+		if got := w.search(text); !slices.Equal(ids(got.Entries), []int64{removed}) {
+			t.Errorf("%q reads %v, want only the removed account's entry %d", text, ids(got.Entries), removed)
+		}
+	}
+}

@@ -21,9 +21,15 @@ type Record struct {
 	ID         int64
 	OccurredAt time.Time
 	// Actor is nil for the system, and for an account since removed.
-	Actor      *Actor
-	Action     string
-	EntityType string
+	Actor *Actor
+	// ActorRemoved is set when Actor is nil because the account that made the
+	// entry has since been removed (AO-11). The entry then kept what the
+	// request recorded, its address or its user agent: every entry written for
+	// a request carries one of them and an actor, and the system's own entries
+	// carry neither.
+	ActorRemoved bool
+	Action       string
+	EntityType   string
 	// EntityID is nil for an entry about no single row.
 	EntityID  *string
 	IP        *string

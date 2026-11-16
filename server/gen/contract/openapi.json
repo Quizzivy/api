@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quizzivy API",
-    "version": "0.13.9",
+    "version": "0.13.12",
     "contact": {
       "name": "Thuong",
       "url": "https://github.com/SekiroKenjii/Quizzivy"
@@ -4503,6 +4503,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "rubric": {
             "type": "array",
             "maxItems": 6,
@@ -7854,6 +7857,15 @@
         "maximum": 100,
         "description": "`short_answer` only: the word limit. Advice, never truncation: the\nengine counts words and flags \"too many\", the server stores whatever\nwas typed, and the grader sees an over-limit badge.\n"
       },
+      "EssayMaxWords": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 1,
+        "maximum": 1000,
+        "description": "`essay` only: the word limit, as `maxWords` is a short answer's. Advice,\nnever truncation: the engine counts words and flags \"too many\", the\nserver stores whatever was typed, and the grader sees an over-limit\nbadge. Null is no limit.\n"
+      },
       "MatchAllowReuse": {
         "type": [
           "boolean",
@@ -8054,7 +8066,7 @@
             "format": "date-time"
           },
           "actor": {
-            "description": "Who did it; `null` is the system itself, or an account since removed.",
+            "description": "Who did it; `null` is the system itself, or an account since removed (`actorRemoved`).",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/AuditActor"
@@ -8063,6 +8075,10 @@
                 "type": "null"
               }
             ]
+          },
+          "actorRemoved": {
+            "type": "boolean",
+            "description": "Present and true when the entry was made by an account that has\nsince been removed: `actor` is then `null`. An entry with `actor:\nnull` and no `actorRemoved` is the system's own work.\n"
           },
           "action": {
             "type": "string",
@@ -9064,6 +9080,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
           },
@@ -9311,6 +9330,10 @@
             "$ref": "#/components/schemas/MaxWords",
             "description": "`short_answer` only. A rule the student is told; the engine counts words and never cuts text."
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "`essay` only. A rule the student is told; the engine counts words and never cuts text."
+          },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
           },
@@ -9552,7 +9575,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present only when `review.showScore`. `null` while awaiting manual grading."
+            "description": "Present only when `review.showScore`. `null` while awaiting manual\ngrading, and `null` for an answer removed under the retention policy\nbefore anyone marked it (`answerRemoved`): it was not answered wrong,\nand it is never marked now. A removed answer that was marked keeps\nits mark.\n"
           },
           "pendingManual": {
             "type": "boolean"
@@ -10624,7 +10647,7 @@
       },
       "DiffField": {
         "type": "string",
-        "description": "The part of a question that differs, for a `changed` entry.\n`prompt` and `explanation` cover the text and the rich content;\n`options` the text and content of the choices in their order, `blanks`\nthe gaps and their case rule, and `media` the attachment with its audio\npolicy and transcript. `items` is the text of a matching question's\nitems in their order, `rubric` an essay's criterion labels in their\norder, and `rules` the rules a student is told: a multiple choice's\n`selectCount`, a short answer's `maxWords` and a matching question's\n`matchAllowReuse`. `context` is the shared material of the group\nthe question belongs to, or its being in a group at all, and `section`\nthe part of the paper it sits in. The correct options, the accepted\nanswers and the choice each matching item is keyed to are not here:\nthey are `answer` entries.\n",
+        "description": "The part of a question that differs, for a `changed` entry.\n`prompt` and `explanation` cover the text and the rich content;\n`options` the text and content of the choices in their order, `blanks`\nthe gaps and their case rule, and `media` the attachment with its audio\npolicy and transcript. `items` is the text of a matching question's\nitems in their order, `rubric` an essay's criterion labels in their\norder, and `rules` the rules a student is told: a multiple choice's\n`selectCount`, a short answer's `maxWords`, an essay's `essayMaxWords` and a matching question's\n`matchAllowReuse`. `context` is the shared material of the group\nthe question belongs to, or its being in a group at all, and `section`\nthe part of the paper it sits in. The correct options, the accepted\nanswers and the choice each matching item is keyed to are not here:\nthey are `answer` entries.\n",
         "enum": [
           "type",
           "prompt",
@@ -10665,7 +10688,7 @@
               "minLength": 1,
               "maxLength": 16
             },
-            "description": "The labels (`A`, `B`, …) of the correct options in `from`, in order.\nFor a TFNG question, the value of the correct option instead:\n`true`, `false` or `not_given`, which the reader names in its own\nlanguage. For a matching question, one label per item in order:\nthe item's key, an arrow and the key of the choice it is keyed to,\nas the editor draws them (D-063, `A → iii`), or `–` in place of\nthe choice when it is keyed to none.\n"
+            "description": "The labels (`A`, `B`, …) of the correct options in `from`, in order.\nFor a TFNG question, the value of the correct option instead:\n`true`, `false` or `not_given`, which the reader names in its own\nlanguage. For a matching question, one label per item in order:\nthe item's key, a colon, a space and the key of the choice it is\nkeyed to (D-063, `A: iii`), or `–` in place of the choice when it\nis keyed to none (`A: –`). The editor draws an arrow between the\ntwo; the label has none, since the arrow is outside the app's font.\n"
           },
           "answerTo": {
             "type": "array",
@@ -12429,6 +12452,18 @@
           },
           "language": {
             "$ref": "#/components/schemas/AiLanguage"
+          },
+          "chooseN": {
+            "type": "boolean",
+            "description": "Write each `multiple_choice` question as \"Choose N\": its prompt\nsays how many to choose, and the draft carries `selectCount`, the\nnumber of its correct options (2 to 7). Off when absent.\n"
+          },
+          "maxWords": {
+            "$ref": "#/components/schemas/MaxWords",
+            "description": "A word limit for the `short_answer` questions: each is written to be\nanswered within it, and its draft carries it. Absent or `null`, the\ndrafts carry none.\n"
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "A word limit for the `essay` questions: each task is written for an\nanswer within it, and its draft carries it. Absent or `null`, the\ndrafts carry none.\n"
           }
         }
       },
@@ -12483,6 +12518,18 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Empty when the request did not ask for explanations."
+          },
+          "selectCount": {
+            "$ref": "#/components/schemas/SelectCount",
+            "description": "`multiple_choice` only, present when the request asked for `chooseN`: the number of correct options, which the question is saved with."
+          },
+          "maxWords": {
+            "$ref": "#/components/schemas/MaxWords",
+            "description": "`short_answer` only, present when the request set `maxWords`: the limit the question is saved with."
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords",
+            "description": "`essay` only, present when the request set `essayMaxWords`: the limit the question is saved with."
           }
         }
       },
@@ -12800,6 +12847,9 @@
         "type": "object",
         "required": [
           "changes",
+          "questions",
+          "changedQuestions",
+          "capped",
           "usage"
         ],
         "additionalProperties": false,
@@ -12810,6 +12860,20 @@
             "items": {
               "$ref": "#/components/schemas/AiVariantChange"
             }
+          },
+          "questions": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The questions of the draft the pass read, group members included."
+          },
+          "changedQuestions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The questions with at least one change in `changes`. The others are\nleft as they are: the model proposed nothing safe for them, or their\nrequest failed or ran out of time.\n"
+          },
+          "capped": {
+            "type": "boolean",
+            "description": "True when the pass proposed more than 300 changes and those past the 300th, in paper order, were left out."
           },
           "usage": {
             "$ref": "#/components/schemas/AiUsage"
@@ -13974,7 +14038,7 @@
       },
       "QuestionInput": {
         "type": "object",
-        "description": "Create/update body for a bank question. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
+        "description": "Create/update body for a bank question. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
         "required": [
           "type",
           "prompt",
@@ -14183,6 +14247,9 @@
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
           },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
+          },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
           },
@@ -14265,7 +14332,7 @@
       },
       "StoredQuestionInput": {
         "type": "object",
-        "description": "Stored editable content used by teacher reads, bodyless copies and version\nrestoration. Existing choice arrays retain their length; the eight-option\nlimit applies to authoring requests. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
+        "description": "Stored editable content used by teacher reads, bodyless copies and version\nrestoration. Existing choice arrays retain their length; the eight-option\nlimit applies to authoring requests. Cross-field rules that a single\nschema cannot express — single_choice and true_false need exactly one correct\noption (true_false has exactly two options), multiple_choice needs at least one correct\noption, a `fill_blank` needs exact gapId bindings for rich prompts or matching\n`{{n}}` ordinals for legacy Markdown, `tfng` has exactly three options with one correct,\n`matching` has 2 to 12 options none marked correct and 2 to 20 items each keyed to one of them,\n`selectCount` is for `multiple_choice` and at most its option count minus one, `maxWords` is for\n`short_answer`, `essayMaxWords` for `essay`, `matchAllowReuse` is required on `matching` and refused elsewhere, `rubric` is for\n`essay`, an audio policy requires an audio asset and alt text an image — are validated by the\nserver and again at publish (§8). Failing them returns\n`VALIDATION_FAILED` with per-field `details`.\n",
         "required": [
           "type",
           "prompt",
@@ -14474,6 +14541,9 @@
           },
           "maxWords": {
             "$ref": "#/components/schemas/MaxWords"
+          },
+          "essayMaxWords": {
+            "$ref": "#/components/schemas/EssayMaxWords"
           },
           "matchAllowReuse": {
             "$ref": "#/components/schemas/MatchAllowReuse"
@@ -24306,7 +24376,7 @@
           "admin-audit"
         ],
         "summary": "The audit log",
-        "description": "One page of the audit log, newest first, and how many entries each\ncategory holds. The log is append-only: nothing here changes it.\n\n**Range.** `range` is `today` (from midnight), `7d` (the last seven\ncalendar days, today included), `30d` (the last thirty), `all`, or\n`custom`, which takes `from` and `to` as dates, both inclusive. Every\nday is the viewer's own: their stored time zone, else the centre's\ndefault. `from` and `to` without `custom`, `custom` without both, and a\n`to` before `from` answer `400 VALIDATION_FAILED` naming the field.\n\n**Search.** `q` matches, without regard to case or accents, the actor's\nname or email, the sentence that words the action in either language,\nand the label of the user, class, test, assignment, attempt, media file,\nimport or question group an entry is about.\n\n**Categories.** An entry's category follows from the kind of thing it\nis about. Entries about the organization, exports, maintenance,\nretention and the AI credits belong to no category: `category` is\n`null` and only the unfiltered list holds them.\n\n**Facets.** `facets` counts the entries that match the current `q` and\nrange and ignores `category`, so selecting one never zeroes the others;\n`all` counts every such entry, those in no category included, so it can\nexceed the sum of the six. `total` is the selected category's count, or\n`all`.\n\n**Entries.** `changes` lists the fields an entry changed, each with the\nvalue it had and the value it has. `details` holds anything else the\nentry recorded. A join code is shown as `••••-` and its last four\ncharacters, and a password, token or secret is never shown. `label` is\n`null` when the row the entry is about no longer exists.\n",
+        "description": "One page of the audit log, newest first, and how many entries each\ncategory holds. The log is append-only: nothing here changes it.\n\n**Range.** `range` is `today` (from midnight), `7d` (the last seven\ncalendar days, today included), `30d` (the last thirty), `all`, or\n`custom`, which takes `from` and `to` as dates, both inclusive. Every\nday is the viewer's own: their stored time zone, else the centre's\ndefault. `from` and `to` without `custom`, `custom` without both, and a\n`to` before `from` answer `400 VALIDATION_FAILED` naming the field.\n\n**Search.** `q` matches, without regard to case or accents, the actor's\nname or email, the sentence that words the action in either language,\nthe label of the user, class, test, assignment, attempt, media file,\nimport, question group or role an entry is about, and the names the\nlist gives an entry with no actor: \"Hệ thống\" / \"System\" for the\nsystem's own entries, \"Người dùng đã xoá\" / \"Deleted user\" for those of\nan account since removed.\n\n**Categories.** An entry's category follows from the kind of thing it\nis about. Entries about the organization, exports, maintenance,\nretention and the AI credits belong to no category: `category` is\n`null` and only the unfiltered list holds them.\n\n**Facets.** `facets` counts the entries that match the current `q` and\nrange and ignores `category`, so selecting one never zeroes the others;\n`all` counts every such entry, those in no category included, so it can\nexceed the sum of the six. `total` is the selected category's count, or\n`all`.\n\n**Entries.** `changes` lists the fields an entry changed, each with the\nvalue it had and the value it has. `details` holds anything else the\nentry recorded. A join code is shown as `••••-` and its last four\ncharacters, and a password, token or secret is never shown. `label` is\n`null` when the row the entry is about no longer exists.\n",
         "parameters": [
           {
             "name": "category",
