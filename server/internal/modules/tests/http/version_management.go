@@ -106,7 +106,7 @@ func versionConflict(ctx context.Context, err error) (openapi.ErrorResponse, boo
 	case errors.Is(err, domain.ErrArchived):
 		return httpapi.Error(ctx, openapi.TESTARCHIVED, httpx.Text(ctx, "Hãy khôi phục đề đã lưu trữ trước khi thay đổi phiên bản mặc định hoặc tạo bản nháp.", "Restore the archived test before changing the default version or creating a draft.")), true
 	case errors.Is(err, domain.ErrStaleWrite):
-		return httpapi.Error(ctx, openapi.STALEWRITE, httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi tiếp tục.", "The test was edited elsewhere. Please reload before continuing.")), true
+		return httpapi.StaleWrite(ctx, httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi tiếp tục.", "The test was edited elsewhere. Please reload before continuing."), err), true
 	case errors.Is(err, domain.ErrCurrentVersion):
 		return httpapi.Error(ctx, openapi.VERSIONISCURRENT, httpx.Text(ctx, "Hãy chọn một phiên bản mặc định khác trước khi xoá phiên bản này.", "Choose another default version before deleting this one.")), true
 	case errors.Is(err, domain.ErrReferenced):

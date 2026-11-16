@@ -69,10 +69,10 @@ func copySnapshotQuestion(ctx context.Context, tx pgx.Tx, sourceID, actorID stri
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO app.questions
   (type, prompt, media_asset_id, media_asset_kind, audio_max_plays, audio_allow_seek,
-   audio_show_transcript_after, transcript, points, explanation, sample_answer, created_by, prompt_content, explanation_content, owner_id, level, skill, media_alt, audio_allow_pause,
+   audio_show_transcript_after, transcript, points, explanation, sample_answer, created_by, updated_by, prompt_content, explanation_content, owner_id, level, skill, media_alt, audio_allow_pause,
    select_count, max_words, match_allow_reuse)
   SELECT q.type, q.prompt, q.media_asset_id, q.media_asset_kind, q.audio_max_plays, q.audio_allow_seek,
-   q.audio_show_transcript_after, q.transcript, q.points, q.explanation, q.sample_answer, $2, q.prompt_content, q.explanation_content, t.owner_id, q.level, q.skill, q.media_alt, q.audio_allow_pause,
+   q.audio_show_transcript_after, q.transcript, q.points, q.explanation, q.sample_answer, $2, $2, q.prompt_content, q.explanation_content, t.owner_id, q.level, q.skill, q.media_alt, q.audio_allow_pause,
    q.select_count, q.max_words, q.match_allow_reuse
   FROM app.test_version_questions q
   JOIN app.test_version_sections vs ON vs.id = q.test_version_section_id

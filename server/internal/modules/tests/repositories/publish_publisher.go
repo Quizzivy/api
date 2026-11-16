@@ -51,9 +51,9 @@ func (s *Postgres) Publish(ctx context.Context, req domain.PublishRequest, now t
 
 	var testUpdatedAt time.Time
 	if err := tx.QueryRow(ctx,
-		`UPDATE app.tests SET status = 'published', current_version = $2, last_published_version = $2 WHERE id = $1
+		`UPDATE app.tests SET status = 'published', current_version = $2, last_published_version = $2, updated_by = $3 WHERE id = $1
 		 RETURNING updated_at`,
-		req.TestID, next).Scan(&testUpdatedAt); err != nil {
+		req.TestID, next, req.ActorID).Scan(&testUpdatedAt); err != nil {
 		return domain.Version{}, fmt.Errorf("publish: bump current_version: %w", err)
 	}
 

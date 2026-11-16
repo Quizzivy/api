@@ -30,7 +30,7 @@ func (s *Postgres) SetCurrentVersion(ctx context.Context, req domain.VersionRequ
 	if _, err := lockVersion(ctx, tx, req); err != nil {
 		return domain.Test{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app.tests SET current_version = $2 WHERE id = $1`, req.ID, req.Version); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE app.tests SET current_version = $2, updated_by = $3 WHERE id = $1`, req.ID, req.Version, req.ActorID); err != nil {
 		return domain.Test{}, err
 	}
 	return s.finishVersionChange(ctx, tx, req, now, "test.current_version_changed", reached.access)
@@ -81,7 +81,7 @@ func (s *Postgres) CreateDraftFromVersion(ctx context.Context, req domain.Versio
 	if err := s.restoreSnapshotGroups(ctx, tx, req, now, copies); err != nil {
 		return domain.Test{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at = now() WHERE id = $1`, req.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at = now(), updated_by = $2 WHERE id = $1`, req.ID, req.ActorID); err != nil {
 		return domain.Test{}, err
 	}
 	return s.finishVersionChange(ctx, tx, req, now, "test.draft_restored", reached.access)

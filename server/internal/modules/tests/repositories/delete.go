@@ -61,7 +61,7 @@ func (s *Postgres) DeleteVersion(ctx context.Context, req domain.VersionRequest,
 	if _, err := tx.Exec(ctx, `DELETE FROM app.test_versions WHERE id = $1`, versionID); err != nil {
 		return referenceError(err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at = now() WHERE id = $1`, req.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at = now(), updated_by = $2 WHERE id = $1`, req.ID, req.ActorID); err != nil {
 		return err
 	}
 	if err := auditVersionChange(ctx, tx, req, now, "test.version_deleted"); err != nil {

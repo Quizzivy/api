@@ -7,6 +7,7 @@ import (
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/provenance"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -129,9 +130,12 @@ func checkVersion(ctx context.Context, tx pgx.Tx, id string, expected time.Time,
 	return reached, fresh(reached, expected)
 }
 
+// fresh is nil when expected is the revision of the test reached, and
+// otherwise domain.ErrStaleWrite naming the test's last write, which the
+// caller had not seen.
 func fresh(reached reachedTest, expected time.Time) error {
-	if !reached.updatedAt.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {
-		return domain.ErrStaleWrite
+	if !reached.last.At.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {
+		return provenance.Stale(domain.ErrStaleWrite, reached.last)
 	}
 	return nil
 }
@@ -141,9 +145,10 @@ func applyMetadata(ctx context.Context, tx pgx.Tx, in domain.UpdateRequest) erro
 		UPDATE app.tests
 		   SET title = coalesce($2, title),
 		       description = CASE WHEN $3::boolean THEN $4 ELSE description END,
-		       status = coalesce($5::app.test_status, status)
+		       status = coalesce($5::app.test_status, status),
+		       updated_by = $6
 		 WHERE id = $1`,
-		in.ID, in.Input.Title, in.Input.SetDescription, in.Input.Description, statusArg(in.Input.Status))
+		in.ID, in.Input.Title, in.Input.SetDescription, in.Input.Description, statusArg(in.Input.Status), in.ActorID)
 	if err != nil {
 		return fmt.Errorf("tests: update metadata: %w", err)
 	}

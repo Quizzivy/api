@@ -150,9 +150,9 @@ func (h Tests) UpdateTest(ctx context.Context, request openapi.UpdateTestRequest
 			httpx.Text(ctx, "Đề có nhóm ngữ liệu chung. Cần trình soạn đề hỗ trợ nhóm để thay đổi cấu trúc.",
 				"The test has groups with shared material. Changing its structure needs an editor that supports groups."))), nil
 	case errors.Is(err, domain.ErrStaleWrite):
-		return openapi.UpdateTest409JSONResponse(httpapi.Error(ctx, openapi.STALEWRITE,
+		return openapi.UpdateTest409JSONResponse(httpapi.StaleWrite(ctx,
 			httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi lưu.",
-				"The test was edited elsewhere. Please reload before saving."))), nil
+				"The test was edited elsewhere. Please reload before saving."), err)), nil
 	case errors.Is(err, domain.ErrNotFound):
 		return openapi.UpdateTest404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil

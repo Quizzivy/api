@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -12,6 +11,7 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/provenance"
 	"quizzivy/internal/shared/visibility"
 )
 
@@ -35,12 +35,13 @@ const (
 	testExclusive = "FOR UPDATE OF t"
 )
 
-// reachedTest is a live test as reachTest read it for a caller.
+// reachedTest is a live test as reachTest read it for a caller: last is its
+// last write, whose updated_at is the revision an edit is checked against.
 type reachedTest struct {
 	owner         string
 	access        domain.Access
 	status        domain.Status
-	updatedAt     time.Time
+	last          provenance.LastWrite
 	current       int
 	lastPublished int
 }
@@ -53,18 +54,19 @@ type reachedTest struct {
 func reachTest(ctx context.Context, q db.Querier, scope access.Scope, id string, action domain.Action, lock string) (reachedTest, error) {
 	var row reachedTest
 	var level, status string
-	err := q.QueryRow(ctx, `SELECT t.owner_id::text, `+testAccess("t", 2, 3)+`, t.status::text, t.updated_at,
+	var last provenance.Row
+	err := q.QueryRow(ctx, `SELECT t.owner_id::text, `+testAccess("t", 2, 3)+`, t.status::text, `+provenance.Columns("t")+`,
 		       t.current_version, t.last_published_version
 		  FROM app.tests t
 		 WHERE t.id = $1::uuid AND t.deleted_at IS NULL AND `+testAccess("t", 2, 3)+` IS NOT NULL `+lock,
-		id, scope.All, opt.String(scope.UserID)).Scan(&row.owner, &level, &status, &row.updatedAt, &row.current, &row.lastPublished)
+		id, scope.All, opt.String(scope.UserID)).Scan(append(append([]any{&row.owner, &level, &status}, last.Dest()...), &row.current, &row.lastPublished)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reachedTest{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return reachedTest{}, fmt.Errorf("tests: reach test: %w", err)
 	}
-	row.access, row.status = domain.Access(level), domain.Status(status)
+	row.access, row.status, row.last = domain.Access(level), domain.Status(status), last.LastWrite()
 	return row, row.access.Allows(action)
 }
 

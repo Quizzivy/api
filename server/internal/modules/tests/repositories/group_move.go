@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/provenance"
 	"slices"
 
 	"github.com/google/uuid"
@@ -69,10 +70,10 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 	owner := reached.owner
 	plan, err := resolveMovePlan(ctx, tx, in)
 	if err != nil {
-		return domain.MoveQuestionResult{}, err
+		return domain.MoveQuestionResult{}, provenance.Named(err, domain.ErrStaleWrite, reached.last)
 	}
 	if err := lockMovedGroups(ctx, tx, owner, plan); err != nil {
-		return domain.MoveQuestionResult{}, err
+		return domain.MoveQuestionResult{}, provenance.Named(err, domain.ErrStaleWrite, reached.last)
 	}
 	order, err := lockMovedMembers(ctx, tx, plan)
 	if err != nil {
@@ -145,7 +146,7 @@ func (s *GroupsPostgres) applyMove(ctx context.Context, tx pgx.Tx, in domain.Mov
 	case moveOutOfGroup:
 		return s.moveOutOfGroup(ctx, tx, in, plan, owner, order)
 	default:
-		return reparentMember(ctx, tx, plan, order)
+		return reparentMember(ctx, tx, plan, order, in.ActorID)
 	}
 }
 
@@ -218,12 +219,12 @@ func (s *GroupsPostgres) moveOutOfGroup(ctx context.Context, tx pgx.Tx, in domai
 	if origin.restore {
 		return s.restoreOrigin(ctx, tx, plan, members, origin.id)
 	}
-	return s.leaveGroup(ctx, tx, plan, owner, members, origin.edited)
+	return s.leaveGroup(ctx, tx, plan, owner, members, origin.edited, in.ActorID)
 }
 
-func (s *GroupsPostgres) leaveGroup(ctx context.Context, tx pgx.Tx, plan movePlan, owner string, members []string, editedCopy bool) (moveOutcome, error) {
-	tag, err := tx.Exec(ctx, `UPDATE app.questions SET context_group_id=NULL, context_ordinal=NULL, context_option_order=NULL, owner_id=$3, copied_from_id=NULL
-		WHERE id=$1 AND context_group_id=$2`, plan.questionID, plan.sourceGroup, owner)
+func (s *GroupsPostgres) leaveGroup(ctx context.Context, tx pgx.Tx, plan movePlan, owner string, members []string, editedCopy bool, actorID string) (moveOutcome, error) {
+	tag, err := tx.Exec(ctx, `UPDATE app.questions SET context_group_id=NULL, context_ordinal=NULL, context_option_order=NULL, owner_id=$3, copied_from_id=NULL, updated_by=$4
+		WHERE id=$1 AND context_group_id=$2`, plan.questionID, plan.sourceGroup, owner, actorID)
 	if err != nil {
 		return moveOutcome{}, err
 	}
@@ -242,7 +243,7 @@ func (s *GroupsPostgres) leaveGroup(ctx context.Context, tx pgx.Tx, plan movePla
 	return moveOutcome{questionID: plan.questionID, editedCopy: editedCopy}, nil
 }
 
-func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[string][]string) (moveOutcome, error) {
+func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[string][]string, actorID string) (moveOutcome, error) {
 	source, target := order[plan.sourceGroup], order[plan.targetGroup]
 	if !slices.Contains(source, plan.questionID) {
 		return moveOutcome{}, domain.ErrNotFound
@@ -259,8 +260,8 @@ func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[str
 	if err := requireUnbound(ctx, tx, plan.sourceGroup, plan.questionID); err != nil {
 		return moveOutcome{}, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE app.questions SET context_group_id=$2, context_ordinal=$3
-		WHERE id=$1 AND context_group_id=$4`, plan.questionID, plan.targetGroup, len(target), plan.sourceGroup)
+	tag, err := tx.Exec(ctx, `UPDATE app.questions SET context_group_id=$2, context_ordinal=$3, updated_by=$5
+		WHERE id=$1 AND context_group_id=$4`, plan.questionID, plan.targetGroup, len(target), plan.sourceGroup, actorID)
 	if err != nil {
 		return moveOutcome{}, err
 	}
@@ -277,7 +278,7 @@ func (s *GroupsPostgres) finishMove(ctx context.Context, tx pgx.Tx, in domain.Mo
 	if _, err := tx.Exec(ctx, `UPDATE app.question_groups SET revision=revision+1 WHERE id=ANY($1::uuid[])`, plan.touched); err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at=$2 WHERE id=$1`, in.TestID, in.Now); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at=$2, updated_by=$3 WHERE id=$1`, in.TestID, in.Now, in.ActorID); err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
 	if err := recordMove(ctx, tx, in, plan, outcome); err != nil {

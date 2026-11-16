@@ -110,6 +110,9 @@ func groupFailure(ctx context.Context, err error) (*groupResponse, error) {
 		return nil, err
 	}
 	problem := httpapi.Error(ctx, code, message)
+	if code == openapi.STALEWRITE {
+		problem = httpapi.StaleWrite(ctx, message, err)
+	}
 	if invalid != nil {
 		problem.Error.Details = &map[string]interface{}{"rule": invalid.Rule, "questionId": invalid.QuestionID, "stimulusId": invalid.StimulusID, "gapId": invalid.GapID}
 	}
