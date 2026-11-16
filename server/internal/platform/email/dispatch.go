@@ -61,17 +61,19 @@ type Dispatcher struct {
 // rest count outcomes, Deferred being rows moved to the next local day or
 // month because its budget was spent, Released rows a cap had held that were
 // made due again because budget remained, Expired rows failed because
-// their link expired while they waited, and Skipped rows a Preparer dropped.
+// their link expired while they waited, Skipped rows a Preparer dropped, and
+// Suppressed rows whose recipient is on the suppression list.
 type Batch struct {
-	Busy     bool
-	Claimed  int
-	Sent     int
-	Retried  int
-	Failed   int
-	Deferred int
-	Released int
-	Expired  int
-	Skipped  int
+	Busy       bool
+	Claimed    int
+	Sent       int
+	Retried    int
+	Failed     int
+	Deferred   int
+	Released   int
+	Expired    int
+	Skipped    int
+	Suppressed int
 }
 
 type pending struct {
@@ -109,8 +111,13 @@ type outcome struct {
 // out. A row of a Prepared template is handed to its Preparer before it is
 // rendered: one the Preparer drops is closed as failed with SkippedCode and
 // costs neither a send nor the pause between sends, and one whose Preparer
-// fails is retried as a transient failure. Of the due rows, R5's own mail is
-// claimed before the notification emails, each in the order it fell due.
+// fails is retried as a transient failure. A due row whose recipient is on
+// the suppression list (T-R7.15) is closed as failed with SuppressedCode
+// before anything is claimed, whatever the budgets: it is never prepared,
+// sent or deferred, spends no attempt, and leaves its claim slot to mail that
+// can go; the log names the recipient's domain only. Of the due rows, R5's
+// own mail is claimed before the notification emails, each in the order it
+// fell due.
 // When ctx ends, no further row is sent and what was sent is still recorded.
 func (d *Dispatcher) Dispatch(ctx context.Context) (Batch, error) {
 	org, err := d.Org(ctx)
@@ -136,6 +143,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context) (Batch, error) {
 	}
 	var batch Batch
 	if batch.Expired, err = failExpired(ctx, tx, now); err != nil {
+		return Batch{}, err
+	}
+	if batch.Suppressed, err = d.failSuppressed(ctx, tx, now); err != nil {
 		return Batch{}, err
 	}
 	dayStart, nextDay := localDay(now, d.Location)
@@ -363,6 +373,35 @@ func (d *Dispatcher) record(ctx context.Context, tx pgx.Tx, row pending, result 
 	d.Logger.Info("email dispatched", "outboxId", row.id, "template", row.template, "outcome", verdict,
 		"code", result.code, "attempt", attempts, "toDomain", Domain(row.to))
 	return nil
+}
+
+// failSuppressed closes, on tx, every due row of a template this dispatcher
+// sends whose recipient is on the suppression list, as failed with
+// SuppressedCode and its secret erased, and logs each by its recipient's
+// domain alone. A row another transaction holds is left for the next batch.
+// The address is compared as the list holds it, trimmed and lower-cased.
+func (d *Dispatcher) failSuppressed(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
+	type closed struct{ id, template, to string }
+	rows, err := db.QueryMany(ctx, tx, `
+		UPDATE app.email_outbox o
+		   SET failed_at = $1, last_error_code = $2, secret_ciphertext = NULL
+		 WHERE o.id IN (SELECT w.id FROM app.email_outbox w
+		                 WHERE w.sent_at IS NULL AND w.failed_at IS NULL AND w.deliver_after <= $1 AND w.template = ANY($3::text[])
+		                   AND EXISTS (SELECT 1 FROM app.email_suppressions s WHERE s.address = lower(btrim(w.to_address)))
+		                   FOR UPDATE OF w SKIP LOCKED)
+		RETURNING o.id::text, o.template, o.to_address`, []any{now, SuppressedCode, d.Prepare.sendable()}, func(r pgx.Rows) (closed, error) {
+		var c closed
+		err := r.Scan(&c.id, &c.template, &c.to)
+		return c, err
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range rows {
+		d.Logger.Info("email dispatched", "outboxId", c.id, "template", c.template, "outcome", "suppressed",
+			"code", SuppressedCode, "toDomain", Domain(c.to))
+	}
+	return len(rows), nil
 }
 
 // Backoff is the wait before a message's next attempt after its attempts-th
