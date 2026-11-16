@@ -30,12 +30,22 @@ var walkedElsewhere = map[string]string{
 	"createQuestion":         "share_access_flow: createQuestion forTestId",
 	"duplicateQuestion":      "share_access_flow: duplicateQuestion, with and without forTestId",
 	"searchTeacherDirectory": "names no resource: every teacher reads the same directory",
+	"listQuestionGroups":     "share_access_flow: never lists the test's group at any level",
+	"getQuestionGroup":       "share_access_flow: getQuestionGroup",
+	"createQuestionGroup":    "share_access_flow: createQuestionGroup in the test",
+	"updateQuestionGroup":    "share_access_flow: updateQuestionGroup of the test",
+	"deleteQuestionGroup":    "share_access_flow: deleteQuestionGroup of the test",
+	"copyQuestionGroup":      "share_access_flow: copyQuestionGroup to the caller's bank",
+	"archiveQuestionGroup":   "share_access_flow: archiveQuestionGroup of the test, refused as the owner is",
+	"moveTestQuestion":       "share_access_flow: moveTestQuestion within the test's group",
 }
 
 // sharingSurface is every operation R7's sharing added or gave a share's
 // context: the question sets, the grants, Shared with me, the directory, the
-// copies and the edit in a test's context, and the bank's setId and forTestId.
-var sharingSurface = regexp.MustCompile(`^/teacher/(question-sets|shares|shared-with-me|directory)(/|$)|^/teacher/tests/\{id\}/(copy|question-copies|questions/\{questionId\})$`)
+// copies and the edit in a test's context, the bank's setId and forTestId,
+// and the groups and moves a test's grant opens, since a test's group is read
+// and changed as its test is (testAccess).
+var sharingSurface = regexp.MustCompile(`^/teacher/(question-sets|shares|shared-with-me|directory|question-groups)(/|$)|^/teacher/tests/\{id\}/(copy|question-copies|questions/\{questionId\}|questions/move)$`)
 
 // TestEachSharingOperationAnswersAtEachLevelOfAGrant walks every operation
 // T-R7.2 … T-R7.7 added at each level A's colleague can hold to A's test and

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,6 +21,10 @@ const (
 	needsEdit    = "edit"
 	needsOwner   = "owner"
 	needsContext = "context"
+	// needsBankOnly is an operation no one may make on a test's group, its
+	// owner included (archiving one: it follows its test): a reader gets
+	// exactly the owner's refusal.
+	needsBankOnly = "bank-only"
 )
 
 // sharedOp is one operation on A's test, its draft question, its group, its
@@ -56,10 +61,12 @@ func plainGroupBundle() map[string]any {
 // isolation world, at each level its colleague can hold to it, through the
 // world's own grant: with no grant (another teacher), with Can use (the
 // world's grant), with Can edit (the grant changed), and after Stop sharing.
-// A reader may read, assign and see the access it holds; a Can use reader
-// is refused every write with SHARE_READ_ONLY and a Can edit reader every
-// owner's action with SHARE_OWNER_ONLY; and a caller who cannot read the
-// test gets exactly what a missing id answers. An assignment the colleague
+// A reader may read, assign, copy the test's group into its own bank and see
+// the access it holds; a Can use reader is refused every write (the group's
+// edits and moves too) with SHARE_READ_ONLY and a Can edit reader every
+// owner's action with SHARE_OWNER_ONLY; archiving the test's group is
+// refused to a reader exactly as to the owner; and a caller who cannot read
+// the test gets exactly what a missing id answers. An assignment the colleague
 // made under the grant keeps its monitor, grading, review, export, analysis
 // and the student's result after the grant is gone.
 func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
@@ -100,6 +107,17 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 	}
 
 	var caller *client
+	// group is the test's group A makes afresh at each level, in section.
+	var group, section string
+	stored := func() map[string]any {
+		return a.c.must(http.StatusOK, http.MethodGet, "/teacher/question-groups/"+group, nil)
+	}
+	revisionOf := func(id string) int {
+		if got := a.c.send(http.MethodGet, "/teacher/question-groups/"+id, nil); success(got) {
+			return int(got.json["revision"].(float64))
+		}
+		return 1
+	}
 	ops := []sharedOp{
 		{"getTest", needsRead, test, func(id string) (string, string, *payload) { return http.MethodGet, "/teacher/tests/" + id, nil }},
 		{"listTestVersions", needsRead, test, func(id string) (string, string, *payload) {
@@ -114,6 +132,12 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 		{"getQuestion", needsRead, question, func(id string) (string, string, *payload) { return http.MethodGet, "/teacher/questions/" + id, nil }},
 		{"getQuestionGroup", needsRead, "group", func(id string) (string, string, *payload) {
 			return http.MethodGet, "/teacher/question-groups/" + id, nil
+		}},
+		{"copyQuestionGroup to the caller's bank", needsRead, "group", func(id string) (string, string, *payload) {
+			return http.MethodPost, "/teacher/question-groups/" + id + "/copy", new(jsonPayload(t, map[string]any{"expectedRevision": revisionOf(id)}))
+		}},
+		{"archiveQuestionGroup of the test", needsBankOnly, "group", func(id string) (string, string, *payload) {
+			return http.MethodPatch, "/teacher/question-groups/" + id + "/archive", new(jsonPayload(t, map[string]any{"archived": true, "expectedRevision": revisionOf(id)}))
 		}},
 		{"createAssignment", needsRead, a.id("test-version"), func(id string) (string, string, *payload) {
 			body := assignmentBody(a.with("test-version", id).with("class", classes[caller]))
@@ -157,8 +181,26 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 				"bundle": plainGroupBundle(), "ownerSectionId": id, "expectedTestUpdatedAt": updatedAt(),
 			}))
 		}},
+		{"updateQuestionGroup of the test", needsEdit, "group", func(id string) (string, string, *payload) {
+			current := stored()
+			bundle := current["bundle"].(map[string]any)
+			bundle["group"].(map[string]any)["id"] = id
+			bundle["group"].(map[string]any)["title"] = "Nhóm đồng nghiệp đã sửa " + nonce(t)
+			return http.MethodPut, "/teacher/question-groups/" + id, new(jsonPayload(t, map[string]any{
+				"bundle": bundle, "expectedRevision": current["revision"], "expectedTestUpdatedAt": updatedAt(),
+			}))
+		}},
+		{"moveTestQuestion within the test's group", needsEdit, test, func(id string) (string, string, *payload) {
+			current := stored()
+			member := current["bundle"].(map[string]any)["group"].(map[string]any)["members"].([]any)[0].(map[string]any)["questionId"]
+			return http.MethodPost, "/teacher/tests/" + id + "/questions/move", new(jsonPayload(t, map[string]any{
+				"expectedUpdatedAt": updatedAt(), "questionId": member,
+				"to":                     map[string]any{"sectionId": section, "groupId": group, "index": 0},
+				"expectedGroupRevisions": []any{map[string]any{"groupId": group, "revision": current["revision"]}},
+			}))
+		}},
 		{"deleteQuestionGroup of the test", needsEdit, "group", func(id string) (string, string, *payload) {
-			return http.MethodDelete, "/teacher/question-groups/" + id + "?expectedRevision=1&expectedTestUpdatedAt=" + url.QueryEscape(updatedAt()), nil
+			return http.MethodDelete, "/teacher/question-groups/" + id + "?expectedRevision=" + strconv.Itoa(revisionOf(id)) + "&expectedTestUpdatedAt=" + url.QueryEscape(updatedAt()), nil
 		}},
 		{"publishTest", needsEdit, test, func(id string) (string, string, *payload) {
 			return http.MethodPost, "/teacher/tests/" + id + "/publish", nil
@@ -186,8 +228,8 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 		readable := level == "use" || level == "edit"
 		// A restore as draft gives the draft new sections, so each level reads
 		// the section and makes the test's group afresh.
-		section := a.c.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+test, nil)["sections"].([]any)[0].(map[string]any)["id"].(string)
-		group := a.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
+		section = a.c.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+test, nil)["sections"].([]any)[0].(map[string]any)["id"].(string)
+		group = a.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
 			"bundle": plainGroupBundle(), "ownerSectionId": section, "expectedTestUpdatedAt": updatedAt(),
 		})["bundle"].(map[string]any)["group"].(map[string]any)["id"].(string)
 
@@ -224,6 +266,14 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 				}
 				continue
 			}
+			if op.needs == needsBankOnly {
+				method, path, body = op.build(target)
+				owner := a.c.send(method, path, body)
+				if success(got) || answer(got) != answer(owner) {
+					t.Errorf("%s answered\n  %s\nwhere the owner gets\n  %s", where, answer(got), answer(owner))
+				}
+				continue
+			}
 			want := ""
 			switch {
 			case op.needs == needsOwner:
@@ -239,7 +289,8 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 				}
 				continue
 			}
-			code, _ := got.json["error"].(map[string]any)["code"].(string)
+			failure, _ := got.json["error"].(map[string]any)
+			code, _ := failure["code"].(string)
 			if code != want {
 				t.Errorf("%s: %s, want %s", where, answer(got), want)
 			}
@@ -252,6 +303,9 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 		}
 		if at >= 0 && shared["items"].([]any)[at].(map[string]any)["access"] != level {
 			t.Errorf("the shared row at %s reads %v", level, shared["items"].([]any)[at])
+		}
+		if lists(t, caller, "/teacher/question-groups", group) {
+			t.Errorf("the caller's bank groups at %s list A's test's group", level)
 		}
 		own := caller.must(http.StatusOK, http.MethodGet, "/teacher/tests?limit=100", nil)
 		if slices.ContainsFunc(own["items"].([]any), func(item any) bool { return item.(map[string]any)["id"] == test }) {
