@@ -9634,6 +9634,11 @@ paths:
       responses:
         '204': { description: Deleted. }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The resource is still referenced or has not reached its required inactive state.
@@ -9715,6 +9720,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: '`STALE_WRITE` — edited elsewhere since `expectedUpdatedAt`, with `details.updatedBy` (`PersonRef` or `null`, who saved last) and `details.updatedAt`; `GROUP_OUTLINE_REQUIRED` — a legacy question-only outline cannot replace a draft containing shared groups. Metadata-only updates remain supported. `TEST_ARCHIVED` — restore the test before a mixed-outline edit.'
@@ -9889,6 +9899,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TestVersion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test. `FORBIDDEN` — the caller lacks `content.tests.publish`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -9921,6 +9936,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test; a recipient uses `copyTest`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /teacher/tests/{id}/copy:
@@ -10104,6 +10124,11 @@ paths:
       responses:
         '204': { description: Deleted. }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The version is referenced or current. Archiving does not prevent deletion of an unused, non-current version.
@@ -10193,6 +10218,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The test is archived (`TEST_ARCHIVED`) or the expected update time is stale (`STALE_WRITE`).
@@ -10231,6 +10261,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -10293,7 +10328,9 @@ paths:
         The §8 question bank, with type and tag filters plus search.
 
         With `setId`, the list is that set's questions instead of the
-        caller's bank: any set the caller can read, in set order unless a
+        caller's bank: any set the caller can read, for a caller holding
+        `content.questions.write` (the set operations' own permission; anyone
+        else gets 404), in set order unless a
         sort is given, each row with the caller's `access` and its `owner`.
         `bankTotal` is then the set's size.
       tags: [teacher-questions]
@@ -10589,6 +10626,11 @@ paths:
       responses:
         '204': { $ref: '#/components/responses/NoContent' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller can read the question but does not own it.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -10628,6 +10670,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdminQuestion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — without `forTestId`, a question the caller does not own; `SHARE_READ_ONLY` — `forTestId` names a test the caller holds a Can use grant to.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /teacher/question-sets:
