@@ -170,8 +170,9 @@ func (s *Postgres) CreateSet(ctx context.Context, w domain.SetWrite, fields doma
 }
 
 // UpdateSet changes the set's name or description for its owner or an edit
-// grantee, and audits what changed in the same statement. A change that
-// leaves both as they are writes nothing.
+// grantee, and audits what changed in the same statement as an {old, new}
+// pair per field, with a null for a description that was absent or cleared.
+// A change that leaves both as they are writes nothing.
 func (s *Postgres) UpdateSet(ctx context.Context, w domain.SetWrite, fields domain.SetFields) (domain.QuestionSet, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -195,11 +196,13 @@ func (s *Postgres) UpdateSet(ctx context.Context, w domain.SetWrite, fields doma
 		)
 		INSERT INTO app.audit_log (actor_user_id, action, entity, entity_id, occurred_at, ip, user_agent, diff)
 		SELECT $5::uuid, 'question_set.updated', 'question_set', updated.id, $6, $7::inet, $8,
-		       jsonb_build_object('changed', jsonb_strip_nulls(
-		         jsonb_build_object('name', CASE WHEN updated.old_name <> updated.new_name
-		                                         THEN jsonb_build_object('old', updated.old_name, 'new', updated.new_name) END)
-		         || jsonb_build_object('description', CASE WHEN updated.old_description IS DISTINCT FROM updated.new_description
-		                                         THEN jsonb_build_object('old', updated.old_description, 'new', updated.new_description) END)))
+		       jsonb_build_object('changed',
+		         CASE WHEN updated.old_name <> updated.new_name
+		              THEN jsonb_build_object('name', jsonb_build_object('old', updated.old_name, 'new', updated.new_name))
+		              ELSE '{}'::jsonb END
+		         || CASE WHEN updated.old_description IS DISTINCT FROM updated.new_description
+		                 THEN jsonb_build_object('description', jsonb_build_object('old', updated.old_description, 'new', updated.new_description))
+		                 ELSE '{}'::jsonb END)
 		  FROM updated`,
 		w.ID, fields.Name, fields.DescriptionSet, fields.Description, w.ActorID, w.Now, opt.String(w.IP), opt.String(w.UserAgent)); err != nil {
 		return domain.QuestionSet{}, fmt.Errorf("questions: update set: %w", err)
