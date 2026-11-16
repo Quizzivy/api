@@ -34,7 +34,9 @@ type NotifySchedule struct {
 
 // RunNotifySchedule runs the scheduler at start-up, then again when the
 // next moment it reads falls due, when Idle has passed, or when Nudge fires,
-// until ctx ends. A failure is logged with its code only, and retried.
+// until ctx ends. The next moment is read after the run's own now, so a
+// moment that falls due while the run works is the next one. A failure is
+// logged with its code only, and retried.
 func RunNotifySchedule(ctx context.Context, logger *slog.Logger, s NotifyScheduler, schedule NotifySchedule) {
 	now := schedule.Now
 	if now == nil {
@@ -49,7 +51,8 @@ func RunNotifySchedule(ctx context.Context, logger *slog.Logger, s NotifySchedul
 }
 
 func (schedule NotifySchedule) next(ctx context.Context, logger *slog.Logger, s NotifyScheduler, now func() time.Time) time.Duration {
-	busy, err := s.Run(ctx, now())
+	at := now()
+	busy, err := s.Run(ctx, at)
 	switch {
 	case ctx.Err() != nil:
 		return 0
@@ -59,7 +62,6 @@ func (schedule NotifySchedule) next(ctx context.Context, logger *slog.Logger, s 
 	case busy:
 		return schedule.Busy
 	}
-	at := now()
 	due, ok, err := s.NextDue(ctx, at)
 	switch {
 	case ctx.Err() != nil:
@@ -70,7 +72,7 @@ func (schedule NotifySchedule) next(ctx context.Context, logger *slog.Logger, s 
 	case !ok:
 		return schedule.Idle
 	}
-	return min(max(due.Sub(at), schedule.Floor), schedule.Idle)
+	return min(max(due.Sub(now()), schedule.Floor), schedule.Idle)
 }
 
 func scheduleSleep(ctx context.Context, nudge <-chan struct{}, d time.Duration) bool {

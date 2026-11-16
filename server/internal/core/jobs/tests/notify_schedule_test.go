@@ -20,14 +20,16 @@ type scriptedScheduler struct {
 	due    func(now time.Time) (time.Time, bool)
 	ran    chan struct{}
 	readAt chan time.Time
+	runAt  []time.Time
 }
 
 func newScriptedScheduler(due func(now time.Time) (time.Time, bool)) *scriptedScheduler {
 	return &scriptedScheduler{due: due, ran: make(chan struct{}, 64), readAt: make(chan time.Time, 64)}
 }
 
-func (s *scriptedScheduler) Run(context.Context, time.Time) (bool, error) {
+func (s *scriptedScheduler) Run(_ context.Context, now time.Time) (bool, error) {
 	s.mu.Lock()
+	s.runAt = append(s.runAt, now)
 	n := s.runs
 	s.runs++
 	var busy bool
@@ -162,6 +164,27 @@ func TestAFailedRunIsLoggedByItsCodeAndRetried(t *testing.T) {
 	text := logs.text()
 	if !strings.Contains(text, "NOTIFY_SCHEDULE_FAILED") || strings.Contains(text, "secret") {
 		t.Errorf("logs %s, want the code and not the error's text", text)
+	}
+}
+
+func TestTheNextMomentIsReadAsOfTheRunsOwnNow(t *testing.T) {
+	var mu sync.Mutex
+	clock := time.Date(2026, 11, 17, 3, 0, 0, 0, time.UTC)
+	tick := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		clock = clock.Add(time.Second)
+		return clock
+	}
+	s := newScriptedScheduler(func(time.Time) (time.Time, bool) { return time.Time{}, false })
+	runSchedule(t, s, jobs.NotifySchedule{Idle: time.Hour, Retry: time.Hour, Busy: time.Hour, Floor: time.Millisecond, Now: tick})
+	waitRun(t, s, time.Second)
+	read := <-s.readAt
+	s.mu.Lock()
+	ran := s.runAt[0]
+	s.mu.Unlock()
+	if !read.Equal(ran) {
+		t.Errorf("the run's now was %s and the next moment was read after %s: a moment between them would wait for the idle check", ran, read)
 	}
 }
 
