@@ -40,8 +40,10 @@ func RateLimits() *ratelimit.Registry {
 	reg.Add("GET /public/organization", capacity, ratelimit.PerMinute(120), ratelimit.PerHour(2000))
 	reg.Add("GET /public/organization/logo", capacity, ratelimit.PerMinute(300))
 	reg.Add("POST /public/leads", capacity, ratelimit.PerMinute(3), ratelimit.PerHour(10))
-	// Resend's signed delivery events (T-R7.15), per sending address. It
-	// answers 501 until that task verifies the signature.
+	// Resend's signed delivery events (T-R7.15), per sending address: a
+	// bounce or complaint arrives one delivery at a time, and Resend retries a
+	// refused one, so 120 a minute holds a burst without letting a caller
+	// spend the signature check at will.
 	reg.Add("POST /public/email-events", capacity, ratelimit.PerMinute(120))
 
 	return reg

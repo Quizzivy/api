@@ -88,6 +88,23 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 	}, nil
 }
 
+// EmailWebhook is Resend's webhook over cfg's RESEND_WEBHOOK_SECRET, which
+// lists the recipients of hard bounces and complaints for the dispatcher to
+// skip (T-R7.15). Without the secret it is nil, receiveEmailEvents answers
+// 501, and the API logs that bounces and complaints are not received.
+func EmailWebhook(cfg config.Config, dbx db.Context, logger *slog.Logger) (*email.Webhook, error) {
+	if !cfg.Email.ReceivesEvents() {
+		logger.Warn("email bounces and complaints are not received; POST /public/email-events answers 501", "setting", "RESEND_WEBHOOK_SECRET")
+		return nil, nil
+	}
+	webhook, err := email.NewWebhook(cfg.Email.WebhookSecret.Reveal(), dbx, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("email bounces and complaints are received", "events", []string{email.EventBounced, email.EventComplained})
+	return webhook, nil
+}
+
 func organizationName(branding Branding, logger *slog.Logger) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		b, err := branding.Handle(ctx, organizationquery.Branding{})

@@ -37,7 +37,7 @@ var theOpenThirteen = []string{
 	"POST /auth/set-password",        // the emailed link is the credential; it signs the account in, like login, behind the same limits plus one per token
 	"POST /auth/set-password/check",  // the page asks whose link this is before it shows the form; one identical 410 for every invalid state
 	"POST /join/preview",             // §6.5's public join surface
-	"POST /public/email-events",      // Resend's webhook (O-R5.2): only a Svix-signed delivery counts, and it answers 204 or 401, both empty (501 until T-R7.15)
+	"POST /public/email-events",      // Resend's webhook (O-R5.2, T-R7.15): Resend cannot hold a token, so the Svix signature is the credential; 204 or 401, both empty, and a forged request cannot suppress an address
 	"POST /public/leads",             // the landing site's consultation form, sent by a visitor with no account; one answer for every valid request, stored or not
 }
 

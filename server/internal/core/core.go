@@ -3,6 +3,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/config"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/platform/email"
 	"quizzivy/internal/platform/httpserver"
 )
 
@@ -54,6 +56,9 @@ type App struct {
 	logger   *slog.Logger
 	pool     *db.Pool
 	assembly wiring.Assembly
+	// webhook receives Resend's bounces and complaints; nil without
+	// RESEND_WEBHOOK_SECRET.
+	webhook *email.Webhook
 }
 
 // New opens the database and builds every module. The returned App owns the
@@ -74,7 +79,13 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger, opts ...wi
 		return nil, err
 	}
 
-	return &App{cfg: cfg, logger: logger, pool: pool, assembly: assembly}, nil
+	webhook, err := wiring.EmailWebhook(cfg, db.NewContext(pool.Pool), logger)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("RESEND_WEBHOOK_SECRET: %w", err)
+	}
+
+	return &App{cfg: cfg, logger: logger, pool: pool, assembly: assembly, webhook: webhook}, nil
 }
 
 func (a *App) Close() {
@@ -84,7 +95,7 @@ func (a *App) Close() {
 // Handler is the assembled HTTP surface, for the server and for tests that
 // drive the whole application in-process.
 func (a *App) Handler() (http.Handler, error) {
-	deps := router.Deps{Modules: a.assembly.Modules, DB: a.pool, Tokens: a.assembly.Tokens, Docs: a.assembly.Docs, DocsPublic: a.cfg.DocsPublic, Maintenance: a.assembly.Maintenance, Principals: adapters.Principals{Query: a.assembly.Principals.Queries.ResolvePrincipal, Activity: a.assembly.Identity.Commands.StampActivity}, LandingOrigins: a.cfg.LandingOrigins}
+	deps := router.Deps{Modules: a.assembly.Modules, DB: a.pool, Tokens: a.assembly.Tokens, Docs: a.assembly.Docs, DocsPublic: a.cfg.DocsPublic, Maintenance: a.assembly.Maintenance, Principals: adapters.Principals{Query: a.assembly.Principals.Queries.ResolvePrincipal, Activity: a.assembly.Identity.Commands.StampActivity}, LandingOrigins: a.cfg.LandingOrigins, EmailWebhook: a.webhook}
 	return router.New(deps, a.logger, a.cfg.AllowedOrigins, a.cfg.ClientIPHeader)
 }
 

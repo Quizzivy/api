@@ -23,15 +23,25 @@ import (
 // names email.NotifyEvents lists: every one when it is unset or empty, none
 // for "none", and otherwise those its comma list names. A Config built
 // without Load has nil Events, which sends every one, as unset does.
+//
+// WebhookSecret is RESEND_WEBHOOK_SECRET, the signing secret of Resend's
+// webhook (T-R7.15), checked at start-up with email.ParseWebhookSecret. It is
+// optional: without it POST /public/email-events answers 501 and no bounce or
+// complaint reaches the suppression list.
 type Email struct {
-	APIKey     Secret
-	From       string
-	ReplyTo    string
-	DailyLimit int
-	SendRate   int
-	SinkDir    string
-	Events     []string
+	APIKey        Secret
+	From          string
+	ReplyTo       string
+	DailyLimit    int
+	SendRate      int
+	SinkDir       string
+	Events        []string
+	WebhookSecret Secret
 }
+
+// ReceivesEvents reports whether RESEND_WEBHOOK_SECRET is set, so Resend's
+// bounces and complaints are received.
+func (e Email) ReceivesEvents() bool { return e.WebhookSecret != "" }
 
 // Sends reports whether NOTIFY_EMAIL_EVENTS leaves the notification email of
 // event on.
@@ -69,7 +79,22 @@ func loadEmail(cfg *Config) error {
 	if err := loadResend(cfg); err != nil {
 		return err
 	}
+	if err := loadWebhookSecret(cfg); err != nil {
+		return err
+	}
 	return loadEmailLimits(cfg)
+}
+
+func loadWebhookSecret(cfg *Config) error {
+	raw := strings.TrimSpace(os.Getenv("RESEND_WEBHOOK_SECRET"))
+	if raw == "" {
+		return nil
+	}
+	if _, err := email.ParseWebhookSecret(raw); err != nil {
+		return err
+	}
+	cfg.Email.WebhookSecret = Secret(raw)
+	return nil
 }
 
 func loadResend(cfg *Config) error {
