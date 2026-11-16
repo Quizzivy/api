@@ -581,3 +581,34 @@ func TestTheNewTypesAreReadWithTheirKeysChooseNAndRubric(t *testing.T) {
 		t.Errorf("a stored matching question reads items %v, want %v", bank.MatchItems, wantItems)
 	}
 }
+
+// TestARecipientOfAShareAsksTheAssistantNothing: the AI operations stay the
+// owner's and scope.all's (web#79), so a test or a question read through a
+// share answers as missing.
+func TestARecipientOfAShareAsksTheAssistantNothing(t *testing.T) {
+	for _, level := range []testsdomain.Access{testsdomain.AccessUse, testsdomain.AccessEdit} {
+		r := adapters.AITests{
+			Test: cqrs.HandlerFunc[testsquery.Get, testsdomain.Test](func(context.Context, testsquery.Get) (testsdomain.Test, error) {
+				return testsdomain.Test{ID: "t-1", Sections: []testsdomain.Section{{ID: "s-1", Units: unitsOf("question", "q-1")}}, Access: level}, nil
+			}),
+		}
+		scope := access.Scope{UserID: "grantee"}
+		if _, err := r.Draft(context.Background(), scope, "t-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("the draft of a %s test: %v, want not found", level, err)
+		}
+		if _, err := r.Section(context.Background(), scope, "t-1", "s-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a section of a %s test: %v, want not found", level, err)
+		}
+		if _, err := r.Passage(context.Background(), scope, "t-1", "p-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a passage of a %s test: %v, want not found", level, err)
+		}
+	}
+	for _, level := range []questionsdomain.Access{questionsdomain.AccessUse, questionsdomain.AccessEdit} {
+		r := adapters.AIQuestions{Question: cqrs.HandlerFunc[questionsquery.Get, questionsdomain.Question](func(context.Context, questionsquery.Get) (questionsdomain.Question, error) {
+			return questionsdomain.Question{ID: "q-1", Type: "short_answer", Prompt: "Shared", Access: level}, nil
+		})}
+		if _, err := r.Get(context.Background(), access.Scope{UserID: "grantee"}, "q-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a %s question: %v, want not found", level, err)
+		}
+	}
+}
