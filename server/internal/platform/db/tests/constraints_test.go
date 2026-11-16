@@ -1629,3 +1629,231 @@ func TestTheBankOrdinalKeysAreDeferrable(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------- sharing (T-R7.1)
+
+func newQuestionSet(t *testing.T, tx *sql.Tx, owner string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.question_sets (owner_id, name, created_by)
+		VALUES ($1, 'Bộ câu hỏi', $1) RETURNING id`, owner).Scan(&id); err != nil {
+		t.Fatalf("question set fixture: %v", err)
+	}
+	return id
+}
+
+func newDraftTest(t *testing.T, tx *sql.Tx, owner string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.tests (title, created_by, owner_id)
+		VALUES ('Đề được chia sẻ', $1, $1) RETURNING id`, owner).Scan(&id); err != nil {
+		t.Fatalf("test fixture: %v", err)
+	}
+	return id
+}
+
+// shareRefusal is a content_shares insert refused by one constraint, given the
+// fixture's test, set, grantee and granter as $1 to $4.
+type shareRefusal struct{ constraint, insert string }
+
+func refusesEachShare(t *testing.T, cases []shareRefusal) {
+	t.Helper()
+	for _, c := range cases {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			test, set := newDraftTest(t, tx, f.adminID), newQuestionSet(t, tx, f.adminID)
+			rejectsWith(t, tx, c.constraint, c.insert, test, set, f.studentID, f.adminID)
+		})
+	}
+}
+
+func TestAShareNamesExactlyOneResource(t *testing.T) {
+	refusesEachShare(t, []shareRefusal{
+		{"content_shares_one_resource", `INSERT INTO app.content_shares (kind, test_id, question_set_id, grantee_id, access, granted_by)
+			VALUES ('test', $1, $2, $3, 'use', $4)`},
+		{"content_shares_one_resource", `INSERT INTO app.content_shares (kind, grantee_id, access, granted_by)
+			SELECT 'question_set', $3, 'use', $4 WHERE $1::uuid IS NOT NULL AND $2::uuid IS NOT NULL`},
+	})
+}
+
+func TestAShareKindMustAgreeWithItsResource(t *testing.T) {
+	refusesEachShare(t, []shareRefusal{
+		{"content_shares_kind_matches", `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			SELECT 'question_set', $1, $3, 'use', $4 WHERE $2::uuid IS NOT NULL`},
+		{"content_shares_kind_matches", `INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			SELECT 'test', $2, $3, 'edit', $4 WHERE $1::uuid IS NOT NULL`},
+		{"content_shares_kind_check", `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			SELECT 'word_list', $1, $3, 'use', $4 WHERE $2::uuid IS NOT NULL`},
+		{"content_shares_access_check", `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			SELECT 'test', $1, $3, 'own', $4 WHERE $2::uuid IS NOT NULL`},
+		{"content_shares_message_check", `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by, message)
+			SELECT 'test', $1, $3, 'use', $4, '' WHERE $2::uuid IS NOT NULL`},
+	})
+}
+
+func TestAGranteeHoldsOneGrantPerResource(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		test, set := newDraftTest(t, tx, f.adminID), newQuestionSet(t, tx, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			VALUES ('test', $1, $2, 'use', $3)`, test, f.studentID, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			VALUES ('question_set', $1, $2, 'use', $3)`, set, f.studentID, f.adminID)
+		rejectsWith(t, tx, "content_shares_test_grantee_key",
+			`INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			 VALUES ('test', $1, $2, 'edit', $3)`, test, f.studentID, f.adminID)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		set := newQuestionSet(t, tx, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			VALUES ('question_set', $1, $2, 'use', $3)`, set, f.studentID, f.adminID)
+		rejectsWith(t, tx, "content_shares_question_set_grantee_key",
+			`INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			 VALUES ('question_set', $1, $2, 'edit', $3)`, set, f.studentID, f.adminID)
+	})
+}
+
+func TestASetNameIsOneToAHundredAndTwentyCharacters(t *testing.T) {
+	for _, c := range []struct{ constraint, insert string }{
+		{"question_sets_name_check", `INSERT INTO app.question_sets (owner_id, name, created_by) VALUES ($1, '   ', $1)`},
+		{"question_sets_name_check", `INSERT INTO app.question_sets (owner_id, name, created_by) VALUES ($1, repeat('a', 121), $1)`},
+		{"question_sets_description_check", `INSERT INTO app.question_sets (owner_id, name, description, created_by) VALUES ($1, 'Bộ', repeat('a', 501), $1)`},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			rejectsWith(t, tx, c.constraint, c.insert, f.adminID)
+		})
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.question_sets (owner_id, name, created_by) VALUES ($1, repeat('a', 120), $1)`, f.adminID)
+	})
+}
+
+// [D-13] A set's items are reordered one row at a time inside one transaction.
+func TestASetItemReorderPassesWhenDeferred(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		set := newQuestionSet(t, tx, f.adminID)
+		first := newQuestion(t, tx, f.adminID, "short_answer", "Câu một")
+		second := newQuestion(t, tx, f.adminID, "short_answer", "Câu hai")
+		mustExec(t, tx, `INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by)
+			VALUES ($1, $2, 0, $4), ($1, $3, 1, $4)`, set, first, second, f.adminID)
+		rejectsWith(t, tx, "question_set_items_ordinal_key",
+			`UPDATE app.question_set_items SET ordinal = 1 WHERE set_id = $1 AND question_id = $2`, set, first)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		set := newQuestionSet(t, tx, f.adminID)
+		first := newQuestion(t, tx, f.adminID, "short_answer", "Câu một")
+		second := newQuestion(t, tx, f.adminID, "short_answer", "Câu hai")
+		mustExec(t, tx, `INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by)
+			VALUES ($1, $2, 0, $4), ($1, $3, 1, $4)`, set, first, second, f.adminID)
+		mustExec(t, tx, `SET CONSTRAINTS app.question_set_items_ordinal_key DEFERRED`)
+		mustExec(t, tx, `UPDATE app.question_set_items SET ordinal = 1 WHERE set_id = $1 AND question_id = $2`, set, first)
+		mustExec(t, tx, `UPDATE app.question_set_items SET ordinal = 0 WHERE set_id = $1 AND question_id = $2`, set, second)
+		mustExec(t, tx, `SET CONSTRAINTS app.question_set_items_ordinal_key IMMEDIATE`)
+	})
+}
+
+func TestASetHoldsAQuestionOnce(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		set := newQuestionSet(t, tx, f.adminID)
+		q := newQuestion(t, tx, f.adminID, "short_answer", "Câu trong bộ")
+		mustExec(t, tx, `INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by) VALUES ($1, $2, 0, $3)`, set, q, f.adminID)
+		rejectsWith(t, tx, "question_set_items_pkey",
+			`INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by) VALUES ($1, $2, 1, $3)`, set, q, f.adminID)
+	})
+}
+
+// A set references a bank question, as a draft does, so only a hard purge is
+// refused; the question's soft delete removes its items itself.
+func TestHardPurgingAQuestionASetHoldsIsBlocked(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		set := newQuestionSet(t, tx, f.adminID)
+		q := newQuestion(t, tx, f.adminID, "short_answer", "Câu trong bộ")
+		mustExec(t, tx, `INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by) VALUES ($1, $2, 0, $3)`, set, q, f.adminID)
+		rejectsWith(t, tx, "question_set_items_question_id_fkey", `DELETE FROM app.questions WHERE id = $1`, q)
+	})
+}
+
+func TestPurgingAResourceTakesItsItemsAndGrants(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		test, set := newDraftTest(t, tx, f.adminID), newQuestionSet(t, tx, f.adminID)
+		q := newQuestion(t, tx, f.adminID, "short_answer", "Câu trong bộ")
+		mustExec(t, tx, `INSERT INTO app.question_set_items (set_id, question_id, ordinal, added_by) VALUES ($1, $2, 0, $3)`, set, q, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.content_shares (kind, test_id, grantee_id, access, granted_by)
+			VALUES ('test', $1, $2, 'use', $3)`, test, f.studentID, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.content_shares (kind, question_set_id, grantee_id, access, granted_by)
+			VALUES ('question_set', $1, $2, 'edit', $3)`, set, f.studentID, f.adminID)
+		mustExec(t, tx, `DELETE FROM app.tests WHERE id = $1`, test)
+		mustExec(t, tx, `DELETE FROM app.question_sets WHERE id = $1`, set)
+		var items, grants int
+		if err := tx.QueryRow(`SELECT (SELECT count(*) FROM app.question_set_items WHERE set_id = $1),
+			(SELECT count(*) FROM app.content_shares WHERE grantee_id = $2)`, set, f.studentID).Scan(&items, &grants); err != nil {
+			t.Fatal(err)
+		}
+		if items != 0 || grants != 0 {
+			t.Errorf("%d items and %d grants survived their resources", items, grants)
+		}
+	})
+}
+
+// TestTheV0130WritesStillInsert runs the test and question inserts with the
+// column lists of v0.13.0 (tests/repositories/store.go and
+// questions/repositories/store.go before R7), which an old binary sends while
+// the new schema is live, and shows updated_by left NULL.
+func TestTheV0130WritesStillInsert(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		var testBy, questionBy *string
+		if err := tx.QueryRow(`INSERT INTO app.tests (title, description, created_by, owner_id)
+			VALUES ('Đề cũ', NULL, $1, coalesce(NULL::uuid, $1)) RETURNING updated_by`, f.adminID).Scan(&testBy); err != nil {
+			t.Fatalf("the v0.13.0 test insert was refused: %v", err)
+		}
+		if err := tx.QueryRow(`
+			INSERT INTO app.questions
+			       (type, prompt, media_asset_id, media_asset_kind,
+			        audio_max_plays, audio_allow_seek, audio_show_transcript_after,
+			        transcript, points, explanation, sample_answer, tags, created_by, prompt_content, explanation_content,
+			        id, context_group_id, context_ordinal, context_option_order, owner_id, level, skill, media_alt,
+			        audio_allow_pause, copied_from_id, select_count, max_words, match_allow_reuse)
+			VALUES ('short_answer', 'Câu hỏi cũ', NULL, NULL, NULL, NULL, NULL,
+			        NULL, 1.0, NULL, NULL, '{}', $1, NULL, NULL,
+			        uuidv7(), NULL, NULL, NULL, $1, NULL, NULL, NULL,
+			        NULL, NULL, NULL, NULL, NULL)
+			RETURNING updated_by`, f.adminID).Scan(&questionBy); err != nil {
+			t.Fatalf("the v0.13.0 question insert was refused: %v", err)
+		}
+		if testBy != nil || questionBy != nil {
+			t.Errorf("an old insert reads updated_by %v and %v, want NULL", testBy, questionBy)
+		}
+	})
+}
+
+func TestDeletingTheLastEditorClearsUpdatedBy(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		test := newDraftTest(t, tx, f.adminID)
+		q := newQuestion(t, tx, f.adminID, "short_answer", "Câu đã sửa")
+		mustExec(t, tx, `UPDATE app.tests SET updated_by = $1 WHERE id = $2`, f.studentID, test)
+		mustExec(t, tx, `UPDATE app.questions SET updated_by = $1 WHERE id = $2`, f.studentID, q)
+		mustExec(t, tx, `DELETE FROM app.users WHERE id = $1`, f.studentID)
+		var testBy, questionBy *string
+		if err := tx.QueryRow(`SELECT (SELECT updated_by::text FROM app.tests WHERE id = $1),
+			(SELECT updated_by::text FROM app.questions WHERE id = $2)`, test, q).Scan(&testBy, &questionBy); err != nil {
+			t.Fatal(err)
+		}
+		if testBy != nil || questionBy != nil {
+			t.Errorf("updated_by survived its user: %v and %v", testBy, questionBy)
+		}
+	})
+}
+
+// TestTheR7KeysAreValidated fails when 00161 adds its foreign keys NOT VALID
+// and skips the VALIDATE.
+func TestTheR7KeysAreValidated(t *testing.T) {
+	conn := migrated(t)
+	for _, name := range []string{"tests_updated_by_fkey", "questions_updated_by_fkey"} {
+		var validated bool
+		if err := conn.QueryRow(`SELECT convalidated FROM pg_constraint
+			WHERE conname = $1 AND connamespace = 'app'::regnamespace`, name).Scan(&validated); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !validated {
+			t.Errorf("%s is NOT VALID", name)
+		}
+	}
+}

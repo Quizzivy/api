@@ -219,3 +219,77 @@ func TestFoundationObjectsExist(t *testing.T) {
 		}
 	}
 }
+
+// The sharing files (00159 to 00161, T-R7.1), and the version before them.
+const (
+	beforeSharing int64 = 158
+	sharing       int64 = 161
+)
+
+// TestTheSharingFilesApplyOverPopulatedTablesAndRollBack runs 00159 to 00161
+// over a test and a question that already exist, as production's do, then
+// walks them down and up again: the columns arrive NULL, the Down removes the
+// tables and the columns, and a second Up restores them.
+func TestTheSharingFilesApplyOverPopulatedTablesAndRollBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, beforeSharing); err != nil {
+		t.Fatal(err)
+	}
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		newDraftTest(t, tx, f.adminID)
+		newQuestion(t, tx, f.adminID, "short_answer", "Câu có trước R7")
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	present := func() (tables, columns int) {
+		t.Helper()
+		if err := conn.QueryRow(`SELECT
+			(SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app'
+			    AND table_name IN ('question_sets', 'question_set_items', 'content_shares')),
+			(SELECT count(*) FROM information_schema.columns WHERE table_schema = 'app'
+			    AND table_name IN ('tests', 'questions') AND column_name = 'updated_by')`).Scan(&tables, &columns); err != nil {
+			t.Fatal(err)
+		}
+		return tables, columns
+	}
+	if err := goose.UpTo(conn, dir, sharing); err != nil {
+		t.Fatalf("up over populated tables: %v", err)
+	}
+	if tables, columns := present(); tables != 3 || columns != 2 {
+		t.Fatalf("after up: %d tables and %d columns, want 3 and 2", tables, columns)
+	}
+	var filled int
+	if err := conn.QueryRow(`SELECT (SELECT count(*) FROM app.tests WHERE updated_by IS NOT NULL)
+		+ (SELECT count(*) FROM app.questions WHERE updated_by IS NOT NULL)`).Scan(&filled); err != nil {
+		t.Fatal(err)
+	}
+	if filled != 0 {
+		t.Errorf("%d existing rows gained an updated_by", filled)
+	}
+	if err := goose.DownTo(conn, dir, beforeSharing); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if tables, columns := present(); tables != 0 || columns != 0 {
+		t.Fatalf("after down: %d tables and %d columns left", tables, columns)
+	}
+	if err := goose.UpTo(conn, dir, sharing); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	if tables, columns := present(); tables != 3 || columns != 2 {
+		t.Errorf("after the second up: %d tables and %d columns, want 3 and 2", tables, columns)
+	}
+}
