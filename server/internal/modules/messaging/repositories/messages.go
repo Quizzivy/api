@@ -161,7 +161,7 @@ type target struct {
 // post writes one post in one transaction. resolve reads the facts and
 // answers a thread the sender cannot read; then a repeated clientId returns
 // the message it made, the post's rule is asked, the file checked, the
-// conversation made by the first post, and the message written.
+// conversation made by the first post and locked, and the message written.
 func (p *Postgres) post(ctx context.Context, name string, post domain.Post, resolve func(context.Context, pgx.Tx) (target, error)) (domain.Posted, error) {
 	var out domain.Posted
 	err := p.InTx(ctx, name, func(tx pgx.Tx) error {
@@ -169,11 +169,8 @@ func (p *Postgres) post(ctx context.Context, name string, post domain.Post, reso
 		if err != nil {
 			return err
 		}
-		thread, err := t.find(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if replay, done, err := repeated(ctx, tx, post, thread); done || err != nil {
+		find := func() (string, error) { return t.find(ctx, tx) }
+		if replay, done, err := repeated(ctx, tx, post, find); done || err != nil {
 			out = replay
 			return err
 		}
@@ -186,13 +183,32 @@ func (p *Postgres) post(ctx context.Context, name string, post domain.Post, reso
 		if err := t.open(ctx, tx); err != nil {
 			return err
 		}
-		if thread, err = t.find(ctx, tx); err != nil {
+		thread, err := find()
+		if err != nil {
+			return err
+		}
+		if err := serialise(ctx, tx, thread); err != nil {
 			return err
 		}
 		out, err = write(ctx, tx, thread, post)
 		return err
 	})
 	return out, err
+}
+
+// serialise holds thread's row until the post commits, before the message's
+// id is made, so a thread's posts take their uuidv7 ids in the order they
+// commit. Without it a post could make its id, and a later one make a greater
+// id and commit first: a reader whose poll or read pointer reached the later
+// one would never get the earlier, and would count it as read (page, markRead
+// and seenBy compare ids). FOR NO KEY UPDATE is the lock the last_message_at
+// UPDATE takes anyway; it leaves the FOR KEY SHARE of a read pointer's foreign
+// key alone, so a reader marking the thread read does not wait.
+func serialise(ctx context.Context, tx pgx.Tx, thread string) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM app.conversations WHERE id = $1::uuid FOR NO KEY UPDATE`, thread); err != nil {
+		return fmt.Errorf("messaging: lock thread: %w", err)
+	}
+	return nil
 }
 
 // PostDirect writes post to staffID's thread with studentID in one
@@ -278,9 +294,11 @@ func attachable(post domain.Post) error {
 }
 
 // repeated finds the message the sender's clientId already made: done with it
-// when it is in thread, ErrClientIDTaken when it is another thread's, and not
-// done when there is none.
-func repeated(ctx context.Context, tx pgx.Tx, post domain.Post, thread string) (domain.Posted, bool, error) {
+// when it is in the thread find reads, ErrClientIDTaken when it is another
+// thread's, and not done when there is none. find runs after the message is
+// read, so a first post with the same clientId that committed meanwhile,
+// making the thread, is this one's replay rather than another thread's.
+func repeated(ctx context.Context, tx pgx.Tx, post domain.Post, find func() (string, error)) (domain.Posted, bool, error) {
 	m, err := scanMessage(tx.QueryRow(ctx, messageColumns+messageFrom+`
 		 WHERE m.sender_id = $1::uuid AND m.client_id = $2::uuid`, post.SenderID, post.ClientID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -288,6 +306,10 @@ func repeated(ctx context.Context, tx pgx.Tx, post domain.Post, thread string) (
 	}
 	if err != nil {
 		return domain.Posted{}, true, fmt.Errorf("messaging: repeated post: %w", err)
+	}
+	thread, err := find()
+	if err != nil {
+		return domain.Posted{}, true, err
 	}
 	if m.ConversationID != thread {
 		return domain.Posted{}, true, domain.ErrClientIDTaken
@@ -306,7 +328,7 @@ func write(ctx context.Context, tx pgx.Tx, thread string, post domain.Post) (dom
 		ON CONFLICT (sender_id, client_id) DO NOTHING
 		RETURNING id::text, created_at`, thread, post.SenderID, post.ClientID, post.Content.Body).Scan(&id, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
-		replay, _, err := repeated(ctx, tx, post, thread)
+		replay, _, err := repeated(ctx, tx, post, func() (string, error) { return thread, nil })
 		return replay, err
 	}
 	if err != nil {
