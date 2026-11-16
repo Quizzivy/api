@@ -69,8 +69,13 @@ info:
       `section`, `question`, `version-question`, `version-recording`,
       `question-group`, `media`, `import`, `import-source`, `class`,
       `assignment`, `attempt`, `student`, `notification`, `override`,
-      `question-set` or `share`. A `share` is a grant (`ShareGrant.id`), which
-      its content's owner and its recipient can name. The two `version-` kinds are a
+      `question-set`, `share`, `messaging-peer` or `attachment`. A `share` is
+      a grant (`ShareGrant.id`), which its content's owner and its recipient
+      can name. A `messaging-peer` is a student a staff member may read a
+      direct thread with: one they have a thread with, have taught, now or
+      before, or created; it outlives the class, where `student` does not.
+      An `attachment` is a message's file, named by its uploader and the
+      participants of the thread that holds it. The two `version-` kinds are a
       question and a group recording of a published version, as grading and
       the student's autosave, events and plays name them. A section unit's
       `id` names a question or a group, as its `kind` says, and is declared
@@ -119,6 +124,12 @@ tags:
     description: |
       Sharing tests and question sets with other teachers (D4): the colleague
       directory, grants as Can use or Can edit, and Shared with me.
+  - name: teacher-messages
+    description: |
+      Class announcement channels and direct messages with students (D17).
+      A direct thread is readable by its two participants only, `scope.all`
+      included. Messages are never edited or deleted, and posting is not
+      audited: the messages are the record.
   - name: teacher-imports
     description: Private Word source intake and durable import review.
   - name: teacher-media
@@ -191,6 +202,8 @@ tags:
     description: The student console, with its classes, assigned tests, results and settings.
   - name: take-test
     description: Taking a test, from starting or resuming an attempt to saving answers, submitting and the integrity beacon.
+  - name: student-messages
+    description: The student's Messages, with their teachers' direct threads and their classes' announcements, read-only.
   - name: me
     description: |
       The caller's own notifications and notification switches, for any
@@ -1225,6 +1238,9 @@ components:
         - SHARE_READ_ONLY
         - EDIT_CONTEXT_REQUIRED
         - MEDIA_IN_USE_ELSEWHERE
+        # messages
+        - MESSAGING_NOT_ALLOWED
+        - ATTACHMENT_HAS_MACROS
         # Word imports
         - IMPORT_CONFLICT
         - IMPORT_QUOTA_EXCEEDED
@@ -2583,10 +2599,11 @@ components:
       description: |
         What still references a row whose permanent delete answered
         `RESOURCE_REFERENCED`, carried as `details.referencedBy` by
-        `deleteClass` and `deleteUser`. `other` is a reference the server does
-        not name. Later releases add values; a client treats an unknown one as
-        `other`.
-      enum: [assignments, attempts, audit, members, owned_content, other]
+        `deleteClass` and `deleteUser`. `messages` is a class channel with posts,
+        or an account's messages, threads or files. `other` is a reference the
+        server does not name. Later releases add values; a client treats an
+        unknown one as `other`.
+      enum: [assignments, attempts, audit, members, messages, owned_content, other]
 
     MediaReplacementCounts:
       type: object
@@ -3771,12 +3788,16 @@ components:
         A class as its student sees it (S-10): the name, who teaches it, when
         and where it meets, and when they joined. Never the join code, a count,
         the roster or an average.
-      required: [id, name, description, teacherName, teacherAvatarUrl, scheduleLabel, room, joinedAt]
+      required: [id, name, description, teacherId, teacherName, teacherAvatarUrl, scheduleLabel, room, joinedAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
         name: { type: string }
         description: { type: [string, 'null'] }
+        teacherId:
+          type: [string, 'null']
+          format: uuid
+          description: The class's own teacher, so the class card can open their thread (`getStudentDirectThread`).
         teacherName:
           type: [string, 'null']
           description: The display name of the class's own teacher.
@@ -6572,7 +6593,7 @@ components:
     TeacherSummary:
       type: object
       additionalProperties: false
-      required: [liveAssignments, answersToGrade, unreadNotifications, sharedWithMe]
+      required: [liveAssignments, answersToGrade, unreadNotifications, sharedWithMe, unreadMessages]
       description: Cheap nav counts in the caller's own teaching scope, for an Admin too.
       properties:
         liveAssignments:
@@ -6591,6 +6612,10 @@ components:
           type: integer
           minimum: 0
           description: Live grants to the caller, the muted count beside "Shared with me".
+        unreadMessages:
+          type: integer
+          minimum: 0
+          description: Messages past the caller's read pointers, not counting their own, over their threads. The nav shows "99+" above 99.
 
     ClosingAssignment:
       type: object
@@ -7399,6 +7424,13 @@ components:
         | `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |
         | `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |
         | `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |
+        | `message.received` | a teacher | `senderName`, `count`, `excerpt` |
+        | `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |
+
+        A message item is one per reader per thread: it is written again,
+        unread, with the new `count` while the thread stays unread, and marked
+        read when the reader's pointer passes it. `excerpt` is the newest
+        message's first 80 characters; it lives only in the reader's own bell.
 
         The three `ai.*` kinds are for the teacher's bell. `ai.credit_request`
         is written for every holder of `ai.credits.manage`, who reads it in the
@@ -7424,6 +7456,8 @@ components:
         - class.teacher_changed
         - content.shared
         - test.published_by_collaborator
+        - message.received
+        - message.from_teacher
 
     NotificationAudience:
       type: string
@@ -7444,9 +7478,12 @@ components:
       description: |
         One switch of the notification settings. `attempt.submitted`,
         `attempt.flagged` and `assignment.closing` are the teacher's;
-        `assignment.due_soon` and `result.ready` the student's. A switch
-        governs the kind of the same name, and `assignment.due_soon` also
-        governs `assignment.opened` and `assignment.extended`. `class.joined`
+        `assignment.due_soon` and `result.ready` the student's;
+        `message.received` both ("New message" for a teacher, "Messages from
+        teachers" for a student). A switch governs the kind of the same name,
+        `assignment.due_soon` also governs `assignment.opened` and
+        `assignment.extended`, and `message.received` also governs
+        `message.from_teacher`. `class.joined`
         `join_codes.rotated`, `class.teacher_changed`, `content.shared` and
         `test.published_by_collaborator` have no switch: the sharer's "Send a
         notification" decides the first, and the owner always hears of the
@@ -7457,6 +7494,7 @@ components:
         - assignment.closing
         - assignment.due_soon
         - result.ready
+        - message.received
 
     NotificationParams:
       type: object
@@ -7495,6 +7533,8 @@ components:
         message: { type: string, minLength: 1, maxLength: 500, description: 'The sharer''s own words, as they wrote them (`content.shared`).' }
         editorName: { type: string, minLength: 1, maxLength: 200, description: The co-editor who published (`test.published_by_collaborator`). }
         version: { type: integer, minimum: 1, description: The version a co-editor published. }
+        senderName: { type: string, minLength: 1, maxLength: 200, description: Who wrote the newest message (`message.*`). }
+        excerpt: { type: string, minLength: 1, maxLength: 80, description: 'The newest message''s first 80 characters, or its file''s name (`message.*`).' }
 
     NotificationTarget:
       type: object
@@ -7509,16 +7549,26 @@ components:
         route:
           type: string
           description: |
-            `assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`
-            and `test` are pages of the teaching workspace; `result` and
-            `studentAssignment` are the student's result and the student's
-            page of an assignment.
-          enum: [assignment, attempt, grading, classes, result, studentAssignment, sharedWithMe, test]
+            `assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`,
+            `test` and `messages` are pages of the teaching workspace;
+            `result`, `studentAssignment` and `studentMessages` are the
+            student's result, the student's page of an assignment and the
+            student's Messages.
+          enum: [assignment, attempt, grading, classes, result, studentAssignment, sharedWithMe, test, messages, studentMessages]
         assignmentId: { $ref: '#/components/schemas/Uuid' }
         attemptId: { $ref: '#/components/schemas/Uuid' }
         testId:
           $ref: '#/components/schemas/Uuid'
           description: Present for `test`.
+        studentId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`messages`: the direct thread with this student.'
+        teacherId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`studentMessages`: the direct thread with this teacher.'
+        classId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`studentMessages`: the channel of this class.'
 
     Notification:
       type: object
@@ -7552,17 +7602,338 @@ components:
     NotificationPreferences:
       type: array
       description: Every `NotificationEvent` once. The server answers them in the enum's order.
-      minItems: 5
-      maxItems: 5
+      minItems: 6
+      maxItems: 6
       items: { $ref: '#/components/schemas/NotificationPreference' }
 
     MySummary:
       type: object
       description: What the caller's shell shows before any page is open.
-      required: [unreadNotifications]
+      required: [unreadNotifications, unreadMessages]
       additionalProperties: false
       properties:
         unreadNotifications: { type: integer, minimum: 0 }
+        unreadMessages:
+          type: integer
+          minimum: 0
+          description: A student's unread messages over their threads (the top bar's Messages button); 0 for staff, whose count is `TeacherSummary.unreadMessages`.
+
+    # --------------------------------------------------------------- messages
+
+    MessageAttachment:
+      type: object
+      description: |
+        A file a staff member attached (D17): PDF, Word (DOCX or DOC), PNG,
+        JPEG, MP3 or M4A, at most 20 MiB, typed by sniffing its content. It is
+        fetched through a five-minute signed URL that downloads it under
+        `filename`.
+      required: [id, filename, bytes, mimeType]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        filename: { type: string, minLength: 1, maxLength: 200 }
+        bytes: { type: integer, minimum: 1, maximum: 20971520 }
+        mimeType:
+          type: string
+          enum:
+            - application/pdf
+            - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+            - application/msword
+            - image/png
+            - image/jpeg
+            - audio/mpeg
+            - audio/mp4
+
+    AttachmentUrl:
+      type: object
+      required: [url, expiresAt]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          description: A presigned GET valid five minutes that downloads the file as an attachment under its filename, with its sniffed type.
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    MessagePreview:
+      type: object
+      description: |
+        The newest message of a thread, as a row of the list shows it. The
+        client words "Attachment · {filename}" from `attachmentName` when
+        `text` is null.
+      required: [text, attachmentName, mine]
+      additionalProperties: false
+      properties:
+        text: { type: [string, 'null'], maxLength: 120, description: "The body's first 120 characters, on one line." }
+        attachmentName: { type: [string, 'null'] }
+        mine: { type: boolean, description: The caller sent it. }
+
+    StaffThreadRef:
+      type: object
+      description: Which thread a row opens. A class channel names its class, a direct thread its student.
+      required: [kind, classId, studentId]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [class, direct] }
+        classId: { type: [string, 'null'], format: uuid }
+        studentId: { type: [string, 'null'], format: uuid }
+
+    StaffThread:
+      type: object
+      description: |
+        A row of the staff Messages list. A class row's `title` is the class's
+        name and `studentCount` its active students. A direct row's `title` is
+        the student's name and `classNames` the caller's classes the student
+        is in: empty, with `former`, when the student was in one of the
+        caller's classes and is in none now ("Former student"). A `candidate`
+        is a student the caller may write to and has no thread with yet,
+        listed only for a search: nothing exists until the first post.
+      required: [thread, title, avatarUrl, classNames, studentCount, former, candidate, disabled, lastMessageAt, preview, unread]
+      additionalProperties: false
+      properties:
+        thread: { $ref: '#/components/schemas/StaffThreadRef' }
+        title: { type: string }
+        avatarUrl: { type: [string, 'null'], description: "A direct row's student photo, a presigned GET valid 24 hours; `null` for a class or when there is none." }
+        classNames: { type: array, items: { type: string } }
+        studentCount: { type: [integer, 'null'], minimum: 0, description: A class row's active students; `null` on a direct row. }
+        former: { type: boolean }
+        candidate: { type: boolean }
+        disabled: { type: boolean, description: A direct row's student account is disabled. }
+        lastMessageAt: { type: [string, 'null'], format: date-time, description: '`null` for a class channel nobody has posted in, and for a candidate.' }
+        preview:
+          oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }]
+        unread: { type: integer, minimum: 0, description: "Messages past the caller's read pointer, not counting their own." }
+
+    MessageSender:
+      type: object
+      required: [id, name, avatarUrl]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+
+    StaffMessageSender:
+      type: object
+      required: [id, name, avatarUrl, side]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        side: { type: string, enum: [staff, student] }
+
+    SeenBy:
+      type: object
+      description: 'An announcement''s "Seen by {seen} of {of}": `of` counts the class''s active students now, and `seen` those whose read pointer has passed the post.'
+      required: [seen, of]
+      additionalProperties: false
+      properties:
+        seen: { type: integer, minimum: 0 }
+        of: { type: integer, minimum: 0 }
+
+    StaffMessage:
+      type: object
+      description: A message as staff read it. Messages are never edited or deleted.
+      required: [id, sender, body, attachment, createdAt, mine]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        sender: { $ref: '#/components/schemas/StaffMessageSender' }
+        body: { type: [string, 'null'], description: Plain text. A client renders it as text and links http(s) addresses; never HTML. }
+        attachment:
+          oneOf: [{ $ref: '#/components/schemas/MessageAttachment' }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        mine: { type: boolean }
+        seenBy:
+          $ref: '#/components/schemas/SeenBy'
+          description: Present on a class channel's posts only.
+
+    StudentMessage:
+      type: object
+      description: |
+        A message as a student reads it: its own schema, never a projection
+        of `StaffMessage` (D17, DG-91). It carries no read receipts, no member
+        count and no attempt events.
+      required: [id, sender, body, attachment, createdAt, mine]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        sender: { $ref: '#/components/schemas/MessageSender' }
+        body: { type: [string, 'null'] }
+        attachment:
+          oneOf: [{ $ref: '#/components/schemas/MessageAttachment' }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        mine: { type: boolean }
+
+    ContextEvent:
+      type: object
+      description: |
+        A flagged attempt of the thread's student on an assignment the reader
+        can read, shown in the stream as a card at `at`. Computed when the
+        thread is read, never stored as a message, and never unread.
+      required: [attemptId, assignmentId, title, focusLost, at]
+      additionalProperties: false
+      properties:
+        attemptId: { $ref: '#/components/schemas/Uuid' }
+        assignmentId: { $ref: '#/components/schemas/Uuid' }
+        title: { type: string, description: The test's title. }
+        focusLost: { type: integer, minimum: 0 }
+        at: { $ref: '#/components/schemas/Timestamp' }
+
+    StaffDirectThreadPeer:
+      type: object
+      required: [id, name, avatarUrl, classes, former, disabled, canPost]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classes:
+          type: array
+          description: The caller's classes the student is in now, for Details.
+          items: { $ref: '#/components/schemas/PersonRef' }
+        former: { type: boolean, description: The student was in a class of the caller's and is in none now. }
+        disabled: { type: boolean }
+        canPost:
+          type: boolean
+          description: A post would be accepted. False when the account is disabled or no longer a student; the composer then gives way to a sentence.
+
+    StaffDirectThread:
+      type: object
+      required: [student, messages, contextEvents, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        student: { $ref: '#/components/schemas/StaffDirectThreadPeer' }
+        messages:
+          type: array
+          description: Oldest first.
+          items: { $ref: '#/components/schemas/StaffMessage' }
+        contextEvents:
+          type: array
+          description: The student's flagged attempts from 24 hours before the thread's first message, oldest first. Empty while the thread has no message.
+          items: { $ref: '#/components/schemas/ContextEvent' }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StaffClassThreadClass:
+      type: object
+      required: [id, name, archived, studentCount]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        archived: { type: boolean, description: An archived class's channel stays readable and takes no post. }
+        studentCount: { type: integer, minimum: 0, description: 'Active students, "Sent to all {n} students".' }
+
+    StaffClassThread:
+      type: object
+      required: [class, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        class: { $ref: '#/components/schemas/StaffClassThreadClass' }
+        messages:
+          type: array
+          description: Oldest first, each with `seenBy`.
+          items: { $ref: '#/components/schemas/StaffMessage' }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StaffMessagePost:
+      type: object
+      description: A message is text, a file, or both; one of the two is required.
+      required: [clientId]
+      additionalProperties: false
+      properties:
+        clientId:
+          $ref: '#/components/schemas/Uuid'
+          description: Made by the client for this message. Sending it again returns the message it made, so a retried send never posts twice.
+        body: { type: [string, 'null'], minLength: 1, maxLength: 4000, description: Trimmed; empty is none. }
+        attachmentId:
+          type: [string, 'null']
+          format: uuid
+          description: A file the caller uploaded with `uploadMessageAttachment` and has not sent.
+
+    StudentMessagePost:
+      type: object
+      required: [clientId, body]
+      additionalProperties: false
+      properties:
+        clientId: { $ref: '#/components/schemas/Uuid' }
+        body: { type: string, minLength: 1, maxLength: 4000, description: Trimmed. Students send text only. }
+
+    MessageReadPointer:
+      type: object
+      required: [lastReadMessageId]
+      additionalProperties: false
+      properties:
+        lastReadMessageId:
+          $ref: '#/components/schemas/Uuid'
+          description: The newest message on the reader's screen. The pointer only moves forward; an older id is a no-op.
+
+    StudentThreadRef:
+      type: object
+      required: [kind, classId, teacherId]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [class, direct] }
+        classId: { type: [string, 'null'], format: uuid }
+        teacherId: { type: [string, 'null'], format: uuid }
+
+    StudentThread:
+      type: object
+      description: |
+        A row of the student's Messages. A direct row's `title` is the
+        teacher's name and `classNames` the student's classes they teach
+        ("Your teacher · {classes}"), empty with `former` when the student has
+        left them all ("Former teacher"). A class row is a channel with at
+        least one post ("Class announcements"), titled with the class's name.
+      required: [thread, title, avatarUrl, classNames, former, lastMessageAt, preview, unread]
+      additionalProperties: false
+      properties:
+        thread: { $ref: '#/components/schemas/StudentThreadRef' }
+        title: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classNames: { type: array, items: { type: string } }
+        former: { type: boolean }
+        lastMessageAt: { type: [string, 'null'], format: date-time }
+        preview:
+          oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }]
+        unread: { type: integer, minimum: 0 }
+
+    StudentDirectThreadTeacher:
+      type: object
+      required: [id, name, avatarUrl, classNames, former, canPost]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classNames: { type: array, items: { type: string } }
+        former: { type: boolean }
+        canPost: { type: boolean, description: A post would be accepted. }
+
+    StudentDirectThread:
+      type: object
+      required: [teacher, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        teacher: { $ref: '#/components/schemas/StudentDirectThreadTeacher' }
+        messages: { type: array, description: Oldest first., items: { $ref: '#/components/schemas/StudentMessage' } }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StudentClassThread:
+      type: object
+      description: 'A class channel, read-only for students: "Only your teacher can post here. Reply to {teacher} directly."'
+      required: [readOnly, class, teacher, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        readOnly: { type: boolean, const: true }
+        class: { $ref: '#/components/schemas/PersonRef' }
+        teacher: { $ref: '#/components/schemas/MessageSender' }
+        messages: { type: array, description: Oldest first., items: { $ref: '#/components/schemas/StudentMessage' } }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
 
     # ---------------------------------------------------------------- sharing
 
@@ -11184,6 +11555,361 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ================================================================ teacher/messages
+
+  /teacher/messages/threads:
+    get:
+      operationId: listStaffThreads
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: The staff Messages list
+      description: |
+        Every class channel of a class the caller can read and that is not
+        archived, posted in or not, and the caller's direct threads, newest
+        activity first (a channel nobody has posted in sorts last, by name).
+        A direct thread is readable by its two participants only; `scope.all`
+        opens none (D17, DG-08).
+
+        `q` matches the student's and the class's names, accent-insensitively.
+        With `q`, the answer also lists, after the threads, up to 20 students
+        the caller may start a thread with and has none with, as
+        `candidate` rows.
+
+        The rows are under `threads`, not `items`: they mix two kinds, and a
+        student two teachers teach is rightly in both teachers' lists.
+      parameters:
+        - name: tab
+          in: query
+          required: false
+          schema: { type: string, enum: [all, direct, classes], default: all }
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [threads]
+                additionalProperties: false
+                properties:
+                  threads: { type: array, items: { $ref: '#/components/schemas/StaffThread' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /teacher/messages/students/{studentId}:
+    parameters:
+      - { name: studentId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStaffDirectThread
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      description: |
+        The caller's direct thread with a student, empty until the first
+        post. `studentId` is a `messaging-peer`: a student the caller has a
+        thread with, has taught (now or before), or created. Any other id
+        answers 404, an admin's included, and so does the thread of another
+        staff member with the same student.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffDirectThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postStaffDirectMessage
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: body, name: /clientId, kind: none }
+        - { in: body, name: /attachmentId, kind: attachment }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Write to a student
+      description: |
+        The first post makes the thread. A thread that exists stays open to
+        both of its participants after the student leaves the caller's
+        classes. Writing first needs a tie: the student is, or was, in a
+        class of the caller's, or the caller created the account; and the
+        student must be enabled and still a student. Not audited (D17).
+
+        Limited to 30 a minute and 500 a day per staff member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `MESSAGING_NOT_ALLOWED` — the student's account is disabled or no longer a student, or no thread exists and the pair does not qualify. The thread stays readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — neither a body nor a file.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/students/{studentId}/read:
+    parameters:
+      - { name: studentId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStaffDirectThreadRead
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Move the caller's read pointer in a direct thread
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/messages/classes/{classId}:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStaffClassThread
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      description: |
+        A class's announcement channel, for anyone who can read the class
+        (its teacher, or `scope.all`). Each post carries `seenBy`.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffClassThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postClassAnnouncement
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /clientId, kind: none }
+        - { in: body, name: /attachmentId, kind: attachment }
+      x-permission: teaching.classes.write
+      tags: [teacher-messages]
+      summary: Post an announcement to a class
+      description: |
+        Reaches every active student of the class; replies come back as
+        direct messages. An announcement can be neither edited nor deleted.
+        Not audited (D17).
+
+        Limited to 30 a minute and 500 a day per staff member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '201':
+          description: Posted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `CLASS_ARCHIVED` — restore the class first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — neither a body nor a file.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/classes/{classId}/read:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStaffClassThreadRead
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Move the caller's read pointer in a class channel
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/messages/attachments:
+    post:
+      operationId: uploadMessageAttachment
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Upload a file to send in a message
+      description: |
+        The file waits, unsent, until a post names it; one left unsent for 24
+        hours is removed. The type comes from sniffing the content, never
+        from the part's `Content-Type` or the extension: PDF, Word (DOCX or
+        DOC), PNG, JPEG, MP3 or M4A. WebP is refused. An image's header must
+        declare at most 10000 × 10000 pixels; nothing is decoded further, and
+        the file is kept as it came. A Word file is never opened or
+        converted on the server, and one that carries macros is refused.
+
+        Limited to 20 an hour per staff member.
+      x-max-body-bytes: 21037056
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored, not yet sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageAttachment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: >-
+            `MEDIA_TOO_LARGE` — over 20 MB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '415':
+          description: |
+            `MEDIA_TYPE_UNSUPPORTED` — not one of the accepted types (a WebP,
+            a spreadsheet, a ZIP named `.docx`). `IMAGE_DIMENSIONS` — an image
+            larger than 10000 × 10000. `ATTACHMENT_HAS_MACROS` — a Word file
+            with macros (a DOCM, or a DOC with a `Macros` storage): save it
+            without them and attach it again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getStaffMessageAttachmentUrl
+      x-resource:
+        - { in: path, name: id, kind: attachment }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Mint the download URL of a message's file
+      description: |
+        For the participants of the thread whose message holds the file, and
+        its uploader before it is sent. Anyone else gets 404, an admin
+        included. The URL is a credential, so the answer is not stored.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentUrl' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # =============================================================== teacher/media
 
   /teacher/imports:
@@ -13730,7 +14456,8 @@ paths:
             created), `attempts`, `audit` (audit history it acted in),
             `owned_content` (tests, questions, question groups, media, classes,
             join codes, published versions or Word imports it owns or created),
-            or `other`.
+            `messages` (a message it sent, a thread it is in, a file it
+            uploaded), or `other`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -15701,7 +16428,7 @@ paths:
             `details.referencedBy` (`ReferencedBy`) always names what:
             `assignments` (an assignment targets the class), `members` (a
             membership in another class came through one of its join codes),
-            or `other`.
+            `messages` (its announcement channel has posts), or `other`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -17014,6 +17741,232 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ======================================================================== me
+
+  /app/messages/threads:
+    get:
+      operationId: listStudentThreads
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: The student's Messages list
+      description: |
+        The student's direct threads, and the channels of the classes they
+        are in that have at least one post, newest first.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [threads]
+                additionalProperties: false
+                properties:
+                  threads: { type: array, items: { $ref: '#/components/schemas/StudentThread' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /app/messages/teachers/{teacherId}:
+    parameters:
+      - { name: teacherId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStudentDirectThread
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      description: |
+        The student's thread with a teacher: one who teaches a class the
+        student is in, or one they already have a thread with. `teacherId`
+        is a user id whose eligibility the operation checks (not an owned
+        resource); any other id answers 404.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentDirectThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postStudentDirectMessage
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: body, name: /clientId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Write to a teacher
+      description: |
+        Text only. A student may write first to the teacher of a class they
+        are an active member of, and goes on writing in a thread that exists
+        after leaving the class; they cannot write first to a teacher of a
+        class they left.
+
+        Limited to 10 a minute and 200 a day per student.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudentMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentMessage' }
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `MESSAGING_NOT_ALLOWED` — the teacher's account is disabled. The thread stays readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /app/messages/teachers/{teacherId}/read:
+    parameters:
+      - { name: teacherId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStudentDirectThreadRead
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Move the caller's read pointer in a direct thread
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /app/messages/classes/{classId}:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStudentClassThread
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      description: |
+        The announcements of a class the student is in. Read-only: a
+        student's post here answers 403 (there is no post operation).
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentClassThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /app/messages/classes/{classId}/read:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStudentClassThreadRead
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Move the caller's read pointer in a class channel
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /app/messages/attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getStudentMessageAttachmentUrl
+      x-resource:
+        - { in: path, name: id, kind: attachment }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Mint the download URL of a message's file
+      description: |
+        For the participants of the thread whose message holds the file, and
+        its uploader before it is sent. Anyone else gets 404, an admin
+        included. The URL is a credential, so the answer is not stored.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentUrl' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /me/notifications:
     get:
