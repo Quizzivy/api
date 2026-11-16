@@ -108,7 +108,7 @@ func deref(t *time.Time) time.Time {
 // commit, the outbox is woken if it wrote an email.
 func (s *Schedule) Locked(ctx context.Context, fn func(domain.ScheduledRun) error) (bool, error) {
 	var locked bool
-	run := &scheduledRun{store: s}
+	run := &scheduledRun{}
 	err := s.InTx(ctx, "notifications: scheduled run", func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(73819, $1)`, SchedulerLockKey).Scan(&locked); err != nil {
 			return fmt.Errorf("notifications: the scheduler's lock: %w", err)
@@ -130,7 +130,6 @@ func (s *Schedule) Locked(ctx context.Context, fn func(domain.ScheduledRun) erro
 }
 
 type scheduledRun struct {
-	store *Schedule
 	tx    pgx.Tx
 	mail  *Mail
 	wrote bool

@@ -21,14 +21,6 @@ const (
 	DefaultZone = "Asia/Ho_Chi_Minh"
 )
 
-// Before is how long before a close the reminder of lead l falls.
-func (l Lead) Before() time.Duration {
-	if l == LeadHour {
-		return time.Hour
-	}
-	return 24 * time.Hour
-}
-
 // Upcoming is what the next run of the scheduler waits for, as the store
 // reads it after now: the earliest due-soon moment of any student (a close,
 // overrides included, less a day or an hour), the earliest closing warning
