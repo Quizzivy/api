@@ -17,8 +17,15 @@ type Editor struct {
 }
 
 // LastWrite is a row's last write. By is nil when no one is recorded: a row
-// the R6 binary last wrote, an account since deleted, or an ownership
-// transfer, which is no one's edit. At is the row's updated_at.
+// no R7 write has touched (the R6 binary leaves the column alone), an account
+// since deleted, or an ownership transfer, which is no one's edit. At is the
+// row's updated_at.
+//
+// By is wrong, not nil, for a row the R6 binary updated after an R7 write:
+// the trigger moves updated_at and updated_by keeps the R7 writer. On the way
+// in that is only a row R7 wrote while R6 still served, during the deploy's
+// overlap; after a rollback to v0.13 it is every row v0.13 updates, until R7
+// next writes it. Migration 00161 says how to clear them on the way back.
 type LastWrite struct {
 	By *Editor
 	At time.Time
