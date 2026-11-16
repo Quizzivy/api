@@ -17,6 +17,12 @@ type Repository interface {
 	Create(ctx context.Context, in CreateInput) (Test, error)
 	Update(ctx context.Context, in UpdateRequest) (Test, error)
 	Duplicate(ctx context.Context, in DuplicateInput) (Test, error)
+	// Copy makes the actor's own, independent copy of a test they can read
+	// ("Make a copy"); Duplicate keeps the owner's references.
+	Copy(ctx context.Context, in DuplicateInput) (Test, error)
+	// CopyQuestions copies questions the actor can read into the bank of the
+	// owner of a test the actor can edit, answering the copies in order.
+	CopyQuestions(ctx context.Context, in QuestionCopies) ([]string, error)
 	Delete(ctx context.Context, req Request, now time.Time) error
 	DeleteVersion(ctx context.Context, req VersionRequest, now time.Time) error
 	SetCurrentVersion(ctx context.Context, req VersionRequest, now time.Time) (Test, error)

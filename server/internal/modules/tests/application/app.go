@@ -33,6 +33,8 @@ type Commands struct {
 	Delete                 cqrs.CommandHandler[command.Delete, cqrs.Nothing]
 	Create                 cqrs.CommandHandler[command.Create, domain.Test]
 	Duplicate              cqrs.CommandHandler[command.Duplicate, domain.Test]
+	Copy                   cqrs.CommandHandler[command.Copy, domain.Test]
+	CopyQuestions          cqrs.CommandHandler[command.CopyQuestions, []string]
 	Publish                cqrs.CommandHandler[command.Publish, domain.Version]
 	Update                 cqrs.CommandHandler[command.Update, domain.Test]
 	EditQuestion           cqrs.CommandHandler[command.EditQuestion, domain.QuestionEdited]
@@ -70,6 +72,8 @@ func New(repo domain.Repository) *Application {
 			Delete:                 command.DeleteHandler{Service: service},
 			Create:                 command.CreateHandler{Service: service},
 			Duplicate:              command.DuplicateHandler{Service: service},
+			Copy:                   command.CopyHandler{Service: service},
+			CopyQuestions:          command.CopyQuestionsHandler{Service: service},
 			Publish:                command.PublishHandler{Publisher: publisher},
 			Update:                 command.UpdateHandler{Service: service},
 			EditQuestion:           command.EditQuestionHandler{Service: service},

@@ -43,7 +43,7 @@ func (s *Postgres) Duplicate(ctx context.Context, in domain.DuplicateInput) (dom
 		if err != nil {
 			return domain.Test{}, err
 		}
-		if err := s.copyDraftGraph(ctx, tx, copyID, owner, draft, in); err != nil {
+		if err := s.copyDraftGraph(ctx, tx, copyID, owner, draft, in, sameQuestion); err != nil {
 			return domain.Test{}, err
 		}
 	}
@@ -70,6 +70,10 @@ func (s *Postgres) Duplicate(ctx context.Context, in domain.DuplicateInput) (dom
 	}
 	return created, nil
 }
+
+// sameQuestion is a duplicate's outline: the copy names the source's own
+// bank questions.
+func sameQuestion(id string) string { return id }
 
 // lockDuplicateSource locks the test a duplicate copies. Duplicating keeps
 // references to the source's bank questions, so it is the owner's (D4); a

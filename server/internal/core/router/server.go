@@ -46,7 +46,6 @@ type Server struct {
 	exportshttp.Exports
 	leadshttp.Leads
 	sharinghttp.Sharing
-	R7Pending
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

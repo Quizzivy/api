@@ -11,18 +11,23 @@ import (
 	"quizzivy/internal/modules/tests/domain"
 )
 
-// QuestionWrites is the questions module's side of an edit made in a test's
-// context, run in this module's transaction: ContextUse reads what the
-// copy-on-write rule decides on under the question's row lock, and
-// WriteInContext writes the edit in place or as a fork (questions'
-// repositories.WriteInContext).
+// QuestionWrites is the questions module's side of the bank writes this
+// module makes in its own transaction. For an edit made in a test's context,
+// ContextUse reads what the copy-on-write rule decides on under the
+// question's row lock, and WriteInContext writes the edit in place or as a
+// fork (questions' repositories.WriteInContext). For a copy (copyTest,
+// copyQuestionsForTest), CopyQuestions makes independent copies of bank
+// questions the reader can read, under the sources' row locks and the media's
+// (questions' repositories.CopyQuestions).
 type QuestionWrites interface {
 	ContextUse(ctx context.Context, tx pgx.Tx, questionID string, within questions.EditContext) (questions.QuestionUse, error)
 	WriteInContext(ctx context.Context, tx pgx.Tx, in questions.WriteInput, use questions.QuestionUse, within questions.EditContext) (questions.Question, bool, error)
+	CopyQuestions(ctx context.Context, tx pgx.Tx, in questions.Copy) ([]string, error)
 }
 
-// WithQuestionWrites supplies the question writes editTestQuestion makes in
-// the test's transaction. Without them EditQuestion is unavailable.
+// WithQuestionWrites supplies the question writes editTestQuestion and the
+// copies make in the test's transaction. Without them EditQuestion, Copy and
+// CopyQuestions are unavailable.
 func (s *Postgres) WithQuestionWrites(writes QuestionWrites) *Postgres {
 	s.writes = writes
 	return s

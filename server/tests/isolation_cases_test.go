@@ -276,8 +276,7 @@ const (
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
-	anyTeacher  = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
-	copyPending = "T-R7.7: make a copy"
+	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
 
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
 	budgetSpent        = "the third call in a minute is refused 429 (two a minute per user), so the caller's own id cannot be tried here; the bulk reset flow test resets the caller's own students beside another teacher's in one batch"
@@ -417,8 +416,8 @@ func isolationCases() map[string]isoCase {
 		"editTestQuestion": {fresh: freshDraftQuestion, body: func(_ *iso, own *party, slot string) any {
 			return withProseMedia(choiceInput(own), own, slot)
 		}},
-		"copyTest":             {pending: copyPending},
-		"copyQuestionsForTest": {pending: copyPending, body: fixed(map[string]any{"questionIds": []any{""}})},
+		"copyTest":             {},
+		"copyQuestionsForTest": {body: fixed(map[string]any{"questionIds": []any{""}})},
 
 		"createWordImport": {},
 		"listWordImports":  {},
