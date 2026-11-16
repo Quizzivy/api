@@ -301,9 +301,10 @@ func TestAMessageEmailWaitsTenMinutesAndIsDroppedOnceTheThreadIsRead(t *testing.
 }
 
 // TestAThreadEmailsOneReaderAtMostOnceInThirtyMinutes fails when a second
-// message writes a second email while one waits, when the email after a sent
-// one is due sooner than thirty minutes after it, or when one a Preparer
-// dropped holds back the next.
+// message writes a second email while one waits, or leaves it due sooner than
+// ten minutes after itself, when the email after a sent one is due sooner
+// than thirty minutes after it, or when one a Preparer dropped holds back the
+// next.
 func TestAThreadEmailsOneReaderAtMostOnceInThirtyMinutes(t *testing.T) {
 	w := newDueWorld(t)
 	thread := w.direct(w.creator, w.student)
@@ -313,6 +314,9 @@ func TestAThreadEmailsOneReaderAtMostOnceInThirtyMinutes(t *testing.T) {
 	first := w.outbox(w.creator)
 	if len(first) != 1 {
 		t.Fatalf("two messages while the first email waits queued %d", len(first))
+	}
+	if want := w.now.Add(11 * time.Minute); !first[0].deliverAfter.Equal(want) {
+		t.Errorf("the waiting email is due at %v after a second message, want %v, ten minutes after it", first[0].deliverAfter, want)
 	}
 	sent := w.now.Add(10 * time.Minute)
 	w.exec(`UPDATE app.email_outbox SET sent_at = $2 WHERE dedupe_key = $1`, first[0].key, sent)

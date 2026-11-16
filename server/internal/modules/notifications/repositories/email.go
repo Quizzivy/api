@@ -73,10 +73,11 @@ func (m *Mail) Recipient(ctx context.Context, userID string, sw *domain.Event) (
 // (application/email.Outbox): nothing when its switch is off for its
 // recipient, their address otherwise, and e's ids as the template's params.
 // A digest whose bucket already has its row adds its paper to that row's
-// (gather). A message's email writes nothing while an email about the
-// thread waits for the reader, is keyed by the last one closed, so that two
-// concurrent messages write one, and is held until
-// domain.MessageEmailSpacing after the last one sent.
+// (gather). A message's email writes no second row while an email about the
+// thread waits for the reader, but holds that one until
+// domain.MessageEmailDelay after this message; otherwise it is keyed by the
+// last one closed, so that two concurrent messages write one, and is held
+// until domain.MessageEmailSpacing after the last one sent.
 func (m *Mail) Enqueue(ctx context.Context, e domain.Email) (bool, error) {
 	if m.outbox == nil {
 		return false, errors.New("notifications: an email store without an outbox cannot enqueue")
@@ -173,6 +174,12 @@ func (m *Mail) gather(ctx context.Context, tx pgx.Tx, id, attemptID string, msg 
 	return wrote, err
 }
 
+// spaced reads the thread's last email to the reader, and waits for a
+// dispatcher that holds it, so that it sees what became of it. While that
+// email waits, it writes none beside it and holds it until msg's due time,
+// MessageEmailDelay after this message, so that a reader who opens the thread
+// meanwhile still gets none. Otherwise it keys msg by that email and holds it
+// until MessageEmailSpacing after it was sent.
 func spaced(ctx context.Context, tx pgx.Tx, userID, thread string, msg *email.Mail) (bool, error) {
 	var last string
 	var sentAt *time.Time
@@ -182,13 +189,19 @@ func spaced(ctx context.Context, tx pgx.Tx, userID, thread string, msg *email.Ma
 		  FROM app.email_outbox o
 		 WHERE o.to_user_id = $1::uuid AND o.template = $2 AND o.params->>'conversationId' = $3
 		 ORDER BY o.created_at DESC, o.id DESC
-		 LIMIT 1`, userID, string(email.MessageReceived), thread).Scan(&last, &sentAt, &waiting)
+		 LIMIT 1
+		   FOR UPDATE`, userID, string(email.MessageReceived), thread).Scan(&last, &sentAt, &waiting)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		last = "first"
 	case err != nil:
 		return false, fmt.Errorf("notifications: a thread's last email: %w", err)
 	case waiting:
+		if _, err := tx.Exec(ctx, `
+			UPDATE app.email_outbox SET deliver_after = greatest(deliver_after, $2::timestamptz)
+			 WHERE id = $1::uuid AND held_by IS NULL`, last, msg.DeliverAfter); err != nil {
+			return false, fmt.Errorf("notifications: hold a thread's waiting email: %w", err)
+		}
 		return false, nil
 	}
 	msg.DedupeKey += ":" + last
