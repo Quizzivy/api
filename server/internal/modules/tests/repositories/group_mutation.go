@@ -21,7 +21,7 @@ func lockGroupMutation(ctx context.Context, tx pgx.Tx, in domain.GroupMutation) 
 		return domain.StoredGroup{}, "", err
 	}
 	if testID != nil {
-		if _, err := checkVersion(ctx, tx, *testID, in.ExpectedTestUpdatedAt, in.Scope, domain.ActionEdit); err != nil {
+		if _, err := checkVersion(ctx, tx, *testID, in.ExpectedTestUpdatedAt, in.Scope); err != nil {
 			return domain.StoredGroup{}, "", err
 		}
 		var archived bool

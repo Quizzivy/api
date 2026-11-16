@@ -413,11 +413,7 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		UpdatedAt:          q.UpdatedAt,
 	}
 	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == domain.Essay, q.MaxWords)
-	if q.Owner != nil && q.Access != "" {
-		access := openapi.ContentAccess(q.Access)
-		out.Access = &access
-		out.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
-	}
+	readerAccess(&out, q)
 	if out.Tags == nil {
 		out.Tags = []string{}
 	}
@@ -466,6 +462,17 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		}
 	}
 	return out, h.contentAssets(ctx, q, &out)
+}
+
+// readerAccess sets the reader's access and the question's owner on out, where
+// the read carries them (a read by id, a write's answer).
+func readerAccess(out *openapi.AdminQuestion, q domain.Question) {
+	if q.Owner == nil || q.Access == "" {
+		return
+	}
+	access := openapi.ContentAccess(q.Access)
+	out.Access = &access
+	out.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
 }
 
 // contentAssets signs the media a question's prompt and explanation show

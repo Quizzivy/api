@@ -85,7 +85,7 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 }
 
 func lockMovedTest(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput) (string, error) {
-	reached, err := checkVersion(ctx, tx, in.TestID, in.ExpectedTestUpdatedAt, in.Scope, domain.ActionEdit)
+	reached, err := checkVersion(ctx, tx, in.TestID, in.ExpectedTestUpdatedAt, in.Scope)
 	if err != nil {
 		return "", err
 	}

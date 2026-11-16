@@ -20,7 +20,7 @@ func (s *Postgres) SetCurrentVersion(ctx context.Context, req domain.VersionRequ
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope, domain.ActionEdit)
+	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope)
 	if err != nil {
 		return domain.Test{}, err
 	}
@@ -43,7 +43,7 @@ func (s *Postgres) CreateDraftFromVersion(ctx context.Context, req domain.Versio
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope, domain.ActionEdit)
+	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope)
 	if err != nil {
 		return domain.Test{}, err
 	}

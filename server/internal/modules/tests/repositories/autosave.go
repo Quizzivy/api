@@ -116,13 +116,13 @@ func requireLegacyOutline(ctx context.Context, tx pgx.Tx, testID string) error {
 	return nil
 }
 
-// checkVersion locks the live test id for an action of scope's and refuses a
-// write based on a revision other than expected (domain.ErrStaleWrite). A test
-// the scope cannot read is domain.ErrNotFound, and a reader without the
-// action's right gets the refusal of Access.Allows, both before the revision
-// is compared.
-func checkVersion(ctx context.Context, tx pgx.Tx, id string, expected time.Time, scope access.Scope, action domain.Action) (reachedTest, error) {
-	reached, err := reachTest(ctx, tx, scope, id, action, testExclusive)
+// checkVersion locks the live test id for an edit of its draft by scope and
+// refuses a write based on a revision other than expected
+// (domain.ErrStaleWrite). A test the scope cannot read is domain.ErrNotFound,
+// and a reader who may not edit it gets domain.ErrReadOnly, both before the
+// revision is compared.
+func checkVersion(ctx context.Context, tx pgx.Tx, id string, expected time.Time, scope access.Scope) (reachedTest, error) {
+	reached, err := reachTest(ctx, tx, scope, id, domain.ActionEdit, testExclusive)
 	if err != nil {
 		return reachedTest{}, err
 	}
