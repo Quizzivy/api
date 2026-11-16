@@ -76,6 +76,7 @@ type isoCase struct {
 	excuse  map[string]string
 	blind   map[string]string
 	pending string
+	each    []isoCase
 }
 
 type iso struct {
@@ -278,7 +279,7 @@ func success(s sent) bool { return s.status >= 200 && s.status < 300 }
 
 func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
 	x.t.Helper()
-	own := x.b.with("share", uuid.NewString())
+	own := x.b
 	method, path, body := x.request(op, c, own, "", "")
 	if got := own.c.send(method, path, body); got.status != http.StatusNotImplemented {
 		x.t.Errorf("%s is pending (%s) yet answers %s: give it its isolation case", op.id, c.pending, answer(got))
@@ -289,6 +290,12 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 	x.t.Helper()
 	if c.pending != "" {
 		x.pendingAnswer(op, c)
+		return
+	}
+	for _, variant := range c.each {
+		x.substitute(op, variant)
+	}
+	if c.each != nil {
 		return
 	}
 	caller := func(p *party) *party {

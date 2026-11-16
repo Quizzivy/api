@@ -192,6 +192,8 @@ type party struct {
 	beacon  string
 	code    string
 	student *party
+	mate    *client
+	mateID  string
 }
 
 func (p *party) id(kind string) string {
@@ -260,6 +262,13 @@ func (w *world) teacherWorld(name string) *party {
 		"expectedUpdatedAt": test["updatedAt"], "title": "Đề cách ly có bản nháp " + name,
 	})
 
+	p.mate = w.signedIn(w.createStaff("teacher"))
+	p.mateID = id(p.mate.must(http.StatusOK, http.MethodGet, "/auth/me", nil))
+	p.ids["share"] = p.shareWith(p.c, p.ids["test"], p.mateID)
+	p.ids["shared-with-me"] = p.shareWith(p.mate, id(p.mate.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{
+		"title": "Đề của đồng nghiệp " + name + " " + nonce(w.t),
+	})), p.userID)
+
 	group := c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
 		"bundle": map[string]any{
 			"group":     map[string]any{"id": uuid.NewString(), "title": "Nhóm " + name, "members": []any{}, "stimuli": []any{}, "recordings": []any{}},
@@ -323,6 +332,17 @@ func (w *world) teacherWorld(name string) *party {
 		"media":             p.ids["media"],
 	}}
 	return p
+}
+
+func (p *party) shareWith(sharer *client, test, grantee string) string {
+	made := sharer.must(http.StatusCreated, http.MethodPost, "/teacher/shares", map[string]any{
+		"kind": "test", "resourceId": test, "granteeIds": []string{grantee}, "access": "use", "notify": false,
+	})
+	grants, _ := made["grants"].([]any)
+	if len(grants) != 1 {
+		p.c.w.t.Fatalf("sharing %s with %s made %v", test, grantee, made)
+	}
+	return id(grants[0].(map[string]any))
 }
 
 func (w *world) handedInShortAnswer(p *party, teacher, learner *client, name string) (question, attempt string) {

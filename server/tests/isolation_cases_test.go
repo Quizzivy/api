@@ -201,6 +201,22 @@ func freshSet(_ *iso, own *party) *party {
 	})))
 }
 
+func shareBody(kind string) func(*iso, *party, string) any {
+	return func(*iso, *party, string) any {
+		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
+	}
+}
+
+func freshShare(x *iso, own *party) *party {
+	test := freshTest(x, own).id("test")
+	return own.with("share", own.shareWith(own.c, test, own.mateID))
+}
+
+func freshSharedWithMe(x *iso, own *party) *party {
+	test := id(own.mate.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề chia sẻ dùng một lần " + nonce(x.t)}))
+	return own.with("shared-with-me", own.shareWith(own.mate, test, own.userID))
+}
+
 func freshPublishedTest(_ *iso, own *party) *party {
 	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
 	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề đã phát hành dùng một lần"})
@@ -247,9 +263,9 @@ const (
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
-	sharingPending = "T-R7.3: the sharing module"
-	editPending    = "T-R7.6: copy-on-write"
-	copyPending    = "T-R7.7: make a copy"
+	anyTeacher  = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
+	editPending = "T-R7.6: copy-on-write"
+	copyPending = "T-R7.7: make a copy"
 
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
 	budgetSpent        = "the third call in a minute is refused 429 (two a minute per user), so the caller's own id cannot be tried here; the bulk reset flow test resets the caller's own students beside another teacher's in one batch"
@@ -372,15 +388,19 @@ func isolationCases() map[string]isoCase {
 		},
 		"copyQuestionSet": {pending: copyPending},
 
-		"searchTeacherDirectory": {pending: sharingPending, query: map[string]string{"q": "lan"}},
-		"listShares":             {pending: sharingPending, query: map[string]string{"kind": "test"}},
-		"createShares": {pending: sharingPending, body: fixed(map[string]any{
-			"kind": "test", "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false,
-		})},
-		"updateShare":        {pending: sharingPending, body: fixed(map[string]any{"access": "edit"})},
-		"deleteShare":        {pending: sharingPending},
-		"listSharedWithMe":   {pending: sharingPending},
-		"removeSharedWithMe": {pending: sharingPending},
+		"searchTeacherDirectory": {query: map[string]string{"q": "lan"}},
+		"listShares": {each: []isoCase{
+			{query: map[string]string{"kind": "test"}},
+			{query: map[string]string{"kind": "question_set"}, as: map[string]string{"query resourceId": "question-set"}},
+		}},
+		"createShares": {each: []isoCase{
+			{body: shareBody("test"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}},
+			{body: shareBody("question_set"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}, as: map[string]string{"body /resourceId": "question-set"}},
+		}},
+		"updateShare":        {body: fixed(map[string]any{"access": "edit"})},
+		"deleteShare":        {fresh: freshShare},
+		"listSharedWithMe":   {},
+		"removeSharedWithMe": {as: map[string]string{"path shareId": "shared-with-me"}, fresh: freshSharedWithMe},
 
 		"editTestQuestion":     {pending: editPending, body: func(_ *iso, own *party, _ string) any { return choiceInput(own) }},
 		"copyTest":             {pending: copyPending},
