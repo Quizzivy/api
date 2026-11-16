@@ -14,6 +14,8 @@ import (
 
 var computedActions = []string{"ai.credit_request.approved", "ai.credit_request.declined"}
 
+var pendingActions = []string{"question.forked", "share.changed", "share.copied", "share.granted", "share.removed", "share.revoked"}
+
 func catalogued() map[string]domain.Action {
 	out := map[string]domain.Action{}
 	for _, a := range domain.Actions() {
@@ -63,8 +65,13 @@ func TestEveryActionTheServerWritesIsInTheCatalogue(t *testing.T) {
 func TestEveryActionInTheCatalogueIsStillWritten(t *testing.T) {
 	actions, _ := scanServer(t)
 	for _, a := range domain.Actions() {
-		if _, written := actions[a.Key]; !written && !slices.Contains(computedActions, a.Key) {
+		if _, written := actions[a.Key]; !written && !slices.Contains(computedActions, a.Key) && !slices.Contains(pendingActions, a.Key) {
 			t.Errorf("the catalogue holds %q, which no code writes any more: remove it here and from catalogs/audit-actions.json in Quizzivy/sdk", a.Key)
+		}
+	}
+	for _, key := range pendingActions {
+		if _, written := actions[key]; written {
+			t.Errorf("%q is written now: take it off pendingActions", key)
 		}
 	}
 }

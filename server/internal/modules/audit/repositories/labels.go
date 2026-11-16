@@ -63,6 +63,10 @@ var labelSources = []labelSource{
 		rows:     `SELECT g.id, g.title AS label FROM app.question_groups g`,
 	},
 	{
+		entities: []string{"question_set"},
+		rows:     `SELECT s.id, s.name AS label FROM app.question_sets s`,
+	},
+	{
 		entities: []string{"ai_credit_requests"},
 		rows:     `SELECT r.id, ` + userName + ` AS label FROM app.ai_credit_requests r JOIN app.users u ON u.id = r.user_id`,
 	},

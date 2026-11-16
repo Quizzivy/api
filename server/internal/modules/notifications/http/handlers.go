@@ -99,6 +99,7 @@ func toAPINotification(n domain.Notification) (openapi.Notification, error) {
 			Route:        openapi.NotificationTargetRoute(n.Target.Route),
 			AssignmentId: optionalID(n.Target.AssignmentID),
 			AttemptId:    optionalID(n.Target.AttemptID),
+			TestId:       optionalID(n.Target.TestID),
 		}
 	}
 	return out, nil

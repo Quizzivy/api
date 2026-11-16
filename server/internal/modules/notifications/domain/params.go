@@ -10,6 +10,7 @@ const (
 	maxTitle      = 300
 	maxName       = 200
 	maxClassNames = 5
+	maxMessage    = 500
 )
 
 // Params is what one kind's sentence is built from: plain values under the
@@ -36,6 +37,13 @@ type fields struct {
 	Credits      *int       `json:"credits,omitempty"`
 	TeacherName  *string    `json:"teacherName,omitempty"`
 	Decision     *string    `json:"decision,omitempty"`
+	SharerName   *string    `json:"sharerName,omitempty"`
+	ContentKind  *string    `json:"contentKind,omitempty"`
+	Name         *string    `json:"name,omitempty"`
+	Access       *string    `json:"access,omitempty"`
+	Message      *string    `json:"message,omitempty"`
+	EditorName   *string    `json:"editorName,omitempty"`
+	Version      *int       `json:"version,omitempty"`
 }
 
 // Encode returns p as the object the store keeps and the reader is sent. It
@@ -56,7 +64,25 @@ func (f fields) valid() bool {
 		within(f.TeacherName, maxName) && decided(f.Decision) &&
 		counted(f.Count) && counted(f.ToGrade) && counted(f.FocusLost) && counted(f.NotSubmitted) &&
 		counted(f.Used) && counted(f.Allowance) && counted(f.Credits) &&
-		named(f.ClassNames, f.Count) && (f.ClosesAt == nil || !f.ClosesAt.IsZero())
+		named(f.ClassNames, f.Count) && (f.ClosesAt == nil || !f.ClosesAt.IsZero()) && f.sharing()
+}
+
+func (f fields) sharing() bool {
+	return within(f.SharerName, maxName) && within(f.Name, maxTitle) && within(f.Message, maxMessage) &&
+		within(f.EditorName, maxName) && oneOf(f.ContentKind, ShareTest, ShareQuestionSet) &&
+		oneOf(f.Access, ShareUse, ShareEdit) && (f.Version == nil || *f.Version >= 1)
+}
+
+func oneOf(value *string, allowed ...string) bool {
+	if value == nil {
+		return true
+	}
+	for _, a := range allowed {
+		if *value == a {
+			return true
+		}
+	}
+	return false
 }
 
 func named(names *[]string, count *int) bool {
@@ -279,4 +305,43 @@ func (TeacherChanged) Kind() Kind { return ClassTeacherChanged }
 
 func (p TeacherChanged) fields() fields {
 	return fields{ClassName: &p.ClassName, TeacherName: p.TeacherName}
+}
+
+// The values ContentShared's ContentKind and Access take, as the contract's
+// ShareKind and ShareAccess.
+const (
+	ShareTest        = "test"
+	ShareQuestionSet = "question_set"
+	ShareUse         = "use"
+	ShareEdit        = "edit"
+)
+
+// Shared is ContentShared's params: who shared, what kind of content and its
+// name, the access given and, when the sharer wrote one, their message.
+type Shared struct {
+	SharerName  string
+	ContentKind string
+	Name        string
+	Access      string
+	Message     *string
+}
+
+func (Shared) Kind() Kind { return ContentShared }
+
+func (p Shared) fields() fields {
+	return fields{SharerName: &p.SharerName, ContentKind: &p.ContentKind, Name: &p.Name, Access: &p.Access, Message: p.Message}
+}
+
+// PublishedByCollaborator is TestPublishedByCollaborator's params: the
+// co-editor who published, the test's title and the version they published.
+type PublishedByCollaborator struct {
+	EditorName string
+	Title      string
+	Version    int
+}
+
+func (PublishedByCollaborator) Kind() Kind { return TestPublishedByCollaborator }
+
+func (p PublishedByCollaborator) fields() fields {
+	return fields{EditorName: &p.EditorName, Title: &p.Title, Version: &p.Version}
 }

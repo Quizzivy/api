@@ -13,11 +13,14 @@ const (
 	RouteClasses           Route = "classes"
 	RouteResult            Route = "result"
 	RouteStudentAssignment Route = "studentAssignment"
+	RouteSharedWithMe      Route = "sharedWithMe"
+	RouteTest              Route = "test"
 )
 
 type requirement struct {
 	assignment bool
 	attempt    bool
+	test       bool
 }
 
 var routes = map[Route]requirement{
@@ -27,16 +30,19 @@ var routes = map[Route]requirement{
 	RouteClasses:           {},
 	RouteResult:            {attempt: true},
 	RouteStudentAssignment: {assignment: true},
+	RouteSharedWithMe:      {},
+	RouteTest:              {test: true},
 }
 
 // Target is where a click on a notification goes, stored as the contract's
 // NotificationTarget. RouteAssignment and RouteStudentAssignment need
-// AssignmentID, RouteAttempt and RouteResult need AttemptID, and either id may
-// accompany any route.
+// AssignmentID, RouteAttempt and RouteResult need AttemptID, RouteTest needs
+// TestID, and any id may accompany any route.
 type Target struct {
 	Route        Route  `json:"route"`
 	AssignmentID string `json:"assignmentId,omitempty"`
 	AttemptID    string `json:"attemptId,omitempty"`
+	TestID       string `json:"testId,omitempty"`
 }
 
 // Validate answers ErrInvalidTarget for an unknown route, for an id that is
@@ -46,10 +52,10 @@ func (t Target) Validate() error {
 	if !known {
 		return ErrInvalidTarget
 	}
-	if !idOrNone(t.AssignmentID) || !idOrNone(t.AttemptID) {
+	if !idOrNone(t.AssignmentID) || !idOrNone(t.AttemptID) || !idOrNone(t.TestID) {
 		return ErrInvalidTarget
 	}
-	if needs.assignment && t.AssignmentID == "" || needs.attempt && t.AttemptID == "" {
+	if needs.assignment && t.AssignmentID == "" || needs.attempt && t.AttemptID == "" || needs.test && t.TestID == "" {
 		return ErrInvalidTarget
 	}
 	return nil

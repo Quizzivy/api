@@ -62,7 +62,7 @@ func TestNotifyRefusesANoticeTheStoreCannotWrite(t *testing.T) {
 		want   error
 	}{
 		"no recipient":            {func(n *command.Notify) { n.UserID = "" }, domain.ErrNoRecipient},
-		"an unknown kind":         {func(n *command.Notify) { n.Kind = "content.shared" }, domain.ErrUnknownKind},
+		"an unknown kind":         {func(n *command.Notify) { n.Kind = "content.unknown" }, domain.ErrUnknownKind},
 		"another kind's params":   {func(n *command.Notify) { n.Params = domain.Ready{Title: "Đề giữa kỳ"} }, domain.ErrParamsMismatch},
 		"params out of bounds":    {func(n *command.Notify) { n.Params = domain.Submitted{Count: 1} }, domain.ErrInvalidParams},
 		"a target without its id": {func(n *command.Notify) { n.Target = &domain.Target{Route: domain.RouteAttempt} }, domain.ErrInvalidTarget},

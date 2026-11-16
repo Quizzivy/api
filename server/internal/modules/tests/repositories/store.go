@@ -60,7 +60,9 @@ const testColumns = `
 	       t.id::text, t.title, t.description, t.status::text, t.current_version, t.last_published_version,
 	       outline.points::text, outline.questions, outline.audio, outline.skills,
 	       uses.live, uses.scheduled, uses.closed,
-	       t.created_at, t.updated_at, t.deleted_at`
+	       t.created_at, t.updated_at, t.deleted_at,
+	       t.owner_id::text, (SELECT coalesce(nullif(u.display_name, ''), u.full_name) FROM app.users u WHERE u.id = t.owner_id),
+	       (SELECT count(*) FROM app.content_shares g WHERE g.test_id = t.id)`
 
 const testFrom = `
 	  FROM app.tests t
@@ -80,7 +82,7 @@ func scanTest(row pgx.Row) (domain.Test, error) {
 	err := row.Scan(&t.ID, &t.Title, &t.Description, &status, &t.CurrentVersion, &lastPublished,
 		&t.TotalPoints, &t.QuestionCount, &t.AudioCount, &t.Skills,
 		&t.Assignments.Live, &t.Assignments.Scheduled, &t.Assignments.Closed,
-		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt)
+		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt, &t.OwnerID, &t.OwnerName, &t.SharedWith)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Test{}, domain.ErrNotFound
 	}

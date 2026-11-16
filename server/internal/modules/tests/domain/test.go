@@ -25,9 +25,14 @@ type Test struct {
 	// latest version; nil where it was not computed or cannot be.
 	UnpublishedChanges *int
 	Sections           []Section
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
+	// OwnerID and OwnerName are the test's owner; SharedWith counts the
+	// grants to it.
+	OwnerID    string
+	OwnerName  string
+	SharedWith int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  *time.Time
 }
 
 // NextVersion is the number the next publish of a test takes: one more than

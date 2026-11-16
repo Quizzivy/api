@@ -275,6 +275,9 @@ func toAPITest(t domain.Test) (openapi.Test, error) {
 		UpdatedAt:      t.UpdatedAt,
 		DeletedAt:      t.DeletedAt,
 		Sections:       make([]openapi.TestSection, len(t.Sections)),
+		Access:         openapi.ContentAccess("owner"),
+		Owner:          openapi.PersonRef{Id: httpapi.ParseUUID(t.OwnerID), Name: t.OwnerName},
+		SharedWith:     t.SharedWith,
 	}
 	out.UnpublishedChanges = t.UnpublishedChanges
 	for i, skill := range t.Skills {
