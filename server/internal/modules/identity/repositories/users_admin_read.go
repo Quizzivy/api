@@ -32,7 +32,8 @@ const ownedCountsSQL = `
 		       (SELECT count(*)::int FROM app.tests t WHERE t.owner_id = u.id AND t.deleted_at IS NULL),
 		       (SELECT count(*)::int FROM app.questions q WHERE q.owner_id = u.id AND q.deleted_at IS NULL),
 		       (SELECT count(*)::int FROM app.media_assets m WHERE m.owner_id = u.id AND m.deleted_at IS NULL),
-		       (SELECT count(*)::int FROM app.assignments g WHERE g.created_by = u.id)`
+		       (SELECT count(*)::int FROM app.assignments g WHERE g.created_by = u.id),
+		       (SELECT count(*)::int FROM app.question_sets s WHERE s.owner_id = u.id AND s.deleted_at IS NULL)`
 
 const (
 	anyRow        = `TRUE`
@@ -178,7 +179,7 @@ func (a *AdminUsers) facts(ctx context.Context, id string, detail *domain.AdminU
 		 WHERE u.id = $1::uuid`, id).
 		Scan(&creatorID, &creatorName, &detail.LastActiveAdmin,
 			&detail.Owned.Classes, &detail.Owned.Tests, &detail.Owned.Questions, &detail.Owned.Media, &detail.Owned.Assignments,
-			&detail.InProgressAttempts)
+			&detail.Owned.QuestionSets, &detail.InProgressAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrUserNotFound
 	}
