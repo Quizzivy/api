@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/platform/httpapi"
 	"quizzivy/internal/platform/httpx"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/content"
 	"quizzivy/internal/shared/matchkey"
 	"strconv"
@@ -28,6 +29,12 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 
 	in := domain.ListInput{Scope: httpapi.ScopeFromContext(ctx).Own()}
 	if request.Params.SetId != nil {
+		// A set's own operations need content.questions.write; without it a
+		// set's questions are as unreadable as a set the caller holds no
+		// grant to, so a grant cannot reach them through the bank list.
+		if principal, _ := httpx.PrincipalFromContext(ctx); !principal.Access.Permissions.Has(access.ContentQuestionsWrite) {
+			return openapi.ListQuestions404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
+		}
 		in.SetID = request.Params.SetId.String()
 	}
 	questionListDimensions(&in, request.Params)

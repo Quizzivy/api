@@ -10,11 +10,46 @@ import (
 	"quizzivy/gen/openapi"
 	"quizzivy/internal/modules/questions/application"
 	"quizzivy/internal/modules/questions/application/command"
+	"quizzivy/internal/modules/questions/application/query"
 	"quizzivy/internal/modules/questions/domain"
 	questionshttp "quizzivy/internal/modules/questions/http"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/cqrs"
 )
+
+// listQuestions opens to workspace.teacher, but a set's own operations need
+// content.questions.write; a caller without it reads a set's questions as a
+// set it cannot read, whatever grant it holds.
+func TestASetsQuestionsNeedTheSetsPermission(t *testing.T) {
+	listed := false
+	app := &application.Application{Queries: application.Queries{List: cqrs.HandlerFunc[query.List, query.ListResult](
+		func(context.Context, query.List) (query.ListResult, error) {
+			listed = true
+			return query.ListResult{}, domain.ErrSetNotFound
+		})}}
+	setID := uuid.New()
+	grader := access.Principal{UserID: uuid.NewString(), Permissions: access.NewSet(access.WorkspaceTeacher, access.TeachingGrading)}
+	got, err := questionshttp.NewQuestions(app, nil).ListQuestions(contextAs(t, grader), openapi.ListQuestionsRequestObject{
+		Params: openapi.ListQuestionsParams{SetId: &setID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.(openapi.ListQuestions404JSONResponse); !ok || listed {
+		t.Fatalf("a caller without content.questions.write listing a set got %T (the list ran: %v), want 404 before the read", got, listed)
+	}
+
+	author := access.Principal{UserID: uuid.NewString(), Permissions: access.NewSet(access.WorkspaceTeacher, access.ContentQuestionsWrite)}
+	got, err = questionshttp.NewQuestions(app, nil).ListQuestions(contextAs(t, author), openapi.ListQuestionsRequestObject{
+		Params: openapi.ListQuestionsParams{SetId: &setID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.(openapi.ListQuestions404JSONResponse); !ok || !listed {
+		t.Fatalf("a caller with content.questions.write got %T (the list ran: %v), want the read to decide", got, listed)
+	}
+}
 
 func TestASetsDescriptionIsClearedByNullAndKeptWhenAbsent(t *testing.T) {
 	var got domain.SetFields
