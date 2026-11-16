@@ -69,7 +69,7 @@ func noticeFixture(t *testing.T, tmpl email.Template, name string) email.Params 
 	case email.MessageReceived:
 		return email.MessageReceivedParams{ConversationID: someThread, StudentID: someStudent, FullName: name, SenderName: "Lê Hà My", Count: 1}
 	case email.WeeklySummary:
-		return email.WeeklySummaryParams{WeekOf: time.Date(2026, 11, 8, 17, 0, 0, 0, time.UTC), Count: 12, ToGrade: 3, Flagged: 1, ClassNames: []string{"IELTS Foundation A", "TOEIC 2"}, FullName: name}
+		return email.WeeklySummaryParams{WeekOf: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), Count: 12, ToGrade: 3, Flagged: 1, ClassNames: []string{"IELTS Foundation A", "TOEIC 2"}, FullName: name}
 	}
 	t.Fatalf("no fixture for template %q", tmpl)
 	return nil

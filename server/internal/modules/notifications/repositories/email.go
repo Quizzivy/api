@@ -121,7 +121,8 @@ func (m *Mail) write(ctx context.Context, tx pgx.Tx, e domain.Email, msg email.M
 	return m.gather(ctx, tx, id, e.IDs.AttemptID, msg)
 }
 
-// paramsOf is e's ids as its template's params, which the outbox stores.
+// paramsOf is e's ids as its template's params, which the outbox stores,
+// and a weekly summary's figures.
 func paramsOf(e domain.Email) (email.Params, error) {
 	ids := e.IDs
 	switch e.Template {
@@ -139,8 +140,16 @@ func paramsOf(e domain.Email) (email.Params, error) {
 		return email.SubmissionsDigestParams{AssignmentID: ids.AssignmentID, From: ids.From, AttemptIDs: []string{ids.AttemptID}}, nil
 	case domain.EmailMessageReceived:
 		return email.MessageReceivedParams{ConversationID: ids.ConversationID, StudentID: ids.StudentID, TeacherID: ids.TeacherID, ClassID: ids.ClassID}, nil
+	case domain.EmailAssignmentDueSoon:
+		return email.AssignmentDueSoonParams{AssignmentID: ids.AssignmentID, Lead: string(ids.Lead)}, nil
+	case domain.EmailAssignmentClosing:
+		return email.AssignmentClosingParams{AssignmentID: ids.AssignmentID}, nil
+	case domain.EmailWeeklySummary:
+		if s := e.Summary; s != nil {
+			return email.WeeklySummaryParams{WeekOf: s.Week.Monday(), Count: s.Count, ToGrade: s.ToGrade, Flagged: s.Flagged, ClassNames: s.ClassNames}, nil
+		}
 	}
-	return nil, fmt.Errorf("notifications: %s is not an email Notify sends", e.Template)
+	return nil, fmt.Errorf("notifications: %s is not an email the module sends", e.Template)
 }
 
 // gather adds attemptID to the digest row id, which its bucket's first paper

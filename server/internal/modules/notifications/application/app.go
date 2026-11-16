@@ -37,6 +37,15 @@ func (a *Application) WithMail(mailer ports.Mailer) *Application {
 	return a
 }
 
+// WithSchedule sets the store the notification scheduler runs on (T-R7.14)
+// and NOTIFY_EMAIL_EVENTS, by domain.EmailTemplate.Event name (nil sends
+// every email). Without it SendDueEmails and SendWeeklySummary refuse to run
+// and NextDue answers nothing due.
+func (a *Application) WithSchedule(store domain.Scheduled, sends func(event string) bool) *Application {
+	a.service.Schedule, a.service.Sends = store, sends
+	return a
+}
+
 type Commands struct {
 	Notify            cqrs.CommandHandler[command.Notify, cqrs.Nothing]
 	MaterialiseDue    cqrs.CommandHandler[command.MaterialiseDue, int]
@@ -45,12 +54,15 @@ type Commands struct {
 	MarkKeyRead       cqrs.CommandHandler[command.MarkKeyRead, cqrs.Nothing]
 	UpdatePreferences cqrs.CommandHandler[command.UpdatePreferences, []domain.Preference]
 	Prune             cqrs.CommandHandler[command.Prune, int64]
+	SendDueEmails     cqrs.CommandHandler[command.SendDueEmails, command.Scheduled]
+	SendWeeklySummary cqrs.CommandHandler[command.SendWeeklySummary, command.Scheduled]
 }
 
 type Queries struct {
 	List        cqrs.QueryHandler[query.List, domain.Page]
 	Summary     cqrs.QueryHandler[query.Summary, domain.Summary]
 	Preferences cqrs.QueryHandler[query.Preferences, []domain.Preference]
+	NextDue     cqrs.QueryHandler[query.NextDue, query.Due]
 }
 
 func New(repo domain.Repository) *Application {
@@ -64,11 +76,14 @@ func New(repo domain.Repository) *Application {
 			MarkKeyRead:       command.MarkKeyReadHandler{Service: service},
 			UpdatePreferences: command.UpdatePreferencesHandler{Service: service},
 			Prune:             command.PruneHandler{Service: service},
+			SendDueEmails:     command.SendDueEmailsHandler{Service: service},
+			SendWeeklySummary: command.SendWeeklySummaryHandler{Service: service},
 		},
 		Queries: Queries{
 			List:        query.ListHandler{Service: service},
 			Summary:     query.SummaryHandler{Service: service},
 			Preferences: query.PreferencesHandler{Service: service},
+			NextDue:     query.NextDueHandler{Service: service},
 		},
 		service: service,
 	}

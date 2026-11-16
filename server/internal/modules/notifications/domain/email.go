@@ -45,10 +45,10 @@ const (
 )
 
 // EmailIDs are what a notification email's outbox row holds: ids, and the
-// two facts that are not names (the bucket's start, whether a teacher is the
-// one a class left). Everything the email says is read when it is sent. A
-// digest's AttemptID is the paper its notice announced; the store adds each
-// later paper of the bucket to the row.
+// three facts that are not names (the bucket's start, whether a teacher is the
+// one a class left, a reminder's lead). Everything the email says is read when
+// it is sent. A digest's AttemptID is the paper its notice announced; the
+// store adds each later paper of the bucket to the row.
 type EmailIDs struct {
 	AttemptID      string
 	AssignmentID   string
@@ -60,6 +60,7 @@ type EmailIDs struct {
 	ResourceID     string
 	From           time.Time
 	Previous       bool
+	Lead           Lead
 }
 
 // Email is one notification email to enqueue for UserID: its template and
@@ -68,7 +69,9 @@ type EmailIDs struct {
 // due (zero is now). Thread is a message email's conversation: it is sent at
 // most once per MessageEmailSpacing per thread and reader, so the store adds
 // to DedupeKey the last such email it closed and holds DeliverAfter until
-// MessageEmailSpacing after the last one sent.
+// MessageEmailSpacing after the last one sent. Summary is a weekly
+// summary's figures, which the scheduler computes once and the row holds
+// (T-R7.14).
 type Email struct {
 	UserID       string
 	Template     EmailTemplate
@@ -77,6 +80,7 @@ type Email struct {
 	DedupeKey    string
 	DeliverAfter time.Time
 	Thread       string
+	Summary      *WeeklyFigures
 }
 
 // PlanEmail is the email n calls for when Notify writes it at now, and false

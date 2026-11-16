@@ -153,7 +153,9 @@ type MessageReceivedParams struct {
 }
 
 // WeeklySummaryParams are a teacher's Monday summary of the week that began
-// on WeekOf: papers handed in, answers waiting for a mark and flagged
+// on WeekOf, the Monday's date in the teacher's own zone as 00:00 UTC of
+// that day, so that a teacher in another zone than the centre's reads their
+// own Monday: papers handed in, answers waiting for a mark and flagged
 // attempts on the classes ClassNames names (at most five). T-R7.14's
 // scheduler writes the figures; FullName is read when it is sent.
 type WeeklySummaryParams struct {

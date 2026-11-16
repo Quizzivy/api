@@ -2,7 +2,7 @@
 
 {{define "classes"}}{{range $i, $name := .}}{{if $i}}, {{end}}{{$name}}{{end}}{{end}}
 
-{{define "week"}}{{(.Params.WeekOf.In .Zone).Format "2 Jan 2006"}}{{end}}
+{{define "week"}}{{.Params.WeekOf.UTC.Format "2 Jan 2006"}}{{end}}
 
 {{define "text"}}{{.Org}}
 
