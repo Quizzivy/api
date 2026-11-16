@@ -30,6 +30,11 @@ func TestTheStudentEligibilityTableOnTheDatabase(t *testing.T) {
 	archivedWithThread := w.user("Học viên Dương", "student")
 	w.enrol(archived, student)
 	w.enrol(archived, archivedWithThread)
+	// A student in an archived and an active class of the same teacher still
+	// writes first: one class that is not archived is enough.
+	archivedAndActive := w.user("Học viên Giang", "student")
+	w.enrol(archived, archivedAndActive)
+	w.enrol(w.class(minhID, "Lớp 12D"), archivedAndActive)
 	w.mustAsStudent(archivedWithThread, minhID, "Em chào thầy ạ.")
 	w.archive(archived)
 
@@ -64,16 +69,17 @@ func TestTheStudentEligibilityTableOnTheDatabase(t *testing.T) {
 		read, post       error
 		evidence         string
 	}{
-		"the teacher of a class the student is in":  {student, lanID, nil, nil, "a class of theirs now"},
-		"the teacher of a class the student left":   {student, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no writing first to a former teacher"},
-		"a former teacher with a thread":            {formerWithThread, hoaID, nil, nil, "the thread outlives the class"},
-		"a teacher who wrote first":                 {writtenFirst, lanID, nil, nil, "the thread they started"},
-		"the teacher of an archived class":          {student, minhID, domain.ErrNotFound, domain.ErrNotFound, "an archived class lets no one write first"},
-		"an archived class's teacher with a thread": {archivedWithThread, minhID, nil, nil, "the thread outlives the archive"},
-		"a teacher who never taught the student":    {classmate, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no class, no thread"},
-		"the staff member who created the account":  {created, creator, domain.ErrNotFound, domain.ErrNotFound, "creating is staff's tie, never the student's"},
-		"a disabled teacher of the student's class": {student, disabledTeacher, nil, domain.ErrNotAllowed, "readable, no post"},
-		"a thread whose teacher is no longer staff": {formerWithThread, demoted, nil, domain.ErrNotAllowed, "the thread stays readable"},
+		"the teacher of a class the student is in":     {student, lanID, nil, nil, "a class of theirs now"},
+		"the teacher of a class the student left":      {student, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no writing first to a former teacher"},
+		"a former teacher with a thread":               {formerWithThread, hoaID, nil, nil, "the thread outlives the class"},
+		"a teacher who wrote first":                    {writtenFirst, lanID, nil, nil, "the thread they started"},
+		"the teacher of an archived class":             {student, minhID, domain.ErrNotFound, domain.ErrNotFound, "an archived class lets no one write first"},
+		"an archived class's teacher with a thread":    {archivedWithThread, minhID, nil, nil, "the thread outlives the archive"},
+		"a teacher of an archived and an active class": {archivedAndActive, minhID, nil, nil, "the active class is enough to write first"},
+		"a teacher who never taught the student":       {classmate, hoaID, domain.ErrNotFound, domain.ErrNotFound, "no class, no thread"},
+		"the staff member who created the account":     {created, creator, domain.ErrNotFound, domain.ErrNotFound, "creating is staff's tie, never the student's"},
+		"a disabled teacher of the student's class":    {student, disabledTeacher, nil, domain.ErrNotAllowed, "readable, no post"},
+		"a thread whose teacher is no longer staff":    {formerWithThread, demoted, nil, domain.ErrNotAllowed, "the thread stays readable"},
 		"a classmate":                                     {student, classmate, domain.ErrNotFound, domain.ErrNotFound, "a student teaches no class"},
 		"the student naming themselves":                   {student, student, domain.ErrNotFound, domain.ErrNotFound, "no thread with oneself"},
 		"an id no account has":                            {student, uuid.NewString(), domain.ErrNotFound, domain.ErrNotFound, "missing"},
