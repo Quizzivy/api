@@ -28,7 +28,8 @@ func (a MessagingPhotos) AvatarURL(ctx context.Context, key string) (string, err
 // MessagingContextEvents is the attempts module's FlaggedAttempts query
 // behind the messaging module's ContextEvents port: a staff member's direct
 // thread shows the student's flagged attempts on the assignments the staff
-// member's scope reaches, without the messaging module reading attempts.
+// member's scope reaches, among the papers that scope sees, without the
+// messaging module reading attempts.
 type MessagingContextEvents struct {
 	Query cqrs.QueryHandler[attemptsquery.FlaggedAttempts, []attemptsdomain.FlaggedAttempt]
 }

@@ -66,7 +66,7 @@ type ReviewRepository interface {
 type TimelineRepository interface {
 	Timeline(ctx context.Context, scope access.Scope, attemptID string) (Timeline, error)
 	// Flagged returns studentID's flagged attempts on the assignments scope
-	// reaches whose moment (FlaggedAttempt.At) is since or later, oldest
-	// first.
+	// reaches, among the papers scope sees (visibility.Papers), whose moment
+	// (FlaggedAttempt.At) is since or later, oldest first.
 	Flagged(ctx context.Context, scope access.Scope, studentID string, since time.Time) ([]FlaggedAttempt, error)
 }

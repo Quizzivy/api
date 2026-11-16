@@ -19,8 +19,9 @@ type Avatars interface {
 }
 
 // ContextEvents reads the attempts of studentID that were flagged on an
-// assignment scope reaches, from since on, oldest first: the attempts
-// context's query, so the messaging context never reads attempts itself.
+// assignment scope reaches, among the papers scope sees, from since on,
+// oldest first: the attempts context's query, so the messaging context never
+// reads attempts itself.
 type ContextEvents interface {
 	FlaggedAttempts(ctx context.Context, scope access.Scope, studentID string, since time.Time) ([]domain.ContextEvent, error)
 }

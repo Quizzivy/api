@@ -220,16 +220,18 @@ func TestTwoStudentsOfOneTeacherEachReadTheirOwnThread(t *testing.T) {
 func TestAStudentsListNamesTheirTeachersAndTheirAnnouncedClasses(t *testing.T) {
 	w := newWorld(t)
 	lanID, minhID, hoaID := w.user("Cô Lan", "teacher"), w.user("Thầy Minh", "teacher"), w.user("Cô Hoa", "teacher")
+	maiID := w.user("Cô Mai", "teacher")
 	lan, hoa := by(lanID), by(hoaID)
 	english, maths, quiet := w.class(lanID, "Tiếng Anh"), w.class(lanID, "Ngữ pháp"), w.class(minhID, "Toán")
 	former, archived := w.class(hoaID, "Văn"), w.class(lanID, "Lớp đã lưu trữ")
-	student := w.user("Học viên Dũng", "student")
+	student := w.user("Học viên Dũng", "student", maiID)
 	for _, c := range []string{english, maths, quiet, former, archived} {
 		w.enrol(c, student)
 	}
 	w.mustDirect(hoa, student, "Em đọc bài này nhé.")
 	w.remove(former, student)
 	w.mustAsStudent(student, lanID, "Em chào cô.")
+	w.mustDirect(by(maiID), student, "Cô đã tạo tài khoản cho em.")
 	w.mustDirect(lan, student, "Chào em.")
 	w.mustAnnounce(lan, english, "Mai lớp nghỉ.")
 	w.mustAnnounce(lan, archived, "Lớp này đã kết thúc.")
@@ -246,9 +248,9 @@ func TestAStudentsListNamesTheirTeachersAndTheirAnnouncedClasses(t *testing.T) {
 		titles = append(titles, th.Title)
 		byKey[string(th.Kind)+th.ClassID+th.TeacherID] = th
 	}
-	want := []string{"Tiếng Anh " + w.marker, "Cô Lan " + w.marker, "Cô Hoa " + w.marker}
+	want := []string{"Tiếng Anh " + w.marker, "Cô Lan " + w.marker, "Cô Mai " + w.marker, "Cô Hoa " + w.marker}
 	if !slices.Equal(titles, want) {
-		t.Fatalf("the student's list: %v, want the announced class, then Lan's thread, then Hoa's, newest first; no channel without a post, no archived class and none of a class the student left", titles)
+		t.Fatalf("the student's list: %v, want the announced class, then Lan's and Mai's threads (one moment, by title), then Hoa's, newest first; no channel without a post, no archived class and none of a class the student left", titles)
 	}
 	if th := byKey["direct"+lanID]; !slices.Equal(th.ClassNames, []string{"Lớp đã lưu trữ " + w.marker, "Ngữ pháp " + w.marker, "Tiếng Anh " + w.marker}) || th.Former ||
 		th.Unread != 1 || th.Preview == nil || th.Preview.Mine || *th.Preview.Text != "Chào em." || th.AvatarURL == nil {
@@ -256,6 +258,15 @@ func TestAStudentsListNamesTheirTeachersAndTheirAnnouncedClasses(t *testing.T) {
 	}
 	if th := byKey["direct"+hoaID]; !th.Former || len(th.ClassNames) != 0 || th.Unread != 1 {
 		t.Errorf("Hoa's row: %+v, want 'Former teacher': no class of hers now", th)
+	}
+	// The staff member who created the account and wrote first never taught
+	// the student: no class of theirs and no tie, so neither "Your teacher ·
+	// {classes}" nor "Former teacher" (the wording is the owner's to settle).
+	if th := byKey["direct"+maiID]; len(th.ClassNames) != 0 || th.Former || th.Unread != 1 {
+		t.Errorf("Mai's row: %+v, want no class names, not former, her message unread", th)
+	}
+	if header, err := w.studentThread(student, maiID, domain.Cursor{}); err != nil || len(header.Teacher.ClassNames) != 0 || header.Teacher.Former || !header.Teacher.CanPost {
+		t.Errorf("Mai's thread header: %+v, %v, want no class names, not former, open to a reply", header.Teacher, err)
 	}
 	if th := byKey["class"+english]; th.TeacherID != "" || len(th.ClassNames) != 0 || th.Former || th.AvatarURL != nil || th.Unread != 1 || *th.Preview.Text != "Mai lớp nghỉ." {
 		t.Errorf("the class row: %+v, want 'Class announcements' with its one unread post", th)

@@ -10,8 +10,9 @@ import (
 )
 
 // FlaggedAttempts reads StudentID's flagged attempts on the assignments Scope
-// reaches, handed in or started at Since or later, oldest first: the
-// context events of a staff member's direct thread with the student.
+// reaches that the papers list would show (visibility.Papers), handed in or
+// started at Since or later, oldest first: the context events of a staff
+// member's direct thread with the student.
 type FlaggedAttempts struct {
 	Scope     access.Scope
 	StudentID string

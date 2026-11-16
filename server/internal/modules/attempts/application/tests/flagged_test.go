@@ -79,3 +79,45 @@ func TestFlaggedAttemptsFollowTheAssignmentScopeAndTheirMoment(t *testing.T) {
 		}
 	}
 }
+
+// Flagged shows only the papers visibility.Papers shows (the papers list,
+// the grading queue and the dashboard): a teacher who reaches a colleague's
+// assignment through their own class does not see the flagged attempt of a
+// student they no longer reach, such as one who left their class for the
+// colleague's. A student still in the teacher's class stays in view, and the
+// colleague, who wrote the assignment, sees both.
+func TestFlaggedAttemptsLeaveOutAPaperTheReaderDoesNotSee(t *testing.T) {
+	w := newPaperWorld(t)
+	ctx := context.Background()
+	former := w.user(t, "student")
+	classB := w.class(t, w.b, former)
+	w.id(t, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3) RETURNING user_id::text`, w.classA, former, w.a)
+	ofB := w.assignment(t, w.b, classB, nil)
+	w.id(t, `INSERT INTO app.assignment_classes (assignment_id, class_id) VALUES ($1, $2) RETURNING class_id::text`, ofB, w.classA)
+	formerPaper := w.attempt(t, ofB, former, 1, "submitted", "now() + interval '5 minutes'")
+	currentPaper := w.attempt(t, ofB, w.studentA, 1, "submitted", "now() + interval '5 minutes'")
+	if _, err := w.tx.Exec(ctx, `DELETE FROM app.class_members WHERE class_id = $1 AND user_id = $2`, w.classA, former); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.tx.Exec(ctx, `UPDATE app.attempts SET flagged = true, focus_loss_count = 2 WHERE id = ANY($1::uuid[])`,
+		[]string{formerPaper, currentPaper}); err != nil {
+		t.Fatal(err)
+	}
+	a, b, all := access.Scope{UserID: w.a}, access.Scope{UserID: w.b}, access.Scope{UserID: w.admin, All: true}
+	hourAgo := time.Now().Add(-time.Hour)
+	for label, c := range map[string]struct {
+		scope   access.Scope
+		student string
+		want    []string
+	}{
+		"A, a former student's paper on B's assignment for A's class": {a, former, nil},
+		"A, a current student's paper on the same assignment":         {a, w.studentA, []string{currentPaper}},
+		"B, who wrote the assignment, the former student's paper":     {b, former, []string{formerPaper}},
+		"B, who wrote the assignment, A's student's paper":            {b, w.studentA, []string{currentPaper}},
+		"scope.all, the former student's paper":                       {all, former, []string{formerPaper}},
+	} {
+		if got := flaggedIDs(t, w, c.scope, c.student, hourAgo); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %v, want %v", label, got, c.want)
+		}
+	}
+}
