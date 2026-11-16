@@ -483,3 +483,44 @@ func TestTwoSchedulersUnderTheLockEnqueueOneSet(t *testing.T) {
 		t.Errorf("two hours earlier the next moment is %+v %v, want the hour before the close", due, err)
 	}
 }
+
+// TestAWeeklyItemIsPublishedOnlyUnderItsSwitchAndLeftAsItIs: the store
+// writes the summary in the app only for a teacher who turned its switch on
+// (the deck draws it off), and a second write leaves the row, read or not,
+// as it is.
+func TestAWeeklyItemIsPublishedOnlyUnderItsSwitchAndLeftAsItIs(t *testing.T) {
+	w := newFarWorld(t)
+	week, _ := domain.LastWeek(far, time.UTC)
+	figures := domain.WeeklyFigures{Week: week, Count: 2, ClassNames: []string{"Lớp thử"}}
+	publish := func(teacher string) bool {
+		t.Helper()
+		var wrote bool
+		locked, err := repositories.NewSchedule(db.NewContext(w.tx), email.NewOutbox(nil), nil).Locked(context.Background(), func(run domain.ScheduledRun) error {
+			var err error
+			wrote, err = run.Publish(context.Background(), figures.Notice(teacher))
+			return err
+		})
+		if err != nil || !locked {
+			t.Fatalf("publish: %v (locked %v)", err, locked)
+		}
+		return wrote
+	}
+	if publish(w.creator) {
+		t.Error("a teacher who never turned the item on got it")
+	}
+	w.prefer(w.creator, domain.EventSummaryWeekly, true)
+	if !publish(w.creator) {
+		t.Fatal("a teacher who turned the item on did not get it")
+	}
+	w.exec(`UPDATE app.notifications SET read_at = $2 WHERE user_id = $1`, w.creator, far)
+	if publish(w.creator) {
+		t.Error("a second write wrote again")
+	}
+	var unread int
+	if err := w.tx.QueryRow(context.Background(), `SELECT count(*) FROM app.notifications WHERE user_id = $1 AND read_at IS NULL`, w.creator).Scan(&unread); err != nil {
+		t.Fatal(err)
+	}
+	if unread != 0 {
+		t.Error("a second write made the read item unread")
+	}
+}
