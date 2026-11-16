@@ -43,6 +43,11 @@ func TestTheEligibilityTableOnTheDatabase(t *testing.T) {
 	w.mustDirect(lan, disabledWithThread, "Chào em.")
 	w.disable(disabledWithThread)
 	staffMade := w.user("Trợ giảng cô tạo", "teacher", teacher)
+	createdDisabled := w.user("Học viên cô tạo rồi bị khoá", "student", teacher)
+	w.disable(createdDisabled)
+	createdPromoted := w.user("Học viên cô tạo rồi thành trợ giảng", "student", teacher)
+	w.mustDirect(lan, createdPromoted, "Chào em.")
+	w.exec(`UPDATE app.users SET role_id = (SELECT id FROM app.roles WHERE builtin_key = 'teacher') WHERE id = $1::uuid`, createdPromoted)
 	admin := w.user("Quản trị", "admin")
 
 	for name, c := range map[string]struct {
@@ -63,7 +68,9 @@ func TestTheEligibilityTableOnTheDatabase(t *testing.T) {
 		"a disabled student of the caller's":            {teacher, disabled, nil, domain.ErrNotAllowed, false, "readable, no post"},
 		"a tied account that is no longer a student":    {teacher, promoted, nil, domain.ErrNotAllowed, false, "the strict student predicate"},
 		"a thread whose student was disabled":           {teacher, disabledWithThread, nil, domain.ErrNotAllowed, false, "the thread stays readable"},
-		"a staff account the caller created":            {teacher, staffMade, nil, domain.ErrNotAllowed, false, "created, but no student"},
+		"a staff account the caller created":            {teacher, staffMade, domain.ErrNotFound, domain.ErrNotFound, false, "created, but no student: no peer"},
+		"a student the caller created, disabled":        {teacher, createdDisabled, nil, domain.ErrNotAllowed, false, "a created student stays a peer"},
+		"a created student promoted after a thread":     {teacher, createdPromoted, nil, domain.ErrNotAllowed, false, "the thread keeps it readable"},
 		"an admin and the teacher's student":            {admin, member, domain.ErrNotFound, domain.ErrNotFound, false, "scope.all does not open a direct thread"},
 		"the caller naming themselves":                  {teacher, teacher, domain.ErrNotFound, domain.ErrNotFound, false, "no thread with oneself"},
 		"another teacher's student, for a third person": {other, removed, domain.ErrNotFound, domain.ErrNotFound, false, "never taught"},
@@ -88,6 +95,11 @@ func TestTheEligibilityTableOnTheDatabase(t *testing.T) {
 		facts, err := messagingrepo.NewPostgres(db.NewContext(w.tx)).DirectFacts(context.Background(), c.who, c.student)
 		if err != nil {
 			t.Fatal(err)
+		}
+		var peer bool
+		w.value(fmt.Sprintf(`SELECT $2::uuid IN %s`, visibility.MessagingPeerIDs(1)), &peer, c.who, c.student)
+		if want := (domain.Eligibility{}).Peer(facts); peer != want || peer != (c.read == nil) {
+			t.Errorf("%s: visibility.MessagingPeerIDs holds it: %v, the manager's Peer %v, want %v: a peer is whom the thread is readable to", name, peer, want, c.read == nil)
 		}
 		if got := (domain.Eligibility{}).CanPost(facts); got != canMessage {
 			t.Errorf("%s: the manager says %v and visibility.CanMessage %v: they must be one rule", name, got, canMessage)

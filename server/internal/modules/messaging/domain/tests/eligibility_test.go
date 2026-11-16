@@ -21,19 +21,21 @@ func TestTheEligibilityTableForADirectThread(t *testing.T) {
 		facts      domain.DirectFacts
 		read, post error
 	}{
-		"a student of the caller's class":     {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
-		"a student the caller created":        {with(student, func(f *domain.DirectFacts) { f.Created = true }), nil, nil},
-		"a removed student, through the tie":  {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
-		"a removed student with a thread":     {with(student, func(f *domain.DirectFacts) { f.Tied, f.Conversation = true, true }), nil, nil},
-		"a thread outliving every tie":        {with(student, func(f *domain.DirectFacts) { f.Conversation = true }), nil, nil},
-		"another teacher's student":           {student, domain.ErrNotFound, domain.ErrNotFound},
-		"another teacher's disabled student":  {with(student, func(f *domain.DirectFacts) { f.Enabled = false }), domain.ErrNotFound, domain.ErrNotFound},
-		"an id no account has":                {domain.DirectFacts{}, domain.ErrNotFound, domain.ErrNotFound},
-		"the caller naming themselves":        {with(student, func(f *domain.DirectFacts) { f.Self, f.Created = true, true }), domain.ErrNotFound, domain.ErrNotFound},
-		"a tied student, disabled":            {with(student, func(f *domain.DirectFacts) { f.Tied, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
-		"a tied account, no longer a student": {with(student, func(f *domain.DirectFacts) { f.Tied, f.Student = true, false }), nil, domain.ErrNotAllowed},
-		"a thread whose student was disabled": {with(student, func(f *domain.DirectFacts) { f.Conversation, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
-		"a staff account the caller created":  {with(student, func(f *domain.DirectFacts) { f.Created, f.Student = true, false }), nil, domain.ErrNotAllowed},
+		"a student of the caller's class":           {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
+		"a student the caller created":              {with(student, func(f *domain.DirectFacts) { f.Created = true }), nil, nil},
+		"a removed student, through the tie":        {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
+		"a removed student with a thread":           {with(student, func(f *domain.DirectFacts) { f.Tied, f.Conversation = true, true }), nil, nil},
+		"a thread outliving every tie":              {with(student, func(f *domain.DirectFacts) { f.Conversation = true }), nil, nil},
+		"another teacher's student":                 {student, domain.ErrNotFound, domain.ErrNotFound},
+		"another teacher's disabled student":        {with(student, func(f *domain.DirectFacts) { f.Enabled = false }), domain.ErrNotFound, domain.ErrNotFound},
+		"an id no account has":                      {domain.DirectFacts{}, domain.ErrNotFound, domain.ErrNotFound},
+		"the caller naming themselves":              {with(student, func(f *domain.DirectFacts) { f.Self, f.Created = true, true }), domain.ErrNotFound, domain.ErrNotFound},
+		"a tied student, disabled":                  {with(student, func(f *domain.DirectFacts) { f.Tied, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
+		"a tied account, no longer a student":       {with(student, func(f *domain.DirectFacts) { f.Tied, f.Student = true, false }), nil, domain.ErrNotAllowed},
+		"a thread whose student was disabled":       {with(student, func(f *domain.DirectFacts) { f.Conversation, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
+		"a staff account the caller created":        {with(student, func(f *domain.DirectFacts) { f.Created, f.Student = true, false }), domain.ErrNotFound, domain.ErrNotFound},
+		"a student the caller created, disabled":    {with(student, func(f *domain.DirectFacts) { f.Created, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
+		"a created account promoted after a thread": {with(student, func(f *domain.DirectFacts) { f.Created, f.Conversation, f.Student = true, true, false }), nil, domain.ErrNotAllowed},
 	} {
 		if err := rules.ReadDirect(c.facts); !errors.Is(err, c.read) {
 			t.Errorf("%s: read = %v, want %v", name, err, c.read)

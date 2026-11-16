@@ -40,11 +40,15 @@ type ChannelFacts struct {
 type Eligibility struct{}
 
 // Peer reports whether the account is a messaging peer of the staff member:
-// a thread exists between them, or the staff member taught the student or
-// created the account. scope.all does not widen it, so a student the caller
-// never taught stays out of reach, an admin's included.
+// a thread exists between them, the staff member taught the student, or the
+// staff member created the account and it is a student. The student predicate
+// binds only the last: a thread or a tie stays readable after its student is
+// given a staff role, but an account the caller created and that is not a
+// student, a colleague's, resolves as no peer at all (404, as a missing id).
+// scope.all does not widen it, so a student the caller never taught stays out
+// of reach, an admin's included.
 func (Eligibility) Peer(f DirectFacts) bool {
-	return f.Exists && !f.Self && (f.Conversation || f.Tied || f.Created)
+	return f.Exists && !f.Self && (f.Conversation || f.Tied || (f.Created && f.Student))
 }
 
 // ReadDirect lets the staff member read their thread with a peer, which a
