@@ -298,6 +298,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	user := created["user"].(map[string]any)
 	p.ids["student"] = user["id"].(string)
+	// The teacher created the student and teaches them, so the student is a
+	// messaging peer of the teacher's.
+	p.ids["messaging-peer"] = p.ids["student"]
 
 	assignment := c.assign(versionID, p.ids["class"])
 	p.ids["assignment"] = id(assignment)

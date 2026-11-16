@@ -8,10 +8,11 @@ import (
 )
 
 // R7Pending answers 501 for the R7 messaging operations the contract declares
-// and no task has built yet (httpx.ErrNotImplemented): the staff side
-// (T-R7.10a), the student side (T-R7.10b) and attachments (T-R7.11). Each of
-// those tasks moves its operations into the messaging module's transport and
-// deletes them here; the last one deletes the file.
+// and no task has built yet (httpx.ErrNotImplemented): the student side
+// (T-R7.10b) and attachments (T-R7.11). Each of those tasks moves its
+// operations into the messaging module's transport and deletes them here; the
+// last one deletes the file. The staff side (T-R7.10a) is the messaging
+// module's Staff.
 type R7Pending struct{}
 
 func (R7Pending) UploadMessageAttachment(context.Context, openapi.UploadMessageAttachmentRequestObject) (openapi.UploadMessageAttachmentResponseObject, error) {
@@ -19,34 +20,6 @@ func (R7Pending) UploadMessageAttachment(context.Context, openapi.UploadMessageA
 }
 
 func (R7Pending) GetStaffMessageAttachmentUrl(context.Context, openapi.GetStaffMessageAttachmentUrlRequestObject) (openapi.GetStaffMessageAttachmentUrlResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) GetStaffClassThread(context.Context, openapi.GetStaffClassThreadRequestObject) (openapi.GetStaffClassThreadResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) PostClassAnnouncement(context.Context, openapi.PostClassAnnouncementRequestObject) (openapi.PostClassAnnouncementResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) MarkStaffClassThreadRead(context.Context, openapi.MarkStaffClassThreadReadRequestObject) (openapi.MarkStaffClassThreadReadResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) GetStaffDirectThread(context.Context, openapi.GetStaffDirectThreadRequestObject) (openapi.GetStaffDirectThreadResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) PostStaffDirectMessage(context.Context, openapi.PostStaffDirectMessageRequestObject) (openapi.PostStaffDirectMessageResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) MarkStaffDirectThreadRead(context.Context, openapi.MarkStaffDirectThreadReadRequestObject) (openapi.MarkStaffDirectThreadReadResponseObject, error) {
-	return nil, httpx.ErrNotImplemented
-}
-
-func (R7Pending) ListStaffThreads(context.Context, openapi.ListStaffThreadsRequestObject) (openapi.ListStaffThreadsResponseObject, error) {
 	return nil, httpx.ErrNotImplemented
 }
 

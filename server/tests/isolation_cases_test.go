@@ -276,11 +276,15 @@ const (
 
 	// The messaging operations answer 501 until their tasks build them. A
 	// pending case only needs a request the contract accepts, so as points the
-	// kinds the world does not hold yet (messaging-peer, attachment, a
-	// student's class) at ids it does hold; each task replaces its cases.
-	staffMessagingPending   = "T-R7.10a: the staff side of messaging"
+	// kinds the world does not hold yet (attachment, a student's class) at ids
+	// it does hold; each task replaces its cases.
 	studentMessagingPending = "T-R7.10b: the student side of messaging"
 	attachmentsPending      = "T-R7.11: message attachments"
+
+	noAttachmentYet = "no file can be uploaded before T-R7.11, so every attachmentId, the caller's own media included, answers as a missing one; T-R7.11 adds the world's attachment and removes this entry"
+	clientMade      = "a clientId is made by the client for its own message and names no resource; a repeat answers the message it made, and another sender's clientId is another key (messages_sender_client_key)"
+	inThread        = "a read pointer names a message checked against the thread, so another thread's message answers 422 as a missing one does; the DM case below proves it for another teacher's thread"
+	cursorID        = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
@@ -291,9 +295,16 @@ const (
 )
 
 func isolationCases() map[string]isoCase {
-	messagePost := func(*iso, *party, string) any {
-		return map[string]any{"clientId": uuid.NewString(), "body": "Chào em, cô gửi lịch học tuần sau."}
+	messagePost := func(_ *iso, _ *party, slot string) any {
+		post := map[string]any{"clientId": uuid.NewString(), "body": "Chào em, cô gửi lịch học tuần sau."}
+		if slot == "/attachmentId" {
+			post["attachmentId"] = ""
+		}
+		return post
 	}
+	posted := map[string]string{"body /clientId": clientMade}
+	paged := map[string]string{"query before": cursorID, "query after": cursorID}
+	pointed := map[string]string{"body /lastReadMessageId": inThread}
 	messageRead := func(*iso, *party, string) any {
 		return map[string]any{"lastReadMessageId": uuid.NewString()}
 	}
@@ -588,13 +599,13 @@ func isolationCases() map[string]isoCase {
 		"getMySummary":               {},
 		"getNotificationPreferences": {},
 
-		"listStaffThreads":               {pending: staffMessagingPending, query: map[string]string{"tab": "all"}},
-		"getStaffDirectThread":           {pending: staffMessagingPending, as: map[string]string{"path studentId": "student"}},
-		"postStaffDirectMessage":         {pending: staffMessagingPending, as: map[string]string{"path studentId": "student", "body /attachmentId": "media"}, body: messagePost},
-		"markStaffDirectThreadRead":      {pending: staffMessagingPending, as: map[string]string{"path studentId": "student"}, body: messageRead},
-		"getStaffClassThread":            {pending: staffMessagingPending},
-		"postClassAnnouncement":          {pending: staffMessagingPending, as: map[string]string{"body /attachmentId": "media"}, body: messagePost},
-		"markStaffClassThreadRead":       {pending: staffMessagingPending, body: messageRead},
+		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
+		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},
+		"postStaffDirectMessage":         {as: map[string]string{"body /attachmentId": "media"}, blind: map[string]string{"body /attachmentId": noAttachmentYet}, excuse: posted, body: messagePost},
+		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead},
+		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
+		"postClassAnnouncement":          {as: map[string]string{"body /attachmentId": "media"}, blind: map[string]string{"body /attachmentId": noAttachmentYet}, excuse: posted, body: messagePost},
+		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
 		"listStudentThreads":             {pending: studentMessagingPending, student: true},
 		"getStudentDirectThread":         {pending: studentMessagingPending, student: true},
 		"postStudentDirectMessage":       {pending: studentMessagingPending, student: true, body: messagePost},

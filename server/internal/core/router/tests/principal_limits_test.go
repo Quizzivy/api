@@ -64,6 +64,9 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 	"GET /teacher/directory/teachers":            {{Burst: 60, Window: time.Minute}},
 	"POST /teacher/shares":                       {{Burst: 30, Window: time.Hour}},
 
+	"POST /teacher/messages/students/{studentId}": messagePosts,
+	"POST /teacher/messages/classes/{classId}":    messagePosts,
+
 	"POST /teacher/ai/questions/generate":                                         aiSuggestion,
 	"POST /teacher/ai/tests/{id}/check":                                           aiSuggestion,
 	"POST /teacher/ai/tests/{id}/variant":                                         aiSuggestion,
@@ -84,6 +87,7 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 }
 
 var (
+	messagePosts = []ratelimit.Rule{{Burst: 30, Window: time.Minute}, {Burst: 500, Window: 24 * time.Hour}}
 	aiSuggestion = []ratelimit.Rule{{Burst: 10, Window: time.Minute}, {Burst: 100, Window: time.Hour}}
 	aiConsole    = aiSuggestion
 	aiRead       = []ratelimit.Rule{{Burst: 60, Window: time.Minute}, {Burst: 600, Window: time.Hour}}
