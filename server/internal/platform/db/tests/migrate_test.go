@@ -416,3 +416,85 @@ func TestTheMessagingFilesFillTheTiesAndRollBack(t *testing.T) {
 		t.Errorf("after the second up: %d tables, want 5", n)
 	}
 }
+
+// TestTheTieFileDeletesTheAnonymisedAccountsTiesAndRollsBack runs 00169 over
+// a teacher tied to an anonymised student, as 00167's fill ties one, and to
+// one who is not. The anonymised student's tie goes and the other stays. Down
+// gives the triggers 00167's bodies back, which tie an anonymised member
+// again, and up runs a second time.
+func TestTheTieFileDeletesTheAnonymisedAccountsTiesAndRollsBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, tieFile int64 = 168, 169
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, kept, gone, class string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, kept, class = f.adminID, f.studentID, f.classID
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('gone-' || uuidv7() || '@example.com', 'Học viên', (SELECT id FROM app.roles WHERE builtin_key = 'student')) RETURNING id`).Scan(&gone); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, `UPDATE app.users SET email = 'anonymous-' || id::text || '@anonymous.invalid', disabled_at = now() WHERE id = $1`, gone)
+		mustExec(t, tx, `INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $2), ($1, $3)`, teacher, kept, gone)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	tiedTo := func() map[string]bool {
+		t.Helper()
+		rows, err := conn.Query(`SELECT student_id::text FROM app.messaging_ties WHERE staff_id = $1`, teacher)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]bool{}
+		for rows.Next() {
+			var student string
+			if err := rows.Scan(&student); err != nil {
+				t.Fatal(err)
+			}
+			out[student] = true
+		}
+		return out
+	}
+	if err := goose.UpTo(conn, dir, tieFile); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if got := tiedTo(); !got[kept] || got[gone] || len(got) != 1 {
+		t.Errorf("after up the teacher is tied to %v, want %s alone", got, kept)
+	}
+
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	tx, err := conn.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, class, gone, teacher)
+	mustExec(t, tx, `SET CONSTRAINTS app.class_members_fill_messaging_ties IMMEDIATE`)
+	var back bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2)`, teacher, gone).Scan(&back); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.Rollback()
+	if !back {
+		t.Error("after down the member trigger still leaves an anonymised member out, want 00167's body back")
+	}
+	if err := goose.UpTo(conn, dir, tieFile); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+}

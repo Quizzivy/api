@@ -2,7 +2,10 @@
 // a staff member may write first to a student who has left their class
 // (O-R7.8). Every write that puts a student in a class, or gives a class
 // another teacher, calls it in the same transaction. Leaving a class removes
-// nothing, and a pair already known keeps the time it was first known.
+// nothing, and a pair already known keeps the time it was first known. An
+// anonymised student is never tied: D16's anonymisation deletes the account's
+// ties but keeps its memberships, and it does not run again for the account,
+// so a tie written after it would stay for good.
 package ties
 
 import (
@@ -10,6 +13,7 @@ import (
 	"fmt"
 
 	"quizzivy/internal/shared/audit"
+	"quizzivy/internal/shared/retention"
 )
 
 // Enrolled records that classID's teacher teaches studentID, after a write
@@ -23,8 +27,8 @@ import (
 func Enrolled(ctx context.Context, db audit.Execer, classID, studentID string) error {
 	if _, err := db.Exec(ctx, `
 		INSERT INTO app.messaging_ties (staff_id, student_id)
-		SELECT c.teacher_id, $2::uuid FROM app.classes c
-		 WHERE c.id = $1::uuid AND c.teacher_id <> $2::uuid
+		SELECT c.teacher_id, u.id FROM app.classes c JOIN app.users u ON u.id = $2::uuid
+		 WHERE c.id = $1::uuid AND c.teacher_id <> u.id AND `+retention.NotAnonymous+`
 		   FOR SHARE OF c
 		ON CONFLICT (staff_id, student_id) DO NOTHING`, classID, studentID); err != nil {
 		return fmt.Errorf("ties: record %s in class %s: %w", studentID, classID, err)
@@ -43,7 +47,8 @@ func Reassigned(ctx context.Context, db audit.Execer, classIDs []string) error {
 		SELECT c.teacher_id, m.user_id
 		  FROM app.classes c
 		  JOIN app.class_members m ON m.class_id = c.id
-		 WHERE c.id = ANY($1::uuid[]) AND m.user_id <> c.teacher_id
+		  JOIN app.users u ON u.id = m.user_id
+		 WHERE c.id = ANY($1::uuid[]) AND m.user_id <> c.teacher_id AND `+retention.NotAnonymous+`
 		ON CONFLICT (staff_id, student_id) DO NOTHING`, classIDs); err != nil {
 		return fmt.Errorf("ties: record the members of %d reassigned classes: %w", len(classIDs), err)
 	}

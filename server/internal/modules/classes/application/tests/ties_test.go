@@ -14,6 +14,7 @@ import (
 	"quizzivy/internal/modules/classes/domain"
 	"quizzivy/internal/modules/classes/repositories"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/shared/ties"
 )
 
 // tied reports whether app.messaging_ties knows that staff has taught student
@@ -104,5 +105,42 @@ func TestAClassGivenToAnotherTeacherTiesThemToEveryMember(t *testing.T) {
 		if ok, _ := w.tied(t, w.a, student); !ok {
 			t.Errorf("the transfer's new teacher is not tied to %s", student)
 		}
+	}
+}
+
+// TestAnAnonymisedMemberIsNotTiedAgain fails when a change of teacher, a
+// transfer or an enrolment ties an anonymised student to a teacher: D16's
+// anonymisation deleted their ties and keeps their memberships, and never
+// runs for them again.
+func TestAnAnonymisedMemberIsNotTiedAgain(t *testing.T) {
+	w := newAdminWorld(t)
+	ctx := context.Background()
+	gone := w.user(t, "student", "Học viên đã ẩn danh", &w.a)
+	w.exec(t, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, w.classA, gone, w.a)
+	w.exec(t, `UPDATE app.users SET email = 'anonymous-' || id::text || '@anonymous.invalid', disabled_at = now() WHERE id = $1`, gone)
+	if ok, _ := w.tied(t, w.a, gone); ok {
+		t.Fatal("the anonymised member is tied before any change")
+	}
+
+	if _, err := w.svc.Commands.ChangeTeacher.Handle(ctx, command.ChangeTeacher{ClassID: w.classA, TeacherID: w.b, Actor: w.who(w.admin)}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := w.tied(t, w.b, w.studentA); !ok {
+		t.Error("the class's new teacher is not tied to its member")
+	}
+	if ok, _ := w.tied(t, w.b, gone); ok {
+		t.Error("a change of teacher tied the new teacher to an anonymised member")
+	}
+	if _, err := repositories.NewPostgres(db.NewContext(w.tx)).TransferOwnership(ctx, w.b, w.a); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := w.tied(t, w.a, gone); ok {
+		t.Error("a transfer tied its new teacher to an anonymised member")
+	}
+	if err := ties.Enrolled(ctx, w.tx, w.classB, gone); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := w.tied(t, w.a, gone); ok {
+		t.Error("an enrolment tied an anonymised student to the class's teacher")
 	}
 }

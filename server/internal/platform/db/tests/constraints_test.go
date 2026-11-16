@@ -2090,6 +2090,27 @@ func TestTheOldBinarysEnrolmentsAndChangesOfTeacherAreTiedAtCommit(t *testing.T)
 	})
 }
 
+// D16's anonymisation deletes an account's ties and keeps its memberships, so
+// 00169 has the triggers leave an anonymised member out (T-R7.12).
+func TestTheOldBinaryTiesNoAnonymisedMember(t *testing.T) {
+	const fire = `SET CONSTRAINTS app.class_members_fill_messaging_ties, app.classes_fill_messaging_ties IMMEDIATE`
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `UPDATE app.users SET email = 'anonymous-' || id::text || '@anonymous.invalid', disabled_at = now() WHERE id = $1`, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		var heir string
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('heir-' || uuidv7() || '@example.com', 'Giáo viên mới', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&heir); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, `UPDATE app.classes SET teacher_id = $2 WHERE id = $1`, f.classID, heir)
+		mustExec(t, tx, fire)
+		var ties int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE student_id = $1`, f.studentID).Scan(&ties); err != nil || ties != 0 {
+			t.Errorf("the old binary's enrolment and change of teacher tied an anonymised member %d times (%v), want none", ties, err)
+		}
+	})
+}
+
 func TestATieIsBetweenTwoAccountsOnceAndGoesWithEither(t *testing.T) {
 	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
 		rejectsWith(t, tx, "messaging_ties_participants_differ",
