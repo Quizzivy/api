@@ -76,11 +76,11 @@ func ignoreMissing(err error) error {
 	return err
 }
 
-func (s *GroupsPostgres) restoreOrigin(ctx context.Context, tx pgx.Tx, plan movePlan, members []string, originID string) (moveOutcome, error) {
+func (s *GroupsPostgres) restoreOrigin(ctx context.Context, tx pgx.Tx, plan movePlan, members []string, originID, actorID string) (moveOutcome, error) {
 	if err := removeMember(ctx, tx, plan.sourceGroup, plan.questionID); err != nil {
 		return moveOutcome{}, err
 	}
-	if err := setMemberOrder(ctx, tx, without(members, plan.questionID)); err != nil {
+	if err := setMemberOrder(ctx, tx, without(members, plan.questionID), actorID); err != nil {
 		return moveOutcome{}, err
 	}
 	if err := s.lockBankQuestion(ctx, tx, originID); err != nil {

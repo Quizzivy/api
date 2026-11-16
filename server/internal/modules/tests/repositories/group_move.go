@@ -184,7 +184,7 @@ func (s *GroupsPostgres) copyIntoGroup(ctx context.Context, tx pgx.Tx, in domain
 	if _, err := s.questions.CreateGroupMember(ctx, tx, write, owned); err != nil {
 		return moveOutcome{}, err
 	}
-	if err := setMemberOrder(ctx, tx, placed(members, member.ID, plan.index)); err != nil {
+	if err := setMemberOrder(ctx, tx, placed(members, member.ID, plan.index), in.ActorID); err != nil {
 		return moveOutcome{}, err
 	}
 	return moveOutcome{questionID: member.ID, copied: true}, nil
@@ -217,7 +217,7 @@ func (s *GroupsPostgres) moveOutOfGroup(ctx context.Context, tx pgx.Tx, in domai
 		return moveOutcome{}, err
 	}
 	if origin.restore {
-		return s.restoreOrigin(ctx, tx, plan, members, origin.id)
+		return s.restoreOrigin(ctx, tx, plan, members, origin.id, in.ActorID)
 	}
 	return s.leaveGroup(ctx, tx, plan, owner, members, origin.edited, in.ActorID)
 }
@@ -231,7 +231,7 @@ func (s *GroupsPostgres) leaveGroup(ctx context.Context, tx pgx.Tx, plan movePla
 	if tag.RowsAffected() != 1 {
 		return moveOutcome{}, domain.ErrNotFound
 	}
-	if err := setMemberOrder(ctx, tx, without(members, plan.questionID)); err != nil {
+	if err := setMemberOrder(ctx, tx, without(members, plan.questionID), actorID); err != nil {
 		return moveOutcome{}, err
 	}
 	if err := s.lockBankQuestion(ctx, tx, plan.questionID); err != nil {
@@ -252,7 +252,7 @@ func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[str
 		return moveOutcome{}, err
 	}
 	if plan.sourceGroup == plan.targetGroup {
-		return moveOutcome{questionID: plan.questionID}, setMemberOrder(ctx, tx, placed(target, plan.questionID, plan.index))
+		return moveOutcome{questionID: plan.questionID}, setMemberOrder(ctx, tx, placed(target, plan.questionID, plan.index), actorID)
 	}
 	if len(target) >= domain.MaxGroupMembers {
 		return moveOutcome{}, &domain.GroupError{Rule: domain.RuleGroupLimits}
@@ -268,10 +268,10 @@ func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[str
 	if tag.RowsAffected() != 1 {
 		return moveOutcome{}, domain.ErrNotFound
 	}
-	if err := setMemberOrder(ctx, tx, without(source, plan.questionID)); err != nil {
+	if err := setMemberOrder(ctx, tx, without(source, plan.questionID), actorID); err != nil {
 		return moveOutcome{}, err
 	}
-	return moveOutcome{questionID: plan.questionID}, setMemberOrder(ctx, tx, placed(target, plan.questionID, plan.index))
+	return moveOutcome{questionID: plan.questionID}, setMemberOrder(ctx, tx, placed(target, plan.questionID, plan.index), actorID)
 }
 
 func (s *GroupsPostgres) finishMove(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput, plan movePlan, outcome moveOutcome, level domain.Access) (domain.MoveQuestionResult, error) {
