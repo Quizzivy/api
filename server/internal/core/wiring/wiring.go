@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"quizzivy/internal/core/adapters"
+	"quizzivy/internal/core/jobs"
 	"quizzivy/internal/core/router"
 	accessapp "quizzivy/internal/modules/access/application"
 	accesshttp "quizzivy/internal/modules/access/http"
@@ -22,6 +23,7 @@ import (
 	mediaapp "quizzivy/internal/modules/media/application"
 	messagingapp "quizzivy/internal/modules/messaging/application"
 	notificationsapp "quizzivy/internal/modules/notifications/application"
+	notificationsrepo "quizzivy/internal/modules/notifications/repositories"
 	organizationapp "quizzivy/internal/modules/organization/application"
 	"quizzivy/internal/platform/config"
 	"quizzivy/internal/platform/db"
@@ -29,7 +31,7 @@ import (
 	"quizzivy/internal/platform/imagesafe"
 )
 
-// Assembly is what Build produces: the transports the router serves, the token verifiers the auth middleware and the docs gate need, the access application that resolves who a request acts as, and the identity, classes, notifications, organization, exports and media applications, the mail outbox and dispatcher and the import sweeper the background jobs drive.
+// Assembly is what Build produces: the transports the router serves, the token verifiers the auth middleware and the docs gate need, the access application that resolves who a request acts as, and the identity, classes, notifications, organization, exports and media applications, the mail outbox and dispatcher, the notification scheduler's nudge and the import sweeper the background jobs drive.
 type Assembly struct {
 	Modules       router.Modules
 	Principals    *accessapp.Application
@@ -48,6 +50,9 @@ type Assembly struct {
 	Maintenance httpx.MaintenanceSource
 	// Mail is the outbox the modules enqueue into and the dispatcher that sends it.
 	Mail Mail
+	// ScheduleNudge is the signal assignment writes send the notification
+	// scheduler, which runs on the notifications application.
+	ScheduleNudge *jobs.Nudge
 	// AI is the provider behind the AI assistant's port, nil when no ANTHROPIC_API_KEY is set.
 	AI aiports.Completer
 	// AICredits is the credits model the AI operations reserve and settle through and the console sets allowances through. It is built with or without the provider.
@@ -67,7 +72,7 @@ func WithCompleter(completer aiports.Completer) Option {
 	return func(o *options) { o.completer, o.hasCompleter = completer, true }
 }
 
-// Build refuses when app.permissions lacks a key this binary was compiled with, or when the join-code keys derive a zero or shared key id, then assembles every module against the pool in dependency order: notifications depends on no module and is built first, so that its Notify command can be handed to any module as a port; the mail outbox is built before identity, which writes its set-password links to it, and leads, which writes the notice of a stored consultation request to it, and is handed to notifications, whose Notify writes each notice's email to it; attempts' student statistics feed classes and identity, classes' enrolment feeds identity's Google sign-in, media feeds questions, tests and attempts, and tests and questions feed sharing, whose count feeds the dashboard, and identity signs the photos messaging shows, whose files keep to the media bucket, whose posts ring through notifications, and whose unread counts feed notifications' summary and the dashboard.
+// Build refuses when app.permissions lacks a key this binary was compiled with, or when the join-code keys derive a zero or shared key id, then assembles every module against the pool in dependency order: notifications depends on no module and is built first, so that its Notify command can be handed to any module as a port; the mail outbox is built before identity, which writes its set-password links to it, and leads, which writes the notice of a stored consultation request to it, and is handed to notifications, whose Notify writes each notice's email to it and whose scheduler writes the due-time emails and weekly summaries to it, nudged by assignments' writes; attempts' student statistics feed classes and identity, classes' enrolment feeds identity's Google sign-in, media feeds questions, tests and attempts, and tests and questions feed sharing, whose count feeds the dashboard, and identity signs the photos messaging shows, whose files keep to the media bucket, whose posts ring through notifications, and whose unread counts feed notifications' summary and the dashboard.
 func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db.Pool, opts ...Option) (Assembly, error) {
 	var chosen options
 	for _, opt := range opts {
@@ -99,6 +104,8 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	}
 	organizationApp.WithMail(mail.Outbox)
 	notificationsApp.WithMail(NotificationMail(cfg, dbx, mail))
+	notificationsApp.WithSchedule(notificationsrepo.NewSchedule(dbx, mail.Outbox, logger), cfg.Email.Sends)
+	nudge := jobs.NewNudge()
 	identityApp, tokens, err := identity(cfg, logger, dbx, stats, classesApp.Commands.EnrolNewMember, mail.Outbox, principals.Queries.AssignableRole)
 	if err != nil {
 		return Assembly{}, err
@@ -160,7 +167,8 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	}
 
 	return Assembly{
-		Mail: mail,
+		Mail:          mail,
+		ScheduleNudge: nudge,
 		Modules: router.Modules{
 			Access:        accesshttp.NewAccess(principals),
 			AI:            aiTransport,
@@ -172,7 +180,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 			Questions:     questionsTransport(questionsApp, mediaApp),
 			Media:         mediaTransport(mediaApp),
 			Tests:         testsTransport(testsApp, mediaApp),
-			Assignments:   assignments(dbx, notificationsApp.Commands.Notify, logger),
+			Assignments:   assignments(dbx, notificationsApp.Commands.Notify, nudge, logger),
 			Attempts:      attemptsTransport(attemptsApp, mediaApp, identityApp, logger),
 			Availability:  availabilityTransport,
 			Notifications: notificationsTransport(notificationsApp, logger),

@@ -14,12 +14,18 @@ import (
 	"quizzivy/internal/core/jobs"
 	"quizzivy/internal/core/router"
 	"quizzivy/internal/core/wiring"
+	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/config"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/platform/httpserver"
 )
 
-const dbReadyBudget = 60 * time.Second
+const (
+	dbReadyBudget = 60 * time.Second
+	notifyBudget  = 2 * time.Minute
+	notifyRetry   = 5 * time.Minute
+	notifyBusy    = 30 * time.Second
+)
 
 // Run loads configuration, builds every module against a live database, then
 // serves until the process is signalled.
@@ -83,7 +89,8 @@ func (a *App) Handler() (http.Handler, error) {
 }
 
 // Serve starts the background jobs and the HTTP server, and shuts down when ctx
-// is cancelled.
+// is cancelled. The notification scheduler runs here, in the API process, and
+// not in the import worker: its work is light.
 func (a *App) Serve(ctx context.Context) error {
 	handler, err := a.Handler()
 	if err != nil {
@@ -94,6 +101,9 @@ func (a *App) Serve(ctx context.Context) error {
 	go a.assembly.Identity.RunActivity(ctx)
 	go jobs.PruneNotifications(ctx, a.logger, a.assembly.Notifications)
 	go a.assembly.Mail.Run(ctx, a.logger)
+	go jobs.RunNotifySchedule(ctx, a.logger, jobs.NotificationSchedule(a.assembly.Notifications, notifyBudget, a.logger), jobs.NotifySchedule{
+		Nudge: a.assembly.ScheduleNudge.C(), Idle: notificationsdomain.ScheduleIdle, Retry: notifyRetry, Busy: notifyBusy, Floor: time.Second,
+	})
 	if a.assembly.AI != nil {
 		go jobs.ReleaseStaleAiReservations(ctx, a.logger, a.assembly.AICredits)
 	}
