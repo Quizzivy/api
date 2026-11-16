@@ -7440,7 +7440,9 @@ components:
 
         A message item is one per reader per thread: it is written again,
         unread, with the new `count` while the thread stays unread, and marked
-        read when the reader's pointer passes it. `excerpt` is the newest
+        read when the reader's pointer passes it. Each write gives it a new
+        `id` and `createdAt`, so it lists first, and once it was read its
+        `count` starts again from the next message. `excerpt` is the newest
         message's first 80 characters; it lives only in the reader's own bell.
 
         The three `ai.*` kinds are for the teacher's bell. `ai.credit_request`
@@ -15861,7 +15863,10 @@ paths:
         Queues one export for the worker and answers at once. It builds a ZIP
         of `users.csv` (no password hashes or tokens), `roles.csv`,
         `classes.csv` (no join codes), `class_members.csv`, `tests.csv`,
-        `test_versions.csv`, `assignments.csv`, `attempts.csv`, with
+        `test_versions.csv`, `assignments.csv`, `attempts.csv`, `leads.csv`,
+        `messages_summary.csv` (one row per conversation: its kind, class or
+        two participants, message count and first and last message times,
+        never a message's text, a file's name or an attachment), with
         `answers.csv` when `includeAnswers` is true, and a `README.txt` in
         Vietnamese and English that describes each file. Every CSV is UTF-8
         with a byte-order mark and CRLF line ends, and a cell that a
