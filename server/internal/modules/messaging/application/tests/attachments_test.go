@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"quizzivy/internal/modules/messaging/application"
 	"quizzivy/internal/modules/messaging/application/command"
 	"quizzivy/internal/modules/messaging/application/ports"
 	"quizzivy/internal/modules/messaging/application/query"
@@ -35,6 +37,7 @@ type files struct {
 	deleted []string
 	signed  []signature
 	failDel map[string]bool
+	lists   int
 }
 
 type stored struct {
@@ -85,6 +88,7 @@ func (f *files) SignedAttachmentURL(_ context.Context, key, filename, contentTyp
 func (f *files) ListAfter(_ context.Context, prefix, after string, limit int) ([]ports.StoredObject, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lists++
 	var keys []string
 	for key := range f.objects {
 		if strings.HasPrefix(key, prefix) && key > after {
@@ -507,6 +511,65 @@ func TestTheSweepsRemoveUnsentFilesAndUnnamedObjectsAndKeepSentOnes(t *testing.T
 	_, err = w.app.Commands.SweepAttachmentObjects.Handle(ctx, command.SweepAttachmentObjects{Limit: 500})
 	if err == nil || store.has(survivor) {
 		t.Errorf("a delete that fails: %v, survivor kept %v; want the error and the rest still removed", err, store.has(survivor))
+	}
+}
+
+// namesUnreadable is a repository whose NamedKeys fails, as when the
+// database is out of reach; the object sweep reads nothing else.
+type namesUnreadable struct{ domain.Repository }
+
+func (namesUnreadable) NamedKeys(context.Context, []string) (map[string]bool, error) {
+	return nil, errors.New("names: the database is out of reach")
+}
+
+func TestTheObjectSweepStopsWhenItCannotReadTheRows(t *testing.T) {
+	store := newFiles()
+	app := application.New(namesUnreadable{}).WithAttachments(store, audio{})
+	long := time.Now().Add(-48 * time.Hour)
+	for range 3 {
+		store.put("messages/"+uuid.NewString()+".pdf", long)
+	}
+
+	// A full page, and rows it cannot read: one listing and the error, not
+	// the same page listed again until the budget ends.
+	n, err := app.Commands.SweepAttachmentObjects.Handle(context.Background(), command.SweepAttachmentObjects{Limit: 2})
+	if err == nil || n != 0 {
+		t.Errorf("the object sweep without its rows: %d, %v; want 0 and the error", n, err)
+	}
+	if store.lists != 1 {
+		t.Errorf("the object sweep listed %d pages, want 1", store.lists)
+	}
+	if len(store.deleted) != 0 {
+		t.Errorf("the object sweep deleted %v without its rows", store.deleted)
+	}
+}
+
+func TestTheObjectSweepListsABoundedNumberOfPagesACall(t *testing.T) {
+	w := newWorld(t)
+	store := w.withFiles()
+	ctx := context.Background()
+	const limit = 2
+	// A bucket of objects too young to remove, and one orphan past them all.
+	for i := range limit*command.SweepAttachmentPages + 2 {
+		store.put(fmt.Sprintf("messages/a-%03d.pdf", i), time.Now())
+	}
+	orphan := "messages/z.pdf"
+	store.put(orphan, time.Now().Add(-48*time.Hour))
+
+	n, err := w.app.Commands.SweepAttachmentObjects.Handle(ctx, command.SweepAttachmentObjects{Limit: limit})
+	if err != nil || n != 0 {
+		t.Fatalf("the first call: %d, %v", n, err)
+	}
+	if store.lists != command.SweepAttachmentPages || !store.has(orphan) {
+		t.Errorf("the first call listed %d pages (orphan kept %v), want %d and the orphan not reached yet", store.lists, store.has(orphan), command.SweepAttachmentPages)
+	}
+	// The next call resumes where the first stopped and reaches the orphan.
+	n, err = w.app.Commands.SweepAttachmentObjects.Handle(ctx, command.SweepAttachmentObjects{Limit: limit})
+	if err != nil || n != 1 || store.has(orphan) {
+		t.Errorf("the second call: %d, %v, orphan kept %v; want it removed", n, err, store.has(orphan))
+	}
+	if store.lists != command.SweepAttachmentPages+2 {
+		t.Errorf("after the second call %d pages were listed, want %d", store.lists, command.SweepAttachmentPages+2)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"quizzivy/internal/modules/messaging/application/internal/support"
 	"quizzivy/internal/modules/messaging/application/ports"
@@ -52,16 +53,23 @@ func (h SweepUnsentAttachmentsHandler) Handle(ctx context.Context, c SweepUnsent
 // that no file's row names and that were written more than
 // domain.UnsentGrace ago: those T-R7.12's anonymisation leaves, which deletes
 // rows without storage credentials, and those a failed delete left. It
-// removes at most Limit and returns how many. It lists a page at a time from
-// where the last call stopped, and starts over from the first key once a
-// listing comes back short, so a bucket of many sent files is walked across
-// runs rather than from its start each time. The rows are read after the
-// listing, so an object a row names meanwhile is kept, and the grace keeps an
-// upload whose row is not written yet. Every removable object is tried, and
-// the first failure is the error.
+// removes at most Limit and returns how many. It lists a page of Limit keys at
+// a time from where the last call stopped, at most SweepAttachmentPages pages
+// a call, and starts over from the first key once a listing comes back short,
+// so a bucket of many sent files is walked across calls and runs rather than
+// from its start each time, and one call's work does not grow with the
+// bucket. The rows are read after the listing, so an object a row names
+// meanwhile is kept, and the grace keeps an upload whose row is not written
+// yet. Every removable object of a page is tried, and the first failure is
+// the error; a failure to read the rows stops the call where it is, so the
+// next one reads that page again.
 type SweepAttachmentObjects struct {
 	Limit int
 }
+
+// SweepAttachmentPages is how many pages one SweepAttachmentObjects call
+// lists at most.
+const SweepAttachmentPages = 10
 
 type SweepAttachmentObjectsHandler struct {
 	*support.Service
@@ -86,7 +94,7 @@ func (h SweepAttachmentObjectsHandler) Handle(ctx context.Context, c SweepAttach
 	defer h.Cursor.mu.Unlock()
 	removed := 0
 	var first error
-	for removed < c.Limit {
+	for range SweepAttachmentPages {
 		if err := ctx.Err(); err != nil {
 			return removed, errors.Join(first, err)
 		}
@@ -94,7 +102,14 @@ func (h SweepAttachmentObjectsHandler) Handle(ctx context.Context, c SweepAttach
 		if err != nil {
 			return removed, errors.Join(first, fmt.Errorf("sweep attachment objects: list: %w", err))
 		}
-		n, err := h.removeUnnamed(ctx, objects, c.Limit-removed)
+		cutoff := h.Now().Add(-domain.UnsentGrace)
+		named, err := h.Repo.NamedKeys(ctx, olderThan(objects, cutoff))
+		if err != nil {
+			// The cursor has not moved: stop, and the next call reads this
+			// page again.
+			return removed, errors.Join(first, fmt.Errorf("sweep attachment objects: %w", err))
+		}
+		n, err := h.removeUnnamed(ctx, objects, named, cutoff, c.Limit-removed)
 		removed += n
 		if first == nil {
 			first = err
@@ -103,24 +118,27 @@ func (h SweepAttachmentObjectsHandler) Handle(ctx context.Context, c SweepAttach
 			h.Cursor.after = ""
 			return removed, first
 		}
+		if removed >= c.Limit {
+			return removed, first
+		}
 	}
 	return removed, first
 }
 
-// removeUnnamed removes up to limit of objects that are past the grace and
-// that no row names, and moves the cursor past the last object it looked at.
-func (h SweepAttachmentObjectsHandler) removeUnnamed(ctx context.Context, objects []ports.StoredObject, limit int) (int, error) {
-	cutoff := h.Now().Add(-domain.UnsentGrace)
+func olderThan(objects []ports.StoredObject, cutoff time.Time) []string {
 	var old []string
 	for _, o := range objects {
 		if o.WrittenAt.Before(cutoff) {
 			old = append(old, o.Key)
 		}
 	}
-	named, err := h.Repo.NamedKeys(ctx, old)
-	if err != nil {
-		return 0, fmt.Errorf("sweep attachment objects: %w", err)
-	}
+	return old
+}
+
+// removeUnnamed removes up to limit of objects that were written before
+// cutoff and that named does not hold, and moves the cursor past the last
+// object it looked at.
+func (h SweepAttachmentObjectsHandler) removeUnnamed(ctx context.Context, objects []ports.StoredObject, named map[string]bool, cutoff time.Time, limit int) (int, error) {
 	removed := 0
 	var first error
 	for _, o := range objects {
