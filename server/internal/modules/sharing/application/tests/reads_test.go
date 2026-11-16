@@ -11,6 +11,7 @@ import (
 	"quizzivy/internal/modules/sharing/application/query"
 	"quizzivy/internal/modules/sharing/domain"
 	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/retention"
 )
 
 func (w *world) directory(caller, q string, limit int) []domain.Person {
@@ -35,6 +36,9 @@ func TestTheDirectoryMatchesWithoutAccentsAndFlagsDisabledAccounts(t *testing.T)
 	caller := w.user("Trần Đức", "teacher")
 	duc, disabled := w.user("Phan Minh Đức", "teacher"), w.user("Lê Văn Đức", "teacher")
 	w.disable(disabled)
+	anonymised := w.user("Hồ Văn Đức", "teacher")
+	w.disable(anonymised)
+	w.exec(`UPDATE app.users u SET email = `+retention.AnonymousEmail+` WHERE u.id = $1::uuid`, anonymised)
 	w.user("Võ Đức", "student")
 	ha := w.user("Đặng Thu Hà", "teacher")
 	admin := w.user("Quản Trị Đức", "admin")
@@ -42,7 +46,7 @@ func TestTheDirectoryMatchesWithoutAccentsAndFlagsDisabledAccounts(t *testing.T)
 
 	people := w.directory(caller, "duc "+w.marker, 0)
 	if got := ids(people); !slices.Equal(got, []string{disabled, duc, admin}) {
-		t.Fatalf("\"duc\" found %v, want Lê Văn Đức (disabled), Phan Minh Đức and the Admin, by name, never the caller or a student", got)
+		t.Fatalf("\"duc\" found %v, want Lê Văn Đức (disabled), Phan Minh Đức and the Admin, by name, never the caller, a student or an anonymised account", got)
 	}
 	for _, p := range people {
 		if p.Disabled != (p.ID == disabled) {
@@ -67,6 +71,11 @@ func TestTheDirectoryMatchesWithoutAccentsAndFlagsDisabledAccounts(t *testing.T)
 	all := w.directory(caller, "", 0)
 	if len(all) == 0 || len(all) > domain.MaxDirectory || slices.Contains(ids(all), caller) {
 		t.Errorf("without a query the directory lists %d colleagues (caller included: %v)", len(all), slices.Contains(ids(all), caller))
+	}
+	for _, p := range all {
+		if p.ID == anonymised || p.Email == "anonymous-"+p.ID+"@anonymous.invalid" {
+			t.Errorf("without a query the directory lists the anonymised account %+v", p)
+		}
 	}
 
 	anh, lan := w.user("Thu An", "teacher"), w.user("Bé Lan", "teacher")

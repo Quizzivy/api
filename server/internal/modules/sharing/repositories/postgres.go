@@ -18,6 +18,7 @@ import (
 	"quizzivy/internal/shared/limits"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/paging"
+	"quizzivy/internal/shared/retention"
 )
 
 // Page-size bounds for Shared with me.
@@ -74,7 +75,7 @@ func scanPerson(row pgx.Row) (domain.Person, error) {
 }
 
 // Directory returns at most limit accounts that open the teacher workspace,
-// active or disabled, never actorID. A query matches the full name, the
+// active or disabled, never actorID and never an anonymised one. A query matches the full name, the
 // display name or the email through app.immutable_unaccent(lower(…)), so
 // "duc" finds "Đức", and a word that starts with it ranks first; without one
 // the rows are in name order.
@@ -86,7 +87,7 @@ func (p *Postgres) Directory(ctx context.Context, actorID, query string, limit i
 	}
 	people, err := db.QueryMany(ctx, p, `SELECT `+personOf("u")+`
 		  FROM app.users u
-		 WHERE u.id <> $1::uuid AND `+limits.TeacherRole("u.role_id")+`
+		 WHERE u.id <> $1::uuid AND `+limits.TeacherRole("u.role_id")+` AND `+retention.NotAnonymous+`
 		   AND ($2::text = '' OR `+strings.Join(matches, " OR ")+`)
 		 ORDER BY CASE WHEN $2::text = '' OR `+strings.Join(starts, " OR ")+` THEN 0 ELSE 1 END,
 		          `+folded(nameOf("u"))+`, u.id
