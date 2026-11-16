@@ -286,6 +286,14 @@ func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
 	}
 }
 
+// sharingSlots are the parameters that name what a grant would open: the
+// resource of a share, the set or test a bank write works in, and the
+// questions a copy or a set takes. With no grant, another teacher's id in any
+// of them is a 404, whatever else the operation answers to a missing id.
+var sharingSlots = map[string]bool{
+	"query resourceId": true, "body /resourceId": true, "query setId": true, "query forTestId": true, "body /questionIds/-": true,
+}
+
 func (x *iso) substitute(op scopedOp, c isoCase) {
 	x.t.Helper()
 	if c.pending != "" {
@@ -333,6 +341,9 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 		}
 		if answer(theirs) != answer(missing) {
 			x.t.Errorf("%s: another owner's %s answered\n  %s\nwhere a missing one answers\n  %s", where, s.Kind, answer(theirs), answer(missing))
+		}
+		if sharingSlots[slot] && excused == "" && theirs.status != http.StatusNotFound {
+			x.t.Errorf("%s: another owner's %s answered %s, want 404: no grant opens it", where, s.Kind, answer(theirs))
 		}
 		if leaked := mentions([]byte(strings.ReplaceAll(string(theirs.body), theirID, "")), foreign); len(leaked) > 0 {
 			x.t.Errorf("%s: the answer to another owner's %s names their %v", where, s.Kind, leaked)
