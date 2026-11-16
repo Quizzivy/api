@@ -34,6 +34,14 @@ const (
 	EventComplained = "email.complained"
 )
 
+// BouncePermanent is the data.bounce.type of a hard bounce. Resend documents
+// email.bounced as a permanent rejection, but its bounce types also include
+// Transient (MailboxFull, MessageTooLarge, ContentRejected,
+// AttachmentRejected) and Undetermined; a bounce that names any type but this
+// one is not listed, since nothing lifts a suppression yet (O-R7.3). A bounce
+// that names no type is taken as the documented hard bounce.
+const BouncePermanent = "Permanent"
+
 // ErrUnsigned is a delivery whose Svix signature is missing, malformed,
 // wrong or stale. The webhook answers it 401 with no body.
 var ErrUnsigned = errors.New("email: the delivery is not signed by the webhook's secret")
@@ -124,19 +132,25 @@ func VerifySignature(key []byte, d Delivery, now time.Time) error {
 	return nil
 }
 
-// event is what the webhook reads of Resend's event: its type and its
-// recipients. Everything else in it is ignored.
+// event is what the webhook reads of Resend's event: its type, its
+// recipients and, for a bounce, the bounce's type. Everything else in it is
+// ignored.
 type event struct {
 	Type string `json:"type"`
 	Data struct {
-		To json.RawMessage `json:"to"`
+		To     json.RawMessage `json:"to"`
+		Bounce struct {
+			Type string `json:"type"`
+		} `json:"bounce"`
 	} `json:"data"`
 }
 
 // Receive verifies d and, for a hard bounce or a complaint, lists its
-// recipient, idempotent on d's svix-id. Every other event type, and an event
-// it cannot read, is accepted and ignored: it is signed, so it is Resend's,
-// and refusing it would only make Resend retry it. It answers ErrUnsigned for
+// recipient, idempotent on d's svix-id, if Quizzivy holds the address (see
+// Suppress). Every other event type, a bounce whose data.bounce.type is not
+// Permanent, an address Quizzivy does not hold, and an event it cannot read
+// are accepted and ignored: it is signed, so it is Resend's, and refusing it
+// would only make Resend retry it. It answers ErrUnsigned for
 // a delivery that fails Verify, and an error only when the list cannot be
 // written, for Resend to retry. The log names the event's type, the reason
 // and the recipient's domain, never the address.
@@ -152,6 +166,10 @@ func (w *Webhook) Receive(ctx context.Context, d Delivery) error {
 	var reason Reason
 	switch e.Type {
 	case EventBounced:
+		if bounce := e.Data.Bounce.Type; bounce != "" && !strings.EqualFold(bounce, BouncePermanent) {
+			w.Logger.Info("email event ignored", "type", e.Type, "reason", "soft_bounce", "bounceType", truncate(bounce, 64))
+			return nil
+		}
 		reason = ReasonBounced
 	case EventComplained:
 		reason = ReasonComplained
@@ -165,6 +183,10 @@ func (w *Webhook) Receive(ctx context.Context, d Delivery) error {
 		return nil
 	}
 	listed, err := Suppress(ctx, w.DB, Suppression{Address: address, Reason: reason, EventID: d.ID})
+	if errors.Is(err, ErrUnknownAddress) {
+		w.Logger.Info("email event ignored", "type", e.Type, "reason", "unknown_recipient", "toDomain", Domain(address))
+		return nil
+	}
 	if err != nil {
 		return err
 	}

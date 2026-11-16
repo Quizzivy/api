@@ -28,6 +28,12 @@ const (
 // ErrNotAnAddress is a suppression whose address is not one email address.
 var ErrNotAnAddress = errors.New("email: the suppressed address is not one email address")
 
+// ErrUnknownAddress is a suppression of an address Quizzivy does not hold:
+// no outbox row is to it and no account has it. Resend reports on everything
+// its account sends, so an event can name an address that is not Quizzivy's
+// to keep; nothing is stored for it.
+var ErrUnknownAddress = errors.New("email: the suppressed address is not one Quizzivy holds")
+
 // Suppression is an address to stop mailing, the reason, and the provider's
 // id for the event that reported it.
 type Suppression struct {
@@ -47,10 +53,17 @@ func SuppressionAddress(address string) (string, bool) {
 	return strings.ToLower(strings.TrimSpace(parsed.Address)), true
 }
 
-// Suppress lists s's address on q. It answers whether this call listed it:
-// false when the address is already listed, under whichever reason came
-// first, or when s's event was already recorded, so a replayed delivery
-// changes nothing.
+// Suppress lists s's address on q, if Quizzivy already holds the address: an
+// app.email_outbox row is to it, in any case or padding, or an account has it
+// as its email. It answers whether this call listed it: false when the
+// address is already listed, under whichever reason came first, or when s's
+// event was already recorded, so a replayed delivery changes nothing. An
+// address Quizzivy does not hold is ErrUnknownAddress, and nothing is written.
+//
+// The outbox probe has no index on the address; the outbox keeps a day's
+// budget of rows a day for Retention, a few thousand rows, and the webhook
+// takes at most 120 events a minute. The account probe uses
+// users_email_lower_key.
 func Suppress(ctx context.Context, q db.Querier, s Suppression) (bool, error) {
 	address, ok := SuppressionAddress(s.Address)
 	if !ok {
@@ -62,12 +75,23 @@ func Suppress(ctx context.Context, q db.Querier, s Suppression) (bool, error) {
 	if s.EventID == "" {
 		return false, errors.New("email: a suppression needs the event's id")
 	}
-	tag, err := q.Exec(ctx, `
-		INSERT INTO app.email_suppressions (address, reason, provider_event_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING`, address, string(s.Reason), s.EventID)
+	var known, listed bool
+	err := q.QueryRow(ctx, `
+		WITH known AS (
+		  SELECT EXISTS (SELECT 1 FROM app.email_outbox o WHERE lower(btrim(o.to_address)) = $1::text)
+		      OR EXISTS (SELECT 1 FROM app.users u WHERE lower(u.email) = $1::text) AS yes
+		), listed AS (
+		  INSERT INTO app.email_suppressions (address, reason, provider_event_id)
+		  SELECT $1::text, $2::text, $3::text FROM known WHERE known.yes
+		  ON CONFLICT DO NOTHING
+		  RETURNING 1
+		)
+		SELECT known.yes, EXISTS (SELECT 1 FROM listed) FROM known`, address, string(s.Reason), s.EventID).Scan(&known, &listed)
 	if err != nil {
 		return false, fmt.Errorf("email: suppress an address: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if !known {
+		return false, ErrUnknownAddress
+	}
+	return listed, nil
 }

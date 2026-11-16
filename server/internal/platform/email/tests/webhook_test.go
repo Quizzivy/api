@@ -135,6 +135,24 @@ func TestAnUnsignedDeliveryIsRefusedBeforeTheDatabase(t *testing.T) {
 	}
 }
 
+// TestASoftBounceListsNothing fails when a signed email.bounced whose
+// data.bounce.type is anything but Permanent, in any case, reaches the list:
+// a full mailbox or an undetermined bounce must not stop mail for good. The
+// webhook's database here is one no query can reach.
+func TestASoftBounceListsNothing(t *testing.T) {
+	webhook, err := email.NewWebhook(webhookSecret, db.Context{}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhook.Now = func() time.Time { return webhookNow }
+	for _, bounce := range []string{"Transient", "transient", "Temporary", "Undetermined"} {
+		body := `{"type":"email.bounced","created_at":"2031-03-10T05:00:00.000Z","data":{"email_id":"4ef9a417","to":["Nam.Le@Example.com"],"bounce":{"type":"` + bounce + `","subType":"MailboxFull","message":"x"}}}`
+		if err := webhook.Receive(context.Background(), signed(signingKey, "msg_soft_"+bounce, webhookNow, body)); err != nil {
+			t.Errorf("a signed %s bounce: %v, want it accepted and nothing listed", bounce, err)
+		}
+	}
+}
+
 // TestASuppressedAddressIsStoredAsTheDispatcherComparesIt fails when the
 // list's form of an address is not the trimmed, lower-cased bare address, or
 // when something that is not one address gets a form.

@@ -46,10 +46,12 @@ func (w *world) deliverEvent(t *testing.T, key []byte, id, kind, to string) (int
 }
 
 // TestABouncedAddressGetsNoMoreMailAndAForgedOneChangesNothing is T-R7.15
-// through HTTP and R5's dispatcher: a signed hard bounce lists an address,
-// after which the set-password invite written for it is closed as
-// SUPPRESSED and never sent, while a forged bounce for another address is
-// refused 401 and that address's invite goes. Every answer is empty.
+// through HTTP and R5's dispatcher: two invites are queued, then a signed
+// hard bounce lists one address, after which its set-password invite is
+// closed as SUPPRESSED and never sent, while a forged bounce for the other
+// address is refused 401 and that address's invite goes. A signed bounce for
+// an address Quizzivy does not hold is answered the same 204 and lists
+// nothing. Every answer is empty.
 func TestABouncedAddressGetsNoMoreMailAndAForgedOneChangesNothing(t *testing.T) {
 	w := boot(t, func(c *config.Config) {
 		c.SecretsKey = []byte(importSecretsKey)
@@ -64,9 +66,17 @@ func TestABouncedAddressGetsNoMoreMailAndAForgedOneChangesNothing(t *testing.T) 
 	n := nonce(t)
 	bounced, forged := "hoc-vien-"+n+"@example.com", "ban-"+n+"@example.com"
 	t.Cleanup(func() {
-		_, _ = w.pool.Exec(context.Background(), `DELETE FROM app.email_suppressions WHERE address = ANY($1::text[])`, []string{bounced, forged})
+		_, _ = w.pool.Exec(context.Background(), `DELETE FROM app.email_suppressions WHERE address = ANY($1::text[])`, []string{bounced, forged, "nobody-" + n + "@example.com"})
 	})
 
+	for _, address := range []string{bounced, forged} {
+		admin.must(http.StatusCreated, http.MethodPost, "/admin/users", map[string]any{
+			"email": address, "fullName": "Học viên", "roleId": roleID, "delivery": "email_link",
+		})
+	}
+	if status, body := w.deliverEvent(t, suppressionKey, "msg_u"+n, email.EventBounced, "nobody-"+n+"@example.com"); status != http.StatusNoContent || body != "" {
+		t.Fatalf("a signed bounce for an address Quizzivy does not hold: %d %q, want 204 with no body", status, body)
+	}
 	if status, body := w.deliverEvent(t, suppressionKey, "msg_b"+n, email.EventBounced, strings.ToUpper(bounced)); status != http.StatusNoContent || body != "" {
 		t.Fatalf("a signed bounce: %d %q, want 204 with no body", status, body)
 	}
@@ -77,7 +87,7 @@ func TestABouncedAddressGetsNoMoreMailAndAForgedOneChangesNothing(t *testing.T) 
 		t.Fatalf("a forged complaint: %d %q, want 401 with no body", status, body)
 	}
 	var listed []string
-	rows, err := w.pool.Query(context.Background(), `SELECT address FROM app.email_suppressions WHERE address = ANY($1::text[])`, []string{bounced, forged})
+	rows, err := w.pool.Query(context.Background(), `SELECT address FROM app.email_suppressions WHERE address = ANY($1::text[])`, []string{bounced, forged, "nobody-" + n + "@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,11 +103,6 @@ func TestABouncedAddressGetsNoMoreMailAndAForgedOneChangesNothing(t *testing.T) 
 		t.Fatalf("listed %v, want the bounced address alone, lower-cased", listed)
 	}
 
-	for _, address := range []string{bounced, forged} {
-		admin.must(http.StatusCreated, http.MethodPost, "/admin/users", map[string]any{
-			"email": address, "fullName": "Học viên", "roleId": roleID, "delivery": "email_link",
-		})
-	}
 	dispatcher, sender := w.dispatcherAt(t, time.Now())
 	drain(t, dispatcher)
 	if got := sender.to(bounced); len(got) != 0 {

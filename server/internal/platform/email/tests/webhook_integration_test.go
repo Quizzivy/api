@@ -83,32 +83,69 @@ func eventFor(kind, to string) string {
 	return `{"type":"` + kind + `","created_at":"2031-03-10T05:00:00.000Z","data":{"email_id":"4ef9a417","from":"Quizzivy <no-reply@quizzivy.com>","to":["` + to + `"],"subject":"Đề giữa kỳ"}}`
 }
 
+func bounceFor(bounceType, to string) string {
+	return `{"type":"email.bounced","created_at":"2031-03-10T05:00:00.000Z","data":{"email_id":"4ef9a417","to":["` + to + `"],"bounce":{"type":"` + bounceType + `","subType":"General","message":"x"}}}`
+}
+
+func emailOf(t *testing.T, pool *pgxpool.Pool, userID string) string {
+	t.Helper()
+	var address string
+	if err := pool.QueryRow(context.Background(), `SELECT email FROM app.users WHERE id = $1::uuid`, userID).Scan(&address); err != nil {
+		t.Fatal(err)
+	}
+	return address
+}
+
 // TestABounceOrAComplaintListsItsRecipientAndAReplayChangesNothing fails when
 // a signed hard bounce or complaint does not list its recipient as the
 // dispatcher compares it, when a replayed svix-id or a second event for a
-// listed address changes the list, when another event type lists anything,
-// or when the log carries the address.
+// listed address changes the list, when another event type, a soft bounce or
+// an address Quizzivy does not hold lists anything, or when the log carries
+// the address.
 func TestABounceOrAComplaintListsItsRecipientAndAReplayChangesNothing(t *testing.T) {
-	pool := newPool(t)
+	w := newWorld(t, webhookNow)
+	pool := w.pool
 	logs := &lockedBuffer{}
 	webhook := newWebhook(t, pool, logs)
 	n := nonce(t)
 	bounced, complained, delivered, replayed := "bounced-"+n+"@example.com", "complained-"+n+"@example.com", "delivered-"+n+"@example.com", "replayed-"+n+"@example.com"
-	forget(t, pool, bounced, complained, delivered, replayed)
+	hard, soft, unknown := "hard-"+n+"@example.com", "soft-"+n+"@example.com", "unknown-"+n+"@example.com"
+	account := emailOf(t, pool, newUser(t, pool, "vi"))
+	for _, address := range []string{bounced, complained, delivered, replayed, hard, soft} {
+		w.enqueue(t, invite(address))
+	}
+	forget(t, pool, bounced, complained, delivered, replayed, hard, soft, unknown, account)
+	receiveBody := func(id, body string) {
+		t.Helper()
+		if err := webhook.Receive(context.Background(), signed(signingKey, id, webhookNow, body)); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+	}
 	receive := func(id, kind, to string) {
 		t.Helper()
-		if err := webhook.Receive(context.Background(), signed(signingKey, id, webhookNow, eventFor(kind, to))); err != nil {
-			t.Fatalf("%s %s: %v", id, kind, err)
-		}
+		receiveBody(id, eventFor(kind, to))
 	}
 
 	receive("msg_b"+n, email.EventBounced, "  Bounced-"+n+"@Example.COM")
 	receive("msg_c"+n, email.EventComplained, complained)
 	receive("msg_d"+n, "email.delivered", delivered)
 	receive("msg_o"+n, "email.opened", delivered)
-	want := map[string]suppression{bounced: {"bounced", "msg_b" + n}, complained: {"complained", "msg_c" + n}}
-	if got := suppressionsOf(t, pool, bounced, complained, delivered); len(got) != 2 || got[bounced] != want[bounced] || got[complained] != want[complained] {
+	receiveBody("msg_h"+n, bounceFor("Permanent", hard))
+	receiveBody("msg_s"+n, bounceFor("Transient", soft))
+	receive("msg_u"+n, email.EventBounced, unknown)
+	receive("msg_a"+n, email.EventComplained, strings.ToUpper(account))
+	want := map[string]suppression{
+		bounced: {"bounced", "msg_b" + n}, complained: {"complained", "msg_c" + n},
+		hard: {"bounced", "msg_h" + n}, account: {"complained", "msg_a" + n},
+	}
+	got := suppressionsOf(t, pool, bounced, complained, delivered, hard, soft, unknown, account)
+	if len(got) != len(want) {
 		t.Fatalf("listed %+v, want %+v", got, want)
+	}
+	for address, s := range want {
+		if got[address] != s {
+			t.Fatalf("listed %+v, want %+v", got, want)
+		}
 	}
 
 	receive("msg_b"+n, email.EventBounced, bounced)
@@ -117,8 +154,10 @@ func TestABounceOrAComplaintListsItsRecipientAndAReplayChangesNothing(t *testing
 	if got := suppressionsOf(t, pool, bounced, complained, replayed); len(got) != 2 || got[bounced] != want[bounced] || got[complained] != want[complained] {
 		t.Errorf("a replayed svix-id or a second event changed the list: %+v", got)
 	}
-	if strings.Contains(strings.ToLower(logs.String()), n+"@") || !strings.Contains(logs.String(), "toDomain=example.com") {
-		t.Errorf("the log names the address, or not the domain: %s", logs.String())
+	out := logs.String()
+	if strings.Contains(strings.ToLower(out), n+"@") || !strings.Contains(out, "toDomain=example.com") ||
+		!strings.Contains(out, "reason=soft_bounce") || !strings.Contains(out, "reason=unknown_recipient") {
+		t.Errorf("the log names the address, or not the domain and why an event was ignored: %s", out)
 	}
 }
 
@@ -137,13 +176,13 @@ func TestASuppressedAddressIsClosedAsSuppressedAndNeverSent(t *testing.T) {
 	n := nonce(t)
 	listed, other := "listed-"+n+"@example.com", "other-"+n+"@example.com"
 	forget(t, w.pool, listed)
-	if _, err := email.Suppress(context.Background(), w.pool, email.Suppression{Address: listed, Reason: email.ReasonBounced, EventID: "msg_" + n}); err != nil {
-		t.Fatal(err)
-	}
 	user := newUser(t, w.pool, "vi")
 	invited := w.enqueue(t, invite("Listed-"+n+"@EXAMPLE.com"))
 	notice := w.enqueue(t, flagged(listed, user, someAttempt))
 	sent := w.enqueue(t, invite(other))
+	if _, err := email.Suppress(context.Background(), w.pool, email.Suppression{Address: listed, Reason: email.ReasonBounced, EventID: "msg_" + n}); err != nil {
+		t.Fatal(err)
+	}
 
 	batch, err := w.disp.Dispatch(context.Background())
 	if err != nil {
@@ -185,13 +224,22 @@ func TestASuppressedAddressIsClosedAsSuppressedAndNeverSent(t *testing.T) {
 }
 
 // TestSuppressRefusesWhatIsNoAddressAndKeepsTheFirstReason fails when Suppress
-// stores something that is not one address, takes an unknown reason or no
-// event id, or lets a later reason replace the first.
+// stores something that is not one address, an address Quizzivy does not
+// hold, takes an unknown reason or no event id, or lets a later reason
+// replace the first.
 func TestSuppressRefusesWhatIsNoAddressAndKeepsTheFirstReason(t *testing.T) {
-	pool := newPool(t)
+	w := newWorld(t, webhookNow)
+	pool := w.pool
 	n := nonce(t)
-	address := "first-" + n + "@example.com"
-	forget(t, pool, address)
+	address, stranger := "first-"+n+"@example.com", "stranger-"+n+"@example.com"
+	w.enqueue(t, invite("First-"+n+"@Example.com"))
+	forget(t, pool, address, stranger)
+	if listed, err := email.Suppress(context.Background(), pool, email.Suppression{Address: stranger, Reason: email.ReasonBounced, EventID: "msg_s" + n}); !errors.Is(err, email.ErrUnknownAddress) || listed {
+		t.Errorf("an address no outbox row and no account holds: %v %v, want ErrUnknownAddress", listed, err)
+	}
+	if got := suppressionsOf(t, pool, stranger); len(got) != 0 {
+		t.Errorf("an address Quizzivy does not hold was listed: %+v", got)
+	}
 	for name, s := range map[string]email.Suppression{
 		"no address":     {Address: "nobody", Reason: email.ReasonBounced, EventID: "msg_x" + n},
 		"another reason": {Address: address, Reason: "unsubscribed", EventID: "msg_y" + n},
