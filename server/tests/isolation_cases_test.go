@@ -229,6 +229,19 @@ func freshPublishedTest(_ *iso, own *party) *party {
 	return own.with("test", id(test)).with("section", section).with("test-version", version).with("question", question)
 }
 
+// freshDraftQuestion is a question of the caller's in the draft of a test of
+// theirs, both new, so an edit in the test's context (editTestQuestion) never
+// changes the world's question that later cases edit.
+func freshDraftQuestion(_ *iso, own *party) *party {
+	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
+	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề sửa câu dùng một lần"})
+	own.c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+id(test), map[string]any{
+		"expectedUpdatedAt": test["updatedAt"],
+		"sections":          []map[string]any{{"title": "Phần 1", "questionIds": []string{question}}},
+	})
+	return own.with("test", id(test)).with("question", question)
+}
+
 func freshGroupedTest(x *iso, own *party) *party {
 	published := freshPublishedTest(x, own)
 	group := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
@@ -401,7 +414,7 @@ func isolationCases() map[string]isoCase {
 		"listSharedWithMe":   {},
 		"removeSharedWithMe": {as: map[string]string{"path shareId": "shared-with-me"}, fresh: freshSharedWithMe},
 
-		"editTestQuestion": {body: func(_ *iso, own *party, slot string) any {
+		"editTestQuestion": {fresh: freshDraftQuestion, body: func(_ *iso, own *party, slot string) any {
 			return withProseMedia(choiceInput(own), own, slot)
 		}},
 		"copyTest":             {pending: copyPending},
