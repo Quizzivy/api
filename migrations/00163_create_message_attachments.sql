@@ -51,8 +51,12 @@ CREATE TABLE app.message_attachments (
   CONSTRAINT message_attachments_checksum_sha256_check CHECK (length(checksum_sha256) = 32)
 );
 
--- An uploader's files by age: the sweep of unsent files and the cascade check
--- of a user's deletion.
+-- An uploader's files by age, and the check the RESTRICT key makes when a user
+-- is deleted. The daily sweep of unsent files (T-R7.11) does not use it: it
+-- reads every uploader's files older than 24 hours and keeps those a message
+-- holds. Sent files are older than that too, and are kept for good, so an index
+-- on created_at would still visit each of them: the sweep scans the table, once
+-- a day.
 CREATE INDEX message_attachments_uploader_idx ON app.message_attachments (uploaded_by, created_at);
 
 -- quizzivy_app holds SELECT, INSERT, UPDATE and DELETE through the default
