@@ -1,6 +1,6 @@
 # Build context is the repo root, not server/, because the image also carries
-# migrations/ so Fly's release_command can apply them before a new version
-# takes traffic.
+# migrations/ so the deploy's one-shot migration step can apply them before a
+# new version takes traffic.
 
 # ---------------------------------------------------------------- build
 FROM golang:1.27-alpine AS build
@@ -50,8 +50,9 @@ COPY migrations /app/migrations
 USER nonroot:nonroot
 EXPOSE 8080
 
-# CMD, not ENTRYPOINT. Fly APPENDS release_command to a container's entrypoint,
-# so with ENTRYPOINT ["/app/api"] the release step runs
+# CMD, not ENTRYPOINT. The box runs the worker and the migration step from
+# this image by naming another binary as the container's command; with
+# ENTRYPOINT ["/app/api"] that command is APPENDED,
 #   /app/api /app/migrate -dir /app/migrations up
 # -- the API binary with stray arguments, which ignores them, boots, and fails.
 # The migration never runs, and the error looks like a database problem.

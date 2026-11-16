@@ -2,7 +2,7 @@
 
 The Go backend of Quizzivy: the API (`server/cmd/api`), the Word import worker
 (`server/cmd/import-worker`), maintenance (`server/cmd/maintenance`), the
-migrations and the seed. PostgreSQL 18 (Neon in production), Cloudflare R2.
+migrations and the seed. PostgreSQL 18 (on the production VPS), Cloudflare R2.
 
 | Repository | What it holds |
 |---|---|

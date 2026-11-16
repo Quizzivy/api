@@ -80,7 +80,7 @@ wrong.
 | Name | Type | Target | Who creates it |
 |---|---|---|---|
 | `app` | CNAME | `<project>.pages.dev` | **Cloudflare, automatically** |
-| `api` | A + AAAA | the IPs `fly certs add` prints | you, by hand |
+| `api` | A | the box's IPv4 address, DNS only | you, by hand |
 
 Until 2026-11 the SPA was one host, `app.quizzivy.com`; the dated observations
 below name it as it was then. Since spec §5.8 it is two custom domains of the
@@ -131,56 +131,33 @@ Two ways to create the project:
   --project-name quizzivy-web` from `web/`. No GitHub needed, good for a first
   smoke test.
 
-### `api` — Fly.io, and the certificate
+### `api` — the VPS, and the certificate
 
-Done on 2026-08-28. `fly certs add api.quizzivy.com` created the certificate and
-printed the records it wants — **A and AAAA to the app's dedicated IPs**, not a
-CNAME to `quizzivy-api.fly.dev`. Use whatever `fly certs add` prints rather than
-the values here; they are per-app.
-
-```
-A     api  ->  66.241.124.115
-AAAA  api  ->  2a09:8280:1::17d:c39f:0
-```
-
-Order matters. Add them **DNS only** (grey cloud) first: with the record already
-proxied, Cloudflare answers the ACME challenge instead of Fly and issuance
-hangs. Then:
-
-```bash
-fly certs check api.quizzivy.com     # wait for "Certificate issued"
-```
-
-Only once it is issued, switch the records to **proxied** (orange) and set the
-zone's SSL/TLS mode to **Full (strict)** — Fly now presents a real certificate,
-so strict verification passes.
-
-Leaving them grey is a defensible alternative: one less hop, and Fly terminates
-TLS itself. It changes one setting, below.
+The API runs on a VPS in Ho Chi Minh City (`Quizzivy/infra`, `docs/vps.md`).
+The record is an A record to the box's address, **DNS only** (grey cloud): the
+box has no IPv6 address, and clients reach it directly. Caddy on the box gets
+and renews a Let's Encrypt certificate, which needs the record to point at the
+box and ports 80 and 443 open. `docs/vps.md`, "Ingress", has the switch that
+puts Cloudflare's proxy in front on a bad day; with the record proxied, the
+zone's SSL/TLS mode is **Full (strict)**.
 
 ### The setting that depends on the proxy decision
 
 `CLIENT_IP_HEADER` must name the header set by whatever sits directly in front
-of the app:
+of the app. On the box that is Caddy, and it sets `X-Real-IP` on every request:
+from the socket while clients reach the box directly, from `CF-Connecting-IP`
+while only Cloudflare can (`Quizzivy/infra`, `vps/caddy`). A value a client
+sends under that name is replaced. So `deploy/production.env` sets `X-Real-IP`,
+and switching the proxy on or off does not change it.
 
-| `api` record | `CLIENT_IP_HEADER` |
-|---|---|
-| proxied (orange) | `CF-Connecting-IP` |
-| DNS only (grey) | `Fly-Client-IP` |
-
-The record was left grey, and `fly.toml` sets `Fly-Client-IP` (since
-2026-10-09). Until then it set `CF-Connecting-IP`, which on a grey record any
-client can send, so every rate limit was bypassable. Change both together if
-the record is ever made proxied.
+Until 2026-10-09 the setting was `CF-Connecting-IP` on a DNS-only record, which
+any client can send, so every rate limit was bypassable.
 
 The same setting decides whether the Signed-in devices list shows a location
-(T-R4.9). Only with `CF-Connecting-IP`, and only on a request that carries it,
-the API also reads `CF-IPCity` and `CF-IPCountry` to label where a device last
-signed in or refreshed, as "City, CC". Cloudflare sends the country by default
-and the city only while the "Add visitor location headers" Managed Transform is
-on (Rules → Settings → Managed Transforms; check the name in the dashboard).
-Without it the label is the country alone. With the record grey, the API
-records no location.
+(T-R4.9). Only when `CLIENT_IP_HEADER` is `CF-Connecting-IP`, and only on a
+request that carries it, the API also reads `CF-IPCity` and `CF-IPCountry` to
+label where a device last signed in or refreshed, as "City, CC". With
+`X-Real-IP`, as on the box, the API records no location.
 
 **Never set this to `X-Forwarded-For.`** Proxies *append* to that header, so a
 client can send its own value and have the real address appended after it —
@@ -190,8 +167,9 @@ letting it pick a fresh rate-limit bucket per request and defeat §6.5 entirely.
 
 ### Cloudflare proxy limits worth knowing
 
-The body limit leaves room for the media caps; time limits can still bind a
-large upload. Checked against Cloudflare's documentation on 2026-10-05:
+These bind only while the `api` record is proxied. The body limit leaves room
+for the media caps; time limits can still bind a large upload. Checked against
+Cloudflare's documentation on 2026-10-05:
 
 - Request body: the Free plan's default is 100 MB, above §11.1's 50 MiB audio
   and 10 MiB image limits plus multipart overhead. A zone can lower it in
@@ -212,13 +190,15 @@ edge `524` responses separately from API read or write deadline failures.
 
 ---
 
-## Secrets on Fly
+## Secrets
 
-Set these with `fly secrets set`, never in `fly.toml` — that file is committed.
+Set these in `/opt/quizzivy/app.secrets.env` on the box (its template is in
+`Quizzivy/infra`, `vps/secrets/`), never in `deploy/production.env` — that file
+is committed.
 
 ```
-DATABASE_URL           postgres://quizzivy_app:...@<neon-host>/quizzivy?sslmode=require
-MIGRATE_DATABASE_URL   postgres://quizzivy_migrate:...@<neon-host>/quizzivy?sslmode=require
+DATABASE_URL           postgres://quizzivy_app:...@postgres:5432/quizzivy?sslmode=disable
+MIGRATE_DATABASE_URL   postgres://quizzivy_migrate:...@postgres:5432/quizzivy?sslmode=disable
 JWT_SIGNING_KEY        openssl rand -base64 48
 JOIN_CODE_KEY          openssl rand -base64 32, with an offline copy in the owner's password manager
 SECRETS_KEY            openssl rand -base64 32, with an offline copy (docs/setup/operations.md, "Secrets key")
@@ -248,13 +228,14 @@ subdomain and needs it false, which is the default; only MinIO locally needs it
 true.
 
 **`GOOGLE_CLIENT_ID` is NOT a secret and is not set here.** It lives in
-`fly.toml`'s `[env]`, because it is a public identifier that already ships
+`deploy/production.env` (and the box's `vps/app.env`), because it is a public identifier that already ships
 inside a JS bundle any visitor can read. Setting it as a secret as well gives
 one value two homes, and they drift.
 
 Two roles, two URLs, deliberately (§13.5). `MIGRATE_DATABASE_URL` is used only
-by the release command; the running API connects as `quizzivy_app`, which cannot
-run DDL. `sslmode=require` because Neon is over the public internet.
+by the migration step; the running API connects as `quizzivy_app`, which cannot
+run DDL. `sslmode=disable` because PostgreSQL is reachable from the stack's own
+network alone (`docs/vps.md`, "Firewall").
 
 ## Email (Resend)
 
@@ -291,44 +272,9 @@ dependencies this project does not use, in a binary that runs against a public
 deployment. It uses the same goose library at the same version, with only the
 Postgres driver attached.
 
-`fly.toml` runs `migrate up` as a `release_command`, so the schema is applied
-before a new version takes traffic, and rolls back the deploy if it fails.
-
-`min_machines_running = 1` and `auto_stop_machines = false`: this app has a
-server-authoritative timer and a 1.5-second autosave loop, so a cold start when
-a class all begins a test at once is both slow and visible. At one
-shared-cpu-1x machine, never sleeping is a couple of dollars a month.
-
-## What is deployed (2026-08-28)
-
-| | |
-|---|---|
-| API | `https://quizzivy-api.fly.dev` — 2 machines in `sin`, healthy |
-| SPA | `https://quizzivy-web.pages.dev` |
-| Database | Neon, `ap-southeast-1`, PostgreSQL **18.6**, migrations at version 3 |
-
-Verified end to end: `/healthz` returns `database:ok`; an unbuilt operation
-returns the Vietnamese error envelope with a `requestId` matching the
-`X-Request-Id` header; CORS allows `https://app.quizzivy.com` and refuses
-others; deep links like `/join/K7M3-P9QR` serve the SPA shell rather than a
-CDN 404.
-
-Two manual steps remain, both needing dashboard access this project's tokens do
-not have (`zone:read` only, and Pages custom domains have no wrangler command):
-
-1. **`api`** — add the A and AAAA records above as **DNS only**, wait for
-   `fly certs check api.quizzivy.com` to report issued, then switch to proxied.
-2. **`app`** — Pages project `quizzivy-web` → Custom domains → add
-   `app.quizzivy.com`. Cloudflare creates the record itself.
-
-### A note on machine count
-
-Fly created **two** machines on first deploy, for zero-downtime rolling
-deploys. `fly.toml` only asks for a minimum of one. Two costs roughly twice as
-much and, at ~50 students, one would serve the load comfortably —
-`fly scale count 1 -a quizzivy-api` if the redundancy is not worth it. The
-argument for keeping two is that this is a test-taking app: a machine dying
-mid-exam with no second one is a bad afternoon.
+The box runs `migrate up` from the image as a one-shot container before it
+replaces the API and the worker, and a failed migration leaves the running
+version alone (`deploy.md`).
 
 ## Verify after the first deploy
 

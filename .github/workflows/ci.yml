@@ -425,10 +425,10 @@ jobs:
           marker: ${{ fromJSON(env.JOB).outcomes[0][job.status] }}
 
   # ------------------------------------------------------- production image
-  # Builds the root Dockerfile and starts the two processes fly.toml runs from
-  # it, as the image's nonroot user, so a start-up check that depends on the
-  # image's file system (INC-5: /home/nonroot/imports shipped at 0755) fails
-  # here and not on Fly. Neither process touches object storage while it
+  # Builds the root Dockerfile and starts the two processes production runs from
+  # it, with deploy/production.env, as the image's nonroot user, so a start-up
+  # check that depends on the image's file system (INC-5:
+  # /home/nonroot/imports shipped at 0755) fails here and not on the box. Neither process touches object storage while it
   # starts, so MinIO is not started.
   production-image:
     name: Production image

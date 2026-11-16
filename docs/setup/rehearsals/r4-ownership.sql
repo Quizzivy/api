@@ -1,19 +1,19 @@
--- R4 (v0.10.0) rehearsal of 00106_validate_ownership.sql on a Neon branch of
--- production.
+-- R4 (v0.10.0) rehearsal of 00106_validate_ownership.sql on a copy of
+-- production, never production itself.
 --
 -- Run as quizzivy_migrate, twice:
---   psql "$BRANCH_DSN" -v before=1 -f docs/setup/rehearsals/r4-ownership.sql > before.txt
+--   psql "$COPY_DSN" -v before=1 -f docs/setup/rehearsals/r4-ownership.sql > before.txt
 --   goose up (time it)
---   psql "$BRANCH_DSN" -f docs/setup/rehearsals/r4-ownership.sql > after.txt
+--   psql "$COPY_DSN" -f docs/setup/rehearsals/r4-ownership.sql > after.txt
 -- Section A must print the same in both files. Section P runs only before
 -- goose up and says whether the migration will stop. Section B runs only after
 -- goose up; every "must be" line must print what it says. Record the time of
--- goose up itself in the release PR, then delete the branch. Query timing is
+-- goose up itself in the release PR, then drop the copy. Query timing is
 -- off, so a plain diff of the two files shows section A unchanged.
 --
 -- The cost of the validation scans is a separate run, because it prints
 -- timings that differ from one run to the next:
---   psql "$BRANCH_DSN" -v before=1 -v scan=1 -f docs/setup/rehearsals/r4-ownership.sql
+--   psql "$COPY_DSN" -v before=1 -v scan=1 -f docs/setup/rehearsals/r4-ownership.sql
 -- Read-only: nothing here writes.
 
 \set ON_ERROR_STOP on

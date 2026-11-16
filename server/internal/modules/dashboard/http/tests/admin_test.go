@@ -163,7 +163,7 @@ func TestUsageWithNothingStatedIsNullsAndZeroesNeverMissingKeys(t *testing.T) {
 		}
 	}
 	if got := string(body["database"]); got != `{"bytes":0,"limit":10737418240}` {
-		t.Errorf("database = %s, want the Neon Launch warning line", got)
+		t.Errorf("database = %s, want the server disk's warning line", got)
 	}
 	var seats map[string]json.RawMessage
 	if err := json.Unmarshal(body["seats"], &seats); err != nil {

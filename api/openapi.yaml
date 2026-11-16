@@ -834,15 +834,16 @@ components:
       description: |
         What a limit is when nothing is stored. `value` is `null` for no limit.
         `source` says where it comes from: `r2_free` (Cloudflare R2's free tier,
-        10 GB), `neon_launch` (the warning line chosen for Neon's Launch plan,
-        which has no cap), `resend_free` (Resend's free plan, 100 a day and
+        10 GB), `vps_disk` (the warning line chosen for the database on the
+        server's 50 GB disk, which also holds the monthly restore drill's copy
+        beside it), `resend_free` (Resend's free plan, 100 a day and
         3,000 a month), `deploy` (a deploy variable that overrides the plan),
         `app` (the app's own figure) or `none`.
       required: [value, source]
       additionalProperties: false
       properties:
         value: { type: [integer, 'null'], format: int64, minimum: 1 }
-        source: { type: string, enum: [none, app, deploy, r2_free, neon_launch, resend_free] }
+        source: { type: string, enum: [none, app, deploy, r2_free, vps_disk, resend_free] }
 
     UsageLimitDefaults:
       type: object
@@ -4696,7 +4697,8 @@ components:
         which `importBytes` bounds. `email` counts what was sent today and this
         month in `APP_TIMEZONE`, and `held` the messages a cap moved to a
         later day or month. `database.bytes` is PostgreSQL's
-        `pg_database_size`, which approximates and is not what Neon bills.
+        `pg_database_size`, which approximates the files the database takes
+        on the server's disk.
         `attemptsKept` has no limit.
       required: [seats, teachers, storage, media, imports, email, database, attemptsKept, aiCredits, warnAtPercent]
       additionalProperties: false

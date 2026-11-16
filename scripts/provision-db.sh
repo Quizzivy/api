@@ -15,7 +15,7 @@
 # already has. Supporting both avoids a second copy of this logic.
 #
 #   ./scripts/provision-db.sh                              # libpq env vars
-#   ./scripts/provision-db.sh "postgres://user:pw@host/db" # DSN (Neon, etc.)
+#   ./scripts/provision-db.sh "postgres://user:pw@host/db" # DSN
 #
 # Idempotent: safe to re-run. A re-run changes a role's password only when the
 # matching QUIZZIVY_*_PASSWORD variable is set, so adding one role to a database
@@ -34,7 +34,7 @@ run_psql() {
   local dbname="$1"; shift
   if [ -n "$ADMIN_DSN" ]; then
     # Swap the database component of the DSN, keeping host, credentials and
-    # any query string (Neon requires sslmode=require).
+    # any query string (sslmode and the like).
     local rewritten
     rewritten=$(printf '%s' "$ADMIN_DSN" | sed -E "s#(://[^/]+)/[^?]*#\1/${dbname}#")
     psql -v ON_ERROR_STOP=1 "$rewritten" "$@"
@@ -60,7 +60,7 @@ connection_host() {
   fi
 }
 
-# A tunnel to a production database (fly proxy, an SSH forward) arrives on
+# A tunnel to a production database (an SSH forward) arrives on
 # localhost and looks local; QUIZZIVY_MANAGED=1 says it is not.
 CONNECTION_HOST=$(connection_host)
 case "$CONNECTION_HOST" in
