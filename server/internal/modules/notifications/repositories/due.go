@@ -274,8 +274,12 @@ type scheduledRow struct {
 // whose moment lies in (now - domain.ScheduleLookback, now]: the reads of
 // Due's student and teacher items, over every account at once. A teacher is
 // warned only while a student they reach, whose close the assignment's is,
-// has not handed in (Mail.Closing). An email the outbox already holds is
-// left out.
+// has not handed in (Mail.Closing). A released result is emailed only for a
+// paper whose status is graded, the rule Mail.Ready applies at send time:
+// this is narrower than Due's ready item, which also counts a paper handed
+// in with no answer awaiting a mark, so an auto-marked paper nobody declared
+// graded gets the item at its close but no email. An email the outbox
+// already holds is left out.
 func (r *scheduledRun) DueEmails(ctx context.Context, now time.Time) ([]domain.Email, error) {
 	rows, err := db.QueryMany(ctx, r.tx, dueEmailsQuery, []any{now, now, now.Add(-domain.ScheduleLookback)}, func(rows pgx.Rows) (scheduledRow, error) {
 		var row scheduledRow

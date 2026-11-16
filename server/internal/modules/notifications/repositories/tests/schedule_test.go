@@ -445,6 +445,10 @@ func TestTwoSchedulersUnderTheLockEnqueueOneSet(t *testing.T) {
 	if err != nil || !held.Busy || held.Emails != 0 {
 		t.Errorf("while another transaction holds the lock the run did %+v %v, want busy", held, err)
 	}
+	held, err = machine().Commands.RunSchedule.Handle(ctx, command.RunSchedule{Now: far})
+	if err != nil || !held.Busy || held.Emails+held.InApp != 0 {
+		t.Errorf("while another transaction holds the lock the whole run did %+v %v, want busy", held, err)
+	}
 	if err := holder.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +459,7 @@ func TestTwoSchedulersUnderTheLockEnqueueOneSet(t *testing.T) {
 		app := machine()
 		wg.Go(func() {
 			for range 4 {
-				done, err := app.Commands.SendDueEmails.Handle(ctx, command.SendDueEmails{Now: far})
+				done, err := app.Commands.RunSchedule.Handle(ctx, command.RunSchedule{Now: far})
 				if err != nil {
 					t.Error(err)
 					return

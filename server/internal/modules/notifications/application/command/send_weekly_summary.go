@@ -30,34 +30,39 @@ func (s SendWeeklySummaryHandler) Handle(ctx context.Context, cmd SendWeeklySumm
 		return Scheduled{}, domain.ErrNoSchedule
 	}
 	var done Scheduled
-	weekly := domain.WeeklyOn{Email: s.EmailOn(domain.EmailWeeklySummary)}
 	locked, err := s.Schedule.Locked(ctx, func(run domain.ScheduledRun) error {
-		teachers, err := run.WeeklyTeachers(ctx, weekly)
-		if err != nil {
-			return err
-		}
-		zones := map[string]*time.Location{}
-		for _, teacher := range teachers {
-			zone, seen := zones[teacher.Zone]
-			if !seen {
-				zone, _ = domain.Zone(teacher.Zone)
-				zones[teacher.Zone] = zone
-			}
-			if zone == nil {
-				done.Skipped++
-				continue
-			}
-			if err := s.summarise(ctx, run, teacher, zone, cmd.Now, &done); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.within(ctx, run, cmd.Now, &done)
 	})
 	if err != nil {
 		return Scheduled{}, err
 	}
 	done.Busy = !locked
 	return done, nil
+}
+
+// within is SendWeeklySummary's work inside run, a transaction that already
+// holds the scheduler's lock, added to done.
+func (s SendWeeklySummaryHandler) within(ctx context.Context, run domain.ScheduledRun, now time.Time, done *Scheduled) error {
+	teachers, err := run.WeeklyTeachers(ctx, domain.WeeklyOn{Email: s.EmailOn(domain.EmailWeeklySummary)})
+	if err != nil {
+		return err
+	}
+	zones := map[string]*time.Location{}
+	for _, teacher := range teachers {
+		zone, seen := zones[teacher.Zone]
+		if !seen {
+			zone, _ = domain.Zone(teacher.Zone)
+			zones[teacher.Zone] = zone
+		}
+		if zone == nil {
+			done.Skipped++
+			continue
+		}
+		if err := s.summarise(ctx, run, teacher, zone, now, done); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s SendWeeklySummaryHandler) summarise(ctx context.Context, run domain.ScheduledRun, teacher domain.WeeklyTeacher, zone *time.Location, now time.Time, done *Scheduled) error {

@@ -30,6 +30,7 @@ type fakeSchedule struct {
 	enqueued  []domain.Email
 	published []domain.Notice
 	summed    []domain.Week
+	locks     int
 }
 
 func (f *fakeSchedule) Upcoming(_ context.Context, _ time.Time, weekly domain.WeeklyOn) (domain.Upcoming, error) {
@@ -38,6 +39,7 @@ func (f *fakeSchedule) Upcoming(_ context.Context, _ time.Time, weekly domain.We
 }
 
 func (f *fakeSchedule) Locked(_ context.Context, fn func(domain.ScheduledRun) error) (bool, error) {
+	f.locks++
 	if f.busy {
 		return false, nil
 	}
@@ -89,6 +91,9 @@ func TestTheScheduledRunsRefuseWithoutTheirStore(t *testing.T) {
 	if _, err := app.Commands.SendWeeklySummary.Handle(context.Background(), command.SendWeeklySummary{Now: mondayInTokyo}); !errors.Is(err, domain.ErrNoSchedule) {
 		t.Errorf("weekly summary: %v, want ErrNoSchedule", err)
 	}
+	if _, err := app.Commands.RunSchedule.Handle(context.Background(), command.RunSchedule{Now: mondayInTokyo}); !errors.Is(err, domain.ErrNoSchedule) {
+		t.Errorf("run: %v, want ErrNoSchedule", err)
+	}
 	if due, err := app.Queries.NextDue.Handle(context.Background(), query.NextDue{Now: mondayInTokyo}); err != nil || due.Any {
 		t.Errorf("next due %+v %v, want nothing", due, err)
 	}
@@ -124,6 +129,33 @@ func TestARunAnotherMachineHoldsWritesNothingAndSaysSo(t *testing.T) {
 	}
 	if len(store.enqueued)+len(store.published) != 0 {
 		t.Errorf("a busy run wrote %+v %+v", store.enqueued, store.published)
+	}
+}
+
+// TestOneRunWritesBothKindsUnderOneTakeOfTheLock: RunSchedule writes the
+// due emails and the weekly summaries in one Locked transaction, and a run
+// another machine holds writes neither.
+func TestOneRunWritesBothKindsUnderOneTakeOfTheLock(t *testing.T) {
+	teacher := domain.WeeklyTeacher{ID: plannedTeacher, Zone: "Asia/Tokyo", Email: true, InApp: true}
+	figures := domain.WeeklyFigures{Count: 2, ClassNames: []string{"Lớp 10A"}}
+	reminder := domain.DueEmail(plannedAssignment, plannedStudent, domain.LeadHour, mondayInTokyo.Add(time.Hour))
+	store := &fakeSchedule{due: []domain.Email{reminder}, teachers: []domain.WeeklyTeacher{teacher}, figures: figures}
+	done, err := scheduled(t, store, nil).Commands.RunSchedule.Handle(context.Background(), command.RunSchedule{Now: mondayInTokyo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.locks != 1 {
+		t.Errorf("one run took the lock %d times, want once", store.locks)
+	}
+	if done.Busy || done.Emails != 2 || done.InApp != 1 || len(store.enqueued) != 2 ||
+		store.enqueued[0].Template != domain.EmailAssignmentDueSoon || store.enqueued[1].Template != domain.EmailWeeklySummary {
+		t.Errorf("done %+v, enqueued %+v: want the reminder, then the summary's email and item", done, store.enqueued)
+	}
+
+	held := &fakeSchedule{busy: true, due: []domain.Email{reminder}, teachers: []domain.WeeklyTeacher{teacher}, figures: figures}
+	done, err = scheduled(t, held, nil).Commands.RunSchedule.Handle(context.Background(), command.RunSchedule{Now: mondayInTokyo})
+	if err != nil || !done.Busy || held.locks != 1 || len(held.enqueued)+len(held.published) != 0 {
+		t.Errorf("a run another machine holds: done %+v %v, locks %d, wrote %+v %+v", done, err, held.locks, held.enqueued, held.published)
 	}
 }
 

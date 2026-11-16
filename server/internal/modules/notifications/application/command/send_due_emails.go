@@ -42,28 +42,34 @@ func (s SendDueEmailsHandler) Handle(ctx context.Context, cmd SendDueEmails) (Sc
 	}
 	var done Scheduled
 	locked, err := s.Schedule.Locked(ctx, func(run domain.ScheduledRun) error {
-		emails, err := run.DueEmails(ctx, cmd.Now)
-		if err != nil {
-			return err
-		}
-		for _, e := range emails {
-			if !s.EmailOn(e.Template) {
-				done.Skipped++
-				continue
-			}
-			wrote, err := run.Enqueue(ctx, e)
-			if err != nil {
-				return err
-			}
-			if wrote {
-				done.Emails++
-			}
-		}
-		return nil
+		return s.within(ctx, run, cmd.Now, &done)
 	})
 	if err != nil {
 		return Scheduled{}, err
 	}
 	done.Busy = !locked
 	return done, nil
+}
+
+// within is SendDueEmails's work inside run, a transaction that already
+// holds the scheduler's lock, added to done.
+func (s SendDueEmailsHandler) within(ctx context.Context, run domain.ScheduledRun, now time.Time, done *Scheduled) error {
+	emails, err := run.DueEmails(ctx, now)
+	if err != nil {
+		return err
+	}
+	for _, e := range emails {
+		if !s.EmailOn(e.Template) {
+			done.Skipped++
+			continue
+		}
+		wrote, err := run.Enqueue(ctx, e)
+		if err != nil {
+			return err
+		}
+		if wrote {
+			done.Emails++
+		}
+	}
+	return nil
 }

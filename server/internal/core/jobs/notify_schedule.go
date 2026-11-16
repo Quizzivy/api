@@ -110,10 +110,10 @@ func (n *Nudge) Nudge() {
 // C is the channel Nudge signals on, for RunNotifySchedule.
 func (n *Nudge) C() <-chan struct{} { return n.c }
 
-// NotificationSchedule is the notifications module's scheduler: its two
-// scheduled commands, each under the scheduler's lock, and its NextDue.
-// Each run is bounded by budget, and one that wrote anything says so on
-// logger.
+// NotificationSchedule is the notifications module's scheduler: its
+// RunSchedule, which writes the due emails and the weekly summaries in one
+// transaction under one take of the scheduler's lock, and its NextDue. Each
+// run is bounded by budget, and one that wrote anything says so on logger.
 func NotificationSchedule(app *notificationsapp.Application, budget time.Duration, logger *slog.Logger) NotifyScheduler {
 	return notificationSchedule{app: app, budget: budget, logger: logger}
 }
@@ -127,18 +127,14 @@ type notificationSchedule struct {
 func (n notificationSchedule) Run(ctx context.Context, now time.Time) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, n.budget)
 	defer cancel()
-	due, err := n.app.Commands.SendDueEmails.Handle(ctx, notificationscommand.SendDueEmails{Now: now})
+	done, err := n.app.Commands.RunSchedule.Handle(ctx, notificationscommand.RunSchedule{Now: now})
 	if err != nil {
 		return false, err
 	}
-	weekly, err := n.app.Commands.SendWeeklySummary.Handle(ctx, notificationscommand.SendWeeklySummary{Now: now})
-	if err != nil {
-		return false, err
+	if done.Emails+done.InApp > 0 {
+		n.logger.Info("notification schedule wrote", "emails", done.Emails, "in_app", done.InApp)
 	}
-	if written := due.Emails + weekly.Emails + weekly.InApp; written > 0 {
-		n.logger.Info("notification schedule wrote", "emails", due.Emails+weekly.Emails, "in_app", weekly.InApp)
-	}
-	return due.Busy || weekly.Busy, nil
+	return done.Busy, nil
 }
 
 func (n notificationSchedule) NextDue(ctx context.Context, now time.Time) (time.Time, bool, error) {

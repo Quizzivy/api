@@ -39,8 +39,8 @@ func (a *Application) WithMail(mailer ports.Mailer) *Application {
 
 // WithSchedule sets the store the notification scheduler runs on (T-R7.14)
 // and NOTIFY_EMAIL_EVENTS, by domain.EmailTemplate.Event name (nil sends
-// every email). Without it SendDueEmails and SendWeeklySummary refuse to run
-// and NextDue answers nothing due.
+// every email). Without it RunSchedule, SendDueEmails and SendWeeklySummary
+// refuse to run and NextDue answers nothing due.
 func (a *Application) WithSchedule(store domain.Scheduled, sends func(event string) bool) *Application {
 	a.service.Schedule, a.service.Sends = store, sends
 	return a
@@ -56,6 +56,7 @@ type Commands struct {
 	Prune             cqrs.CommandHandler[command.Prune, int64]
 	SendDueEmails     cqrs.CommandHandler[command.SendDueEmails, command.Scheduled]
 	SendWeeklySummary cqrs.CommandHandler[command.SendWeeklySummary, command.Scheduled]
+	RunSchedule       cqrs.CommandHandler[command.RunSchedule, command.Scheduled]
 }
 
 type Queries struct {
@@ -78,6 +79,7 @@ func New(repo domain.Repository) *Application {
 			Prune:             command.PruneHandler{Service: service},
 			SendDueEmails:     command.SendDueEmailsHandler{Service: service},
 			SendWeeklySummary: command.SendWeeklySummaryHandler{Service: service},
+			RunSchedule:       command.RunScheduleHandler{Service: service},
 		},
 		Queries: Queries{
 			List:        query.ListHandler{Service: service},
