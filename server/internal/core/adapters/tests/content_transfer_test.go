@@ -16,10 +16,13 @@ import (
 	mediarepo "quizzivy/internal/modules/media/repositories"
 	questionscmd "quizzivy/internal/modules/questions/application/command"
 	questionsrepo "quizzivy/internal/modules/questions/repositories"
+	sharingcmd "quizzivy/internal/modules/sharing/application/command"
+	sharingrepo "quizzivy/internal/modules/sharing/repositories"
 	testscmd "quizzivy/internal/modules/tests/application/command"
 	testsrepo "quizzivy/internal/modules/tests/repositories"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/cqrs"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +57,8 @@ func newTransferWorld(t *testing.T) *transferWorld {
 		for _, sql := range []string{
 			`DELETE FROM app.audit_log WHERE entity_id = ANY($1::uuid[]) OR actor_user_id = ANY($1::uuid[])`,
 			`DELETE FROM app.media_assets WHERE uploaded_by = ANY($1::uuid[])`,
+			`DELETE FROM app.content_shares WHERE granted_by = ANY($1::uuid[])`,
+			`DELETE FROM app.question_sets WHERE created_by = ANY($1::uuid[])`,
 			`DELETE FROM app.question_groups WHERE created_by = ANY($1::uuid[])`,
 			`DELETE FROM app.questions WHERE created_by = ANY($1::uuid[])`,
 			`DELETE FROM app.tests WHERE created_by = ANY($1::uuid[])`,
@@ -103,6 +108,8 @@ func (w *transferWorld) content(t *testing.T, owner string) {
 		`INSERT INTO app.questions (type, prompt, points, owner_id, created_by) VALUES ('short_answer', 'Còn?', 1, $1::uuid, $1::uuid)`,
 		`INSERT INTO app.questions (type, prompt, points, owner_id, created_by) VALUES ('short_answer', 'Còn nữa?', 1, $1::uuid, $1::uuid)`,
 		`INSERT INTO app.questions (type, prompt, points, owner_id, created_by, deleted_at) VALUES ('short_answer', 'Đã xoá?', 1, $1::uuid, $1::uuid, now())`,
+		`INSERT INTO app.question_sets (name, owner_id, created_by) VALUES ('Bộ còn', $1::uuid, $1::uuid)`,
+		`INSERT INTO app.question_sets (name, owner_id, created_by, deleted_at) VALUES ('Bộ đã xoá', $1::uuid, $1::uuid, now())`,
 		`INSERT INTO app.question_groups (title, owner_id, created_by) VALUES ('Nhóm', $1::uuid, $1::uuid)`,
 		`INSERT INTO app.question_groups (title, owner_id, created_by, archived_at) VALUES ('Nhóm cũ', $1::uuid, $1::uuid, now())`,
 		`INSERT INTO app.media_assets (kind, mime_type, bytes, checksum_sha256, original_filename, storage_key, owner_id, uploaded_by, deleted_at)
@@ -114,15 +121,16 @@ func (w *transferWorld) content(t *testing.T, owner string) {
 	}
 }
 
-func (w *transferWorld) owned(t *testing.T, id string) [5]int {
+func (w *transferWorld) owned(t *testing.T, id string) [6]int {
 	t.Helper()
-	var n [5]int
+	var n [6]int
 	err := w.q.QueryRow(context.Background(), `
 		SELECT (SELECT count(*) FROM app.classes WHERE teacher_id = $1::uuid)::int,
 		       (SELECT count(*) FROM app.tests WHERE owner_id = $1::uuid)::int,
 		       (SELECT count(*) FROM app.questions WHERE owner_id = $1::uuid)::int,
 		       (SELECT count(*) FROM app.question_groups WHERE owner_id = $1::uuid)::int,
-		       (SELECT count(*) FROM app.media_assets WHERE owner_id = $1::uuid)::int`, id).Scan(&n[0], &n[1], &n[2], &n[3], &n[4])
+		       (SELECT count(*) FROM app.media_assets WHERE owner_id = $1::uuid)::int,
+		       (SELECT count(*) FROM app.question_sets WHERE owner_id = $1::uuid)::int`, id).Scan(&n[0], &n[1], &n[2], &n[3], &n[4], &n[5])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +154,7 @@ func movers(scoped db.Context) adapters.ContentMovers {
 		Questions:   questionscmd.TransferOwnershipHandler{Repo: questionsrepo.NewPostgres(scoped)},
 		Media:       mediacmd.TransferOwnershipHandler{Repo: mediarepo.NewPostgres(scoped)},
 		Assignments: assignmentscmd.TransferOwnershipHandler{Repo: assignmentsrepo.NewPostgres(scoped)},
+		Shares:      sharingcmd.TransferOwnershipHandler{Repo: sharingrepo.NewPostgres(scoped)},
 	}
 }
 
@@ -172,14 +181,14 @@ func TestATransferMovesDeletedRowsUncountedLeavesProvenanceAndAuditsTheCounts(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := identitydomain.MovedContent{Classes: 2, Tests: 1, Questions: 2, QuestionGroups: 1, Media: 0, Assignments: 0}
+	want := identitydomain.MovedContent{Classes: 2, Tests: 1, Questions: 2, QuestionGroups: 1, QuestionSets: 1, Media: 0, Assignments: 0}
 	if got.Moved != want {
 		t.Errorf("moved %+v, want every class and only the live rows of the rest counted: %+v", got.Moved, want)
 	}
-	if n := w.owned(t, from); n != [5]int{} {
+	if n := w.owned(t, from); n != [6]int{} {
 		t.Errorf("the source still owns %v", n)
 	}
-	if n := w.owned(t, to); n != [5]int{2, 2, 3, 2, 1} {
+	if n := w.owned(t, to); n != [6]int{2, 2, 3, 2, 1, 2} {
 		t.Errorf("the recipient owns %v, want every row, deleted and archived ones too", n)
 	}
 	var madeBy int
@@ -200,7 +209,7 @@ func TestATransferMovesDeletedRowsUncountedLeavesProvenanceAndAuditsTheCounts(t 
 		t.Errorf("the audit row %s holds a name, which the append-only log could never anonymise", diff)
 	}
 	for _, part := range []string{
-		`"owner": {"new": "` + to + `", "old": "` + from + `"}`, `"classes": 2`, `"tests": 1`, `"questions": 2`, `"questionGroups": 1`, `"importsLeft": 0`,
+		`"owner": {"new": "` + to + `", "old": "` + from + `"}`, `"classes": 2`, `"tests": 1`, `"questions": 2`, `"questionGroups": 1`, `"questionSets": 1`, `"importsLeft": 0`,
 	} {
 		if !strings.Contains(diff, part) {
 			t.Errorf("audit diff %s lacks %s", diff, part)
@@ -237,7 +246,7 @@ func TestATransferIsRefusedForEachWrongPartyAndMovesNothing(t *testing.T) {
 			t.Errorf("%s: %v, want %v", label, err, c.want)
 		}
 	}
-	if n := w.owned(t, from); n != [5]int{2, 2, 3, 2, 1} {
+	if n := w.owned(t, from); n != [6]int{2, 2, 3, 2, 1, 2} {
 		t.Errorf("a refusal moved rows: the source owns %v", n)
 	}
 	if n := w.audits(t, from); n != 0 {
@@ -261,7 +270,7 @@ func TestAFailingStepMovesNothingAndADeadlockIsAContendedWrite(t *testing.T) {
 	if !errors.Is(err, identitydomain.ErrWriteContended) || !errors.Is(err, deadlock) {
 		t.Errorf("a deadlock on the last step: %v, want ErrWriteContended keeping the database error", err)
 	}
-	if n := w.owned(t, from); n != [5]int{2, 2, 3, 2, 1} {
+	if n := w.owned(t, from); n != [6]int{2, 2, 3, 2, 1, 2} {
 		t.Errorf("a failed transfer moved rows: the source owns %v", n)
 	}
 	if n := w.audits(t, from); n != 0 {
@@ -284,7 +293,7 @@ func TestAnActiveAdminTakesAnAccountsContentLikeATeacher(t *testing.T) {
 	if got.Moved.Classes != 2 || got.Moved.Questions != 2 {
 		t.Errorf("moved %+v, want the content counted", got.Moved)
 	}
-	if n := w.owned(t, to); n != [5]int{2, 2, 3, 2, 1} {
+	if n := w.owned(t, to); n != [6]int{2, 2, 3, 2, 1, 2} {
 		t.Errorf("the Admin owns %v, want every row", n)
 	}
 }
@@ -459,5 +468,103 @@ func TestATransferCountsTheStudentsTheSourceCreatedThatTheRecipientStillDoesNotR
 	if err := w.q.QueryRow(context.Background(), `
 		SELECT (diff->>'studentsLeft')::int FROM app.audit_log WHERE action = 'user.content_transferred' AND entity_id = $1::uuid`, from).Scan(&left); err != nil || left != 2 {
 		t.Errorf("the audit row's studentsLeft = %d (%v), want 2", left, err)
+	}
+}
+
+func (w *transferWorld) insert(t *testing.T, sql string, args ...any) string {
+	t.Helper()
+	var id string
+	if err := w.q.QueryRow(context.Background(), sql, args...).Scan(&id); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return id
+}
+
+func (w *transferWorld) texts(t *testing.T, sql string, args ...any) []string {
+	t.Helper()
+	rows, err := w.pool.Query(context.Background(), sql, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func (w *transferWorld) grant(t *testing.T, kind, resource, grantee, access, by string) string {
+	t.Helper()
+	column := "test_id"
+	if kind == "question_set" {
+		column = "question_set_id"
+	}
+	return w.insert(t, `INSERT INTO app.content_shares (kind, `+column+`, grantee_id, access, granted_by)
+		VALUES ($1, $2::uuid, $3::uuid, $4, $5::uuid) RETURNING id::text`, kind, resource, grantee, access, by)
+}
+
+// A grant stores no owner, so the grants to the moved tests and sets follow
+// them without a write; a grant to the recipient, who now owns what it names,
+// is deleted and audited as share.revoked by the actor of the transfer.
+func TestATransferDeletesTheRecipientsOwnGrantsAndLeavesTheRestUnwritten(t *testing.T) {
+	w := newTransferWorld(t)
+	from, fromRole := w.user(t, "teacher", true)
+	to, _ := w.user(t, "teacher", false)
+	third, _ := w.user(t, "teacher", false)
+	fourth, _ := w.user(t, "teacher", false)
+	admin, _ := w.user(t, "admin", false)
+	test := w.insert(t, `INSERT INTO app.tests (title, owner_id, created_by) VALUES ('Đề được chia sẻ', $1::uuid, $1::uuid) RETURNING id::text`, from)
+	gone := w.insert(t, `INSERT INTO app.tests (title, owner_id, created_by, deleted_at) VALUES ('Đề đã xoá', $1::uuid, $1::uuid, now()) RETURNING id::text`, from)
+	set := w.insert(t, `INSERT INTO app.question_sets (name, owner_id, created_by) VALUES ('Bộ được chia sẻ', $1::uuid, $1::uuid) RETURNING id::text`, from)
+	theirs := w.insert(t, `INSERT INTO app.tests (title, owner_id, created_by) VALUES ('Đề của người khác', $1::uuid, $1::uuid) RETURNING id::text`, fourth)
+	dropped := map[string]string{
+		w.grant(t, "test", test, to, "edit", from):       test,
+		w.grant(t, "test", gone, to, "use", from):        gone,
+		w.grant(t, "question_set", set, to, "use", from): set,
+	}
+	kept := []string{
+		w.grant(t, "test", test, third, "use", from),
+		w.grant(t, "question_set", set, third, "edit", from),
+		w.grant(t, "test", theirs, to, "use", fourth),
+		w.grant(t, "test", theirs, from, "edit", fourth),
+	}
+	rows := func(ids []string) []string {
+		t.Helper()
+		return w.texts(t, `SELECT row_to_json(g)::text FROM app.content_shares g WHERE g.id = ANY($1::uuid[]) ORDER BY g.id`, ids)
+	}
+	before := rows(kept)
+
+	mover := adapters.ContentTransfer{DB: w.dbx, Movers: movers}
+	req := identitydomain.WriteRequest{ActorID: admin, All: true, IP: "203.0.113.9", UserAgent: "transfer-grants-test"}
+	got, err := mover.Move(context.Background(), req, identitydomain.ContentTransfer{FromID: from, FromRoleID: fromRole, ToID: to, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Moved.Tests != 1 || got.Moved.QuestionSets != 1 {
+		t.Errorf("moved %+v, want the live test and the set counted", got.Moved)
+	}
+
+	if after := rows(kept); strings.Join(after, "\n") != strings.Join(before, "\n") {
+		t.Errorf("the grants that follow their resource were written:\nbefore %v\nafter  %v", before, after)
+	}
+	ids := make([]string, 0, len(dropped))
+	for id := range dropped {
+		ids = append(ids, id)
+	}
+	if left := rows(ids); len(left) != 0 {
+		t.Errorf("grants to the recipient of what it now owns remain: %v", left)
+	}
+	audited := w.texts(t, `
+		SELECT entity || ' ' || entity_id::text || ' ' || (diff->'shared_with'->'old'->>'granteeId') || ' ' || (diff->'shared_with'->'old'->>'access')
+		       || ' ' || coalesce(diff->'shared_with'->>'new', 'null') || ' ' || host(ip) || ' ' || user_agent
+		  FROM app.audit_log WHERE action = 'share.revoked' AND actor_user_id = $1::uuid ORDER BY entity_id`, admin)
+	want := []string{
+		"test " + test + " " + to + " edit null 203.0.113.9 transfer-grants-test",
+		"test " + gone + " " + to + " use null 203.0.113.9 transfer-grants-test",
+		"question_set " + set + " " + to + " use null 203.0.113.9 transfer-grants-test",
+	}
+	slices.SortFunc(want, func(a, b string) int { return strings.Compare(strings.Fields(a)[1], strings.Fields(b)[1]) })
+	if strings.Join(audited, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the deletions are audited as\n%v\nwant\n%v", audited, want)
 	}
 }
