@@ -62,10 +62,11 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 		return domain.MoveQuestionResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	owner, err := lockMovedTest(ctx, tx, in)
+	reached, err := lockMovedTest(ctx, tx, in)
 	if err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
+	owner := reached.owner
 	plan, err := resolveMovePlan(ctx, tx, in)
 	if err != nil {
 		return domain.MoveQuestionResult{}, err
@@ -81,23 +82,24 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 	if err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
-	return s.finishMove(ctx, tx, in, plan, outcome)
+	return s.finishMove(ctx, tx, in, plan, outcome, reached.access)
 }
 
-func lockMovedTest(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput) (string, error) {
+// lockMovedTest locks the moved test for an edit by the caller and answers it
+// as reached, so the reply can show the caller's own access to it.
+func lockMovedTest(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput) (reachedTest, error) {
 	reached, err := checkVersion(ctx, tx, in.TestID, in.ExpectedTestUpdatedAt, in.Scope)
 	if err != nil {
-		return "", err
+		return reachedTest{}, err
 	}
-	owner := reached.owner
 	var archived bool
 	if err := tx.QueryRow(ctx, `SELECT status='archived' FROM app.tests WHERE id=$1`, in.TestID).Scan(&archived); err != nil {
-		return "", err
+		return reachedTest{}, err
 	}
 	if archived {
-		return "", &domain.GroupError{Rule: ruleOwnerArchived}
+		return reachedTest{}, &domain.GroupError{Rule: ruleOwnerArchived}
 	}
-	return owner, domain.RequireGroupWrite(in.Grants, false)
+	return reached, domain.RequireGroupWrite(in.Grants, false)
 }
 
 // lockMovedGroups locks the groups a move touches, every one a group of the
@@ -271,7 +273,7 @@ func reparentMember(ctx context.Context, tx pgx.Tx, plan movePlan, order map[str
 	return moveOutcome{questionID: plan.questionID}, setMemberOrder(ctx, tx, placed(target, plan.questionID, plan.index))
 }
 
-func (s *GroupsPostgres) finishMove(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput, plan movePlan, outcome moveOutcome) (domain.MoveQuestionResult, error) {
+func (s *GroupsPostgres) finishMove(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput, plan movePlan, outcome moveOutcome, level domain.Access) (domain.MoveQuestionResult, error) {
 	if _, err := tx.Exec(ctx, `UPDATE app.question_groups SET revision=revision+1 WHERE id=ANY($1::uuid[])`, plan.touched); err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
@@ -300,6 +302,7 @@ func (s *GroupsPostgres) finishMove(ctx context.Context, tx pgx.Tx, in domain.Mo
 	if err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
+	readerView(&test, level)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.MoveQuestionResult{}, err
 	}

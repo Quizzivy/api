@@ -9,11 +9,13 @@ import (
 	"testing"
 	"time"
 
+	mediadomain "quizzivy/internal/modules/media/domain"
 	notificationscommand "quizzivy/internal/modules/notifications/application/command"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/modules/tests/application"
 	"quizzivy/internal/modules/tests/application/command"
 	"quizzivy/internal/modules/tests/domain"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/cqrs"
 )
 
@@ -184,6 +186,92 @@ func TestEachActionOnASharedTestAnswersAtEachLevelOfTheGrant(t *testing.T) {
 				t.Errorf("A's test is owned by %s and authored by %s after B's work, want A for both", owner, author)
 			}
 		})
+	}
+}
+
+// TestAMoveAnswersTheTestAsItsCallerReadsIt: a question moved into A's
+// test-owned group answers the test with the mover's own access, and the
+// grants counted only for A.
+func TestAMoveAnswersTheTestAsItsCallerReadsIt(t *testing.T) {
+	for _, level := range []string{levelNone, levelUse, levelEdit, levelRevoked} {
+		t.Run(level, func(t *testing.T) {
+			ctx := context.Background()
+			w := newShareWorld(t, level)
+			into := func(scope access.Scope, actorID, question string) (domain.MoveQuestionResult, error) {
+				group := w.sectionGroupA.Bundle.Group.ID
+				var revision int64
+				if err := w.tx.QueryRow(ctx, `SELECT revision FROM app.question_groups WHERE id = $1`, group).Scan(&revision); err != nil {
+					t.Fatal(err)
+				}
+				return w.groups.MoveQuestion(ctx, domain.MoveQuestionInput{TestID: w.testA, QuestionID: question,
+					ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, To: domain.MoveTarget{SectionID: w.sectionA, GroupID: &group},
+					ExpectedGroups: []domain.GroupRevision{{GroupID: group, Revision: revision}}, ActorID: actorID, Now: time.Now(), Scope: scope, Grants: bothKeys})
+			}
+			moved, err := into(w.scopeB, w.b, w.questionA)
+			w.check(t, "a move into the test's group", edits, err)
+			if err == nil && (moved.Test.Access != domain.AccessEdit || moved.Test.OwnerID != w.a || moved.Test.SharedWith != 0) {
+				t.Errorf("B's move answers access %q, owner %s, sharedWith %d; want edit, A and 0", moved.Test.Access, moved.Test.OwnerID, moved.Test.SharedWith)
+			}
+
+			// A moves what is left: B's copy, within the group, or A's
+			// standalone question into it.
+			question := w.questionA
+			if err == nil {
+				question = moved.QuestionID
+			}
+			moved, err = into(w.scopeA, w.a, question)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shared := 0
+			if level == levelUse || level == levelEdit {
+				shared = 1
+			}
+			if moved.Test.Access != domain.AccessOwner || moved.Test.SharedWith != shared {
+				t.Errorf("A's move answers access %q, sharedWith %d; want owner and %d", moved.Test.Access, moved.Test.SharedWith, shared)
+			}
+		})
+	}
+}
+
+// TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven pins a
+// known gap T-R7.7 closes: the media binding check still reads assets with the
+// writer's own scope, so B, with Can edit, is refused the owner's audio as if
+// it were missing, on a resave of the test's group and on a restore of a
+// version that holds it. T-R7.7's "readable asset" (an asset referenced by
+// content the actor can read) turns both into successes; flip them there.
+func TestAnEditGranteesGroupWriteIsHeldToTheirOwnMediaUntilTRSevenSeven(t *testing.T) {
+	ctx := context.Background()
+	w := newShareWorld(t, levelEdit)
+	audio, err := w.groups.Create(ctx, domain.CreateGroupInput{Bundle: storedGroupFixture(t, storedGroupAsset(t, w.tx, w.a, "audio")), OwnerSectionID: &w.sectionA,
+		ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: audio.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
+		ExpectedRevision: audio.Revision, ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.b, Now: time.Now(), Scope: w.scopeB, Grants: bothKeys}})
+	if !errors.Is(err, mediadomain.ErrNotFound) {
+		t.Errorf("B resaving the test's audio group: %v, want the media not-found until T-R7.7", err)
+	}
+	if _, err := w.groups.Update(ctx, domain.UpdateGroupInput{Bundle: audio.Bundle, GroupMutation: domain.GroupMutation{ID: audio.Bundle.Group.ID,
+		ExpectedRevision: audio.Revision, ExpectedTestUpdatedAt: w.current(t, w.testA).UpdatedAt, ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys}}); err != nil {
+		t.Errorf("A resaving the same group: %v", err)
+	}
+
+	version, err := w.tests.Publish(ctx, domain.PublishRequest{TestID: w.testA, ActorID: w.a, Scope: w.scopeA}, time.Now(), func(domain.DraftContent) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := func(scope access.Scope, actorID string) error {
+		_, err := w.tests.CreateDraftFromVersion(ctx, domain.VersionRequest{Request: w.request(scope, actorID), Version: version.Version,
+			ExpectedUpdatedAt: w.current(t, w.testA).UpdatedAt}, time.Now())
+		return err
+	}
+	if err := restore(w.scopeB, w.b); !errors.Is(err, mediadomain.ErrNotFound) {
+		t.Errorf("B restoring a version with A's audio group: %v, want the media not-found until T-R7.7", err)
+	}
+	if err := restore(w.scopeA, w.a); err != nil {
+		t.Errorf("A restoring the same version: %v", err)
 	}
 }
 
