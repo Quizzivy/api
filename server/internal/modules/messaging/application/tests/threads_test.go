@@ -62,7 +62,7 @@ func TestARepeatedClientIDReturnsTheMessageItMade(t *testing.T) {
 	}
 }
 
-func TestAPostValidatesItsBodyAndRefusesEveryFileUntilAttachmentsExist(t *testing.T) {
+func TestAPostValidatesItsBodyAndRefusesAFileThatIsNotTheSenders(t *testing.T) {
 	w := newWorld(t)
 	teacher := w.user("Cô Yến", "teacher")
 	yen := by(teacher)

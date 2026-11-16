@@ -72,7 +72,7 @@ func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 		}
 	}
 	if status, got := teacher.call(http.MethodPost, thread, map[string]any{"clientId": uuid.NewString(), "body": "Tệp", "attachmentId": uuid.NewString()}); status != http.StatusNotFound {
-		t.Errorf("a post naming a file: %d %v, want 404 until attachments exist", status, got)
+		t.Errorf("a post naming a file nobody uploaded: %d %v, want 404", status, got)
 	}
 	if status, _ := teacher.call(http.MethodGet, thread+"?before="+id(first)+"&after="+id(first), nil); status != http.StatusBadRequest {
 		t.Errorf("a page with before and after: %d, want 400", status)

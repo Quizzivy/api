@@ -20,6 +20,7 @@ import (
 	identitytoken "quizzivy/internal/modules/identity/application/token"
 	importsworker "quizzivy/internal/modules/imports/application/worker"
 	mediaapp "quizzivy/internal/modules/media/application"
+	messagingapp "quizzivy/internal/modules/messaging/application"
 	notificationsapp "quizzivy/internal/modules/notifications/application"
 	organizationapp "quizzivy/internal/modules/organization/application"
 	"quizzivy/internal/platform/config"
@@ -40,8 +41,10 @@ type Assembly struct {
 	Organization  *organizationapp.Application
 	ImportSweeper *importsworker.Sweeper
 	// Exports is the data export, nil without import storage and the worker.
-	Exports     *exportsapp.Application
-	Media       *mediaapp.Application
+	Exports *exportsapp.Application
+	Media   *mediaapp.Application
+	// Messaging is the conversations, whose file sweeps the housekeeping runs.
+	Messaging   *messagingapp.Application
 	Maintenance httpx.MaintenanceSource
 	// Mail is the outbox the modules enqueue into and the dispatcher that sends it.
 	Mail Mail
@@ -64,7 +67,7 @@ func WithCompleter(completer aiports.Completer) Option {
 	return func(o *options) { o.completer, o.hasCompleter = completer, true }
 }
 
-// Build refuses when app.permissions lacks a key this binary was compiled with, or when the join-code keys derive a zero or shared key id, then assembles every module against the pool in dependency order: notifications depends on no module and is built first, so that its Notify command can be handed to any module as a port; the mail outbox is built before identity, which writes its set-password links to it, and leads, which writes the notice of a stored consultation request to it; attempts' student statistics feed classes and identity, classes' enrolment feeds identity's Google sign-in, media feeds questions, tests and attempts, and tests and questions feed sharing, whose count feeds the dashboard, and identity signs the photos messaging shows.
+// Build refuses when app.permissions lacks a key this binary was compiled with, or when the join-code keys derive a zero or shared key id, then assembles every module against the pool in dependency order: notifications depends on no module and is built first, so that its Notify command can be handed to any module as a port; the mail outbox is built before identity, which writes its set-password links to it, and leads, which writes the notice of a stored consultation request to it; attempts' student statistics feed classes and identity, classes' enrolment feeds identity's Google sign-in, media feeds questions, tests and attempts, and tests and questions feed sharing, whose count feeds the dashboard, and identity signs the photos messaging shows, whose files keep to the media bucket.
 func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db.Pool, opts ...Option) (Assembly, error) {
 	var chosen options
 	for _, opt := range opts {
@@ -121,7 +124,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	if err != nil {
 		return Assembly{}, err
 	}
-	mediaApp, mediaRepo, err := media(ctx, cfg, logger, dbx)
+	mediaApp, mediaRepo, objects, err := media(ctx, cfg, logger, dbx)
 	if err != nil {
 		return Assembly{}, err
 	}
@@ -145,7 +148,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	sharingApp, sharingTransport := sharing(dbx, sharingModules{
 		tests: testsApp, questions: questionsApp, identity: identityApp, notifier: notificationsApp.Commands.Notify,
 	}, logger)
-	_, messagingTransport, studentMessagingTransport := messaging(dbx, identityApp, attemptsApp)
+	messagingApp, messagingTransport, studentMessagingTransport := messaging(logger, dbx, objects, identityApp, attemptsApp)
 	auditApp, auditTransport := audit(dbx, identityApp, logger)
 	dashboardTransport, err := dashboard(cfg, dbx, dashboardModules{
 		notifications: notificationsApp, identity: identityApp, organization: organizationApp, audit: auditApp, ai: aiApp, sharing: sharingApp,
@@ -186,6 +189,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 		ImportSweeper: sweeper,
 		Exports:       exportsApp,
 		Media:         mediaApp,
+		Messaging:     messagingApp,
 		Tokens:        tokens,
 		Docs:          docs,
 		Identity:      identityApp,

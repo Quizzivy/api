@@ -160,8 +160,9 @@ type target struct {
 
 // post writes one post in one transaction. resolve reads the facts and
 // answers a thread the sender cannot read; then a repeated clientId returns
-// the message it made, the post's rule is asked, the file checked, the
-// conversation made by the first post and locked, and the message written.
+// the message it made, the post's rule is asked, the file checked (one the
+// sender uploaded and nobody has sent), the conversation made by the first
+// post and locked, and the message written with its file.
 func (p *Postgres) post(ctx context.Context, name string, post domain.Post, resolve func(context.Context, pgx.Tx) (target, error)) (domain.Posted, error) {
 	var out domain.Posted
 	err := p.InTx(ctx, name, func(tx pgx.Tx) error {
@@ -177,7 +178,7 @@ func (p *Postgres) post(ctx context.Context, name string, post domain.Post, reso
 		if err := t.allow(); err != nil {
 			return err
 		}
-		if err := attachable(post); err != nil {
+		if err := attachable(ctx, tx, post); err != nil {
 			return err
 		}
 		if err := t.open(ctx, tx); err != nil {
@@ -284,15 +285,6 @@ func (p *Postgres) seenBy(ctx context.Context, classID, messageID string) (*doma
 	return &s, nil
 }
 
-// attachable refuses every file until T-R7.11 stores them: no attachment is
-// the sender's to send yet, so any id answers as a missing one.
-func attachable(post domain.Post) error {
-	if post.Content.AttachmentID != "" {
-		return domain.ErrAttachmentNotFound
-	}
-	return nil
-}
-
 // repeated finds the message the sender's clientId already made: done with it
 // when it is in the thread find reads, ErrClientIDTaken when it is another
 // thread's, and not done when there is none. find runs after the message is
@@ -317,19 +309,23 @@ func repeated(ctx context.Context, tx pgx.Tx, post domain.Post, find func() (str
 	return domain.Posted{Message: m}, true, nil
 }
 
-// write inserts post into thread and moves the thread's last_message_at. A
-// concurrent call with the same clientId that committed first makes this one
-// its replay.
+// write inserts post into thread with its file and moves the thread's
+// last_message_at. A concurrent call with the same clientId that committed
+// first makes this one its replay; a concurrent post that took the file
+// first, or the sweep that removed it, makes the file a missing one.
 func write(ctx context.Context, tx pgx.Tx, thread string, post domain.Post) (domain.Posted, error) {
 	var id string
 	var at time.Time
 	err := tx.QueryRow(ctx, `
-		INSERT INTO app.messages (conversation_id, sender_id, client_id, body) VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+		INSERT INTO app.messages (conversation_id, sender_id, client_id, body, attachment_id) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid)
 		ON CONFLICT (sender_id, client_id) DO NOTHING
-		RETURNING id::text, created_at`, thread, post.SenderID, post.ClientID, post.Content.Body).Scan(&id, &at)
+		RETURNING id::text, created_at`, thread, post.SenderID, post.ClientID, post.Content.Body, attachmentOf(post)).Scan(&id, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		replay, _, err := repeated(ctx, tx, post, func() (string, error) { return thread, nil })
 		return replay, err
+	}
+	if taken(err) {
+		return domain.Posted{}, domain.ErrAttachmentNotFound
 	}
 	if err != nil {
 		return domain.Posted{}, fmt.Errorf("messaging: write message: %w", err)

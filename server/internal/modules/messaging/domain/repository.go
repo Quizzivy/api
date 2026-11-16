@@ -74,4 +74,18 @@ type Repository interface {
 	// memberships of the teacher's classes FOR SHARE, so a removal waits for
 	// it.
 	PostAsStudent(ctx context.Context, studentID, teacherID string, post Post) (Posted, error)
+
+	// InsertAttachment records a file the upload stored, unsent.
+	InsertAttachment(ctx context.Context, a NewAttachment) (Attachment, error)
+	// StoredAttachment reads the file id and the thread of the message that
+	// holds it, or ErrAttachmentNotFound.
+	StoredAttachment(ctx context.Context, id string) (StoredAttachment, error)
+	// DeleteUnsentAttachments deletes at most limit files no message holds
+	// that were uploaded before before, oldest first, and returns their
+	// storage keys. A file a message names is kept by the RESTRICT key from
+	// app.messages.
+	DeleteUnsentAttachments(ctx context.Context, before time.Time, limit int) ([]string, error)
+	// NamedKeys is the subset of keys some file's row stores its object
+	// under.
+	NamedKeys(ctx context.Context, keys []string) (map[string]bool, error)
 }

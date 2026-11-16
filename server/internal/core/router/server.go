@@ -49,7 +49,6 @@ type Server struct {
 	sharinghttp.Sharing
 	messaginghttp.Staff
 	messaginghttp.Student
-	R7Pending
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

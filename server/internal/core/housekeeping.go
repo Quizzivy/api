@@ -7,6 +7,7 @@ import (
 	"quizzivy/internal/core/jobs"
 	exportscommand "quizzivy/internal/modules/exports/application/command"
 	identitycommand "quizzivy/internal/modules/identity/application/command"
+	messagingcommand "quizzivy/internal/modules/messaging/application/command"
 	organizationcommand "quizzivy/internal/modules/organization/application/command"
 	"quizzivy/internal/platform/db"
 )
@@ -54,6 +55,14 @@ func (a *App) housekeepingSteps() []jobs.HousekeepingStep {
 		steps = append(steps, jobs.HousekeepingStep{Name: "branding_objects", Batch: func(ctx context.Context, limit int) (int, error) {
 			swept, err := sweep.Handle(ctx, organizationcommand.SweepLogos{Limit: limit})
 			return swept.Removed, err
+		}})
+	}
+	if messaging := a.assembly.Messaging; messaging != nil && messaging.Commands.SweepUnsentAttachments != nil {
+		sweepUnsent, sweepObjects := messaging.Commands.SweepUnsentAttachments, messaging.Commands.SweepAttachmentObjects
+		steps = append(steps, jobs.HousekeepingStep{Name: "unsent_message_attachments", Batch: func(ctx context.Context, limit int) (int, error) {
+			return sweepUnsent.Handle(ctx, messagingcommand.SweepUnsentAttachments{Limit: limit})
+		}}, jobs.HousekeepingStep{Name: "message_attachment_objects", Batch: func(ctx context.Context, limit int) (int, error) {
+			return sweepObjects.Handle(ctx, messagingcommand.SweepAttachmentObjects{Limit: limit})
 		}})
 	}
 	return steps

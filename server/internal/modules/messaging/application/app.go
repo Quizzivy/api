@@ -3,10 +3,14 @@
 // announcement channel, posting in each, and the read pointer. On the student
 // side (T-R7.10b): the student's Messages, a direct thread with a teacher,
 // which they post in as text, a class's channel, which they read only, and the
-// read pointer.
+// read pointer. Staff attach files to their posts (T-R7.11): an upload that
+// waits unsent, a download for the thread's participants, and the daily
+// sweeps of files nobody sent and of objects no row names.
 package application
 
 import (
+	"time"
+
 	"quizzivy/internal/modules/messaging/application/command"
 	"quizzivy/internal/modules/messaging/application/internal/support"
 	"quizzivy/internal/modules/messaging/application/ports"
@@ -30,6 +34,11 @@ type Commands struct {
 
 	PostAsStudent     cqrs.CommandHandler[command.PostAsStudent, domain.StudentPosted]
 	MarkReadAsStudent cqrs.CommandHandler[command.MarkReadAsStudent, cqrs.Nothing]
+
+	UploadAttachment cqrs.CommandHandler[command.UploadAttachment, domain.Attachment]
+	// The housekeeping steps, nil until WithAttachments.
+	SweepUnsentAttachments cqrs.CommandHandler[command.SweepUnsentAttachments, int]
+	SweepAttachmentObjects cqrs.CommandHandler[command.SweepAttachmentObjects, int]
 }
 
 // Queries are the module's reads.
@@ -41,11 +50,14 @@ type Queries struct {
 	StudentThreads      cqrs.QueryHandler[query.StudentThreads, []domain.StudentThread]
 	StudentDirectThread cqrs.QueryHandler[query.StudentDirectThread, query.StudentDirect]
 	StudentClassThread  cqrs.QueryHandler[query.StudentClassThread, query.StudentClass]
+
+	StaffAttachmentURL   cqrs.QueryHandler[query.StaffAttachmentURL, domain.AttachmentURL]
+	StudentAttachmentURL cqrs.QueryHandler[query.StudentAttachmentURL, domain.AttachmentURL]
 }
 
 // New builds the application over repo.
 func New(repo domain.Repository) *Application {
-	service := &support.Service{Repo: repo}
+	service := &support.Service{Repo: repo, Now: time.Now}
 	return &Application{
 		Commands: Commands{
 			PostDirect:       command.PostDirectHandler{Service: service},
@@ -54,6 +66,8 @@ func New(repo domain.Repository) *Application {
 
 			PostAsStudent:     command.PostAsStudentHandler{Service: service},
 			MarkReadAsStudent: command.MarkReadAsStudentHandler{Service: service},
+
+			UploadAttachment: command.UploadAttachmentHandler{Service: service},
 		},
 		Queries: Queries{
 			StaffThreads:      query.StaffThreadsHandler{Service: service},
@@ -63,6 +77,9 @@ func New(repo domain.Repository) *Application {
 			StudentThreads:      query.StudentThreadsHandler{Service: service},
 			StudentDirectThread: query.StudentDirectThreadHandler{Service: service},
 			StudentClassThread:  query.StudentClassThreadHandler{Service: service},
+
+			StaffAttachmentURL:   query.StaffAttachmentURLHandler{Service: service},
+			StudentAttachmentURL: query.StudentAttachmentURLHandler{Service: service},
 		},
 		service: service,
 	}
@@ -79,5 +96,22 @@ func (a *Application) WithAvatars(avatars ports.Avatars) *Application {
 // shows beside its messages. Without it a thread shows none.
 func (a *Application) WithContextEvents(events ports.ContextEvents) *Application {
 	a.service.Events = events
+	return a
+}
+
+// WithAttachments keeps messages' files in files and tells audio through
+// audio, and makes the housekeeping's two sweeps available. Without it an
+// upload and a download answer domain.ErrStorageOff.
+func (a *Application) WithAttachments(files ports.AttachmentStore, audio ports.AudioProbe) *Application {
+	a.service.Files, a.service.Audio = files, audio
+	a.Commands.SweepUnsentAttachments = command.SweepUnsentAttachmentsHandler{Service: a.service}
+	a.Commands.SweepAttachmentObjects = command.SweepAttachmentObjectsHandler{Service: a.service, Cursor: &command.SweepCursor{}}
+	return a
+}
+
+// WithClock reads the time from now, for the URL's expiry and the sweeps'
+// grace.
+func (a *Application) WithClock(now func() time.Time) *Application {
+	a.service.Now = now
 	return a
 }

@@ -2,19 +2,23 @@ package support
 
 import (
 	"context"
+	"time"
 
 	"quizzivy/internal/modules/messaging/application/ports"
 	"quizzivy/internal/modules/messaging/domain"
 )
 
 // Service carries what the handlers share: the conversations, the rules that
-// decide who reads and posts, the photo signer, and the flagged attempts a
-// staff member's direct thread shows.
+// decide who reads and posts, the photo signer, the flagged attempts a staff
+// member's direct thread shows, and the store and probe of messages' files.
 type Service struct {
 	Repo    domain.Repository
 	Rules   domain.Eligibility
 	Avatars ports.Avatars
 	Events  ports.ContextEvents
+	Files   ports.AttachmentStore
+	Audio   ports.AudioProbe
+	Now     func() time.Time
 }
 
 // Sign returns the signed URL of the photo key names, once per key in signed,

@@ -16,7 +16,8 @@ import (
 // student, so B's address is B's own thread: B never sees A's message, and
 // naming it as B's read pointer answers as a missing message does. The Admin,
 // whom scope.all does not let into a direct thread, gets 404 on the student
-// wherever a missing student answers 404, and still reads A's class channel,
+// wherever a missing student answers 404, and on the file a direct message
+// holds wherever a missing file does, and still reads A's class channel,
 // which is class content.
 func (x *iso) directThreadsStayWithTheirParticipants() {
 	x.t.Helper()
@@ -75,6 +76,12 @@ func (x *iso) directThreadsStayWithTheirParticipants() {
 		}
 		if strings.Contains(string(got.body), "giáo viên") {
 			x.t.Errorf("the Admin's %s %s shows a message: %s", c.method, c.path, got.body)
+		}
+	}
+	for who, file := range map[string]string{"A": x.a.id("attachment"), "B": x.b.id("attachment")} {
+		got, absent := x.admin.send(http.MethodGet, "/teacher/messages/attachments/"+file, nil), x.admin.send(http.MethodGet, "/teacher/messages/attachments/"+uuid.NewString(), nil)
+		if got.status != http.StatusNotFound || answer(got) != answer(absent) {
+			x.t.Errorf("the Admin downloading the file of %s's direct message: %s, want 404 as for a missing file (%s)", who, answer(got), answer(absent))
 		}
 	}
 	if listed := x.admin.send(http.MethodGet, "/teacher/messages/threads?tab=all", nil); listed.status != http.StatusOK ||
