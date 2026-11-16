@@ -8,6 +8,7 @@ import (
 	dashboardhttp "quizzivy/internal/modules/dashboard/http"
 	dashboardrepo "quizzivy/internal/modules/dashboard/repositories"
 	identityapp "quizzivy/internal/modules/identity/application"
+	messagingapp "quizzivy/internal/modules/messaging/application"
 	notificationsapp "quizzivy/internal/modules/notifications/application"
 	organizationapp "quizzivy/internal/modules/organization/application"
 	sharingapp "quizzivy/internal/modules/sharing/application"
@@ -22,6 +23,7 @@ type dashboardModules struct {
 	audit         *auditapp.Application
 	ai            *aiapp.Application
 	sharing       *sharingapp.Application
+	messaging     *messagingapp.Application
 }
 
 // dashboard reads the Admin console's figures in the centre's own zone, against its usage limits. The AI credits are offered to it only while the assistant is configured, so the Overview shows no credit-request row and the usage no AI figure while it is off.
@@ -34,6 +36,7 @@ func dashboard(cfg config.Config, dbx db.Context, m dashboardModules, aiOn bool)
 		WithZones(adapters.ProfileZone{Query: m.identity.Queries.EffectiveZone}).
 		WithNotifications(m.notifications.Queries.Summary).
 		WithSharedWithMe(m.sharing.Queries.CountSharedWithMe).
+		WithUnreadMessages(m.messaging.Queries.StaffUnread).
 		WithAdmin(m.organization.Queries.Branding, m.audit.Queries.Recent, cfg.Limits, zone)
 	if aiOn {
 		app.WithCredits(m.ai.Queries.AdminCredits)

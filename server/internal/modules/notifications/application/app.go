@@ -5,6 +5,7 @@ import (
 
 	"quizzivy/internal/modules/notifications/application/command"
 	"quizzivy/internal/modules/notifications/application/internal/support"
+	"quizzivy/internal/modules/notifications/application/ports"
 	"quizzivy/internal/modules/notifications/application/query"
 	"quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/shared/cqrs"
@@ -22,11 +23,19 @@ func (a *Application) SetClock(now func() time.Time) {
 	a.service.Now = now
 }
 
+// WithUnreadMessages sets the messaging module's count behind the summary's
+// unread messages. Without it the count is 0.
+func (a *Application) WithUnreadMessages(port ports.UnreadMessages) *Application {
+	a.service.Messages = port
+	return a
+}
+
 type Commands struct {
 	Notify            cqrs.CommandHandler[command.Notify, cqrs.Nothing]
 	MaterialiseDue    cqrs.CommandHandler[command.MaterialiseDue, int]
 	MarkRead          cqrs.CommandHandler[command.MarkRead, cqrs.Nothing]
 	MarkAllRead       cqrs.CommandHandler[command.MarkAllRead, cqrs.Nothing]
+	MarkKeyRead       cqrs.CommandHandler[command.MarkKeyRead, cqrs.Nothing]
 	UpdatePreferences cqrs.CommandHandler[command.UpdatePreferences, []domain.Preference]
 	Prune             cqrs.CommandHandler[command.Prune, int64]
 }
@@ -45,6 +54,7 @@ func New(repo domain.Repository) *Application {
 			MaterialiseDue:    command.MaterialiseDueHandler{Service: service},
 			MarkRead:          command.MarkReadHandler{Service: service},
 			MarkAllRead:       command.MarkAllReadHandler{Service: service},
+			MarkKeyRead:       command.MarkKeyReadHandler{Service: service},
 			UpdatePreferences: command.UpdatePreferencesHandler{Service: service},
 			Prune:             command.PruneHandler{Service: service},
 		},

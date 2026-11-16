@@ -33,6 +33,7 @@ func (s PostAsStudentHandler) Handle(ctx context.Context, cmd PostAsStudent) (do
 	if err != nil {
 		return domain.StudentPosted{}, err
 	}
+	s.Ring(ctx, posted)
 	out := domain.StudentPosted{Message: posted.Message.ForStudent(), Created: posted.Created}
 	s.SignStudentMessage(ctx, cmd.StudentID, &out.Message, map[string]*string{})
 	return out, nil

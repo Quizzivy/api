@@ -21,7 +21,7 @@ func submitted(merge domain.Merge) command.Notify {
 }
 
 func TestNotifyWritesOnceAndNeverReads(t *testing.T) {
-	for _, merge := range []domain.Merge{domain.Replace, domain.Add} {
+	for _, merge := range []domain.Merge{domain.Replace, domain.Add, domain.Renew} {
 		store := only(t, "Upsert")
 		cmd := submitted(merge)
 		if _, err := over(store).Commands.Notify.Handle(context.Background(), cmd); err != nil {
@@ -44,7 +44,7 @@ func TestNotifyWritesOnceAndNeverReads(t *testing.T) {
 }
 
 func TestNotifyRefusesAnUnknownMergeMode(t *testing.T) {
-	for _, merge := range []domain.Merge{0, domain.Add + 1, -1} {
+	for _, merge := range []domain.Merge{0, domain.Renew + 1, -1} {
 		store := only(t, "")
 		_, err := over(store).Commands.Notify.Handle(context.Background(), submitted(merge))
 		if !errors.Is(err, domain.ErrUnknownMerge) {

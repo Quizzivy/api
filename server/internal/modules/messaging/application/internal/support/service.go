@@ -2,15 +2,19 @@ package support
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"quizzivy/internal/modules/messaging/application/ports"
 	"quizzivy/internal/modules/messaging/domain"
+	"quizzivy/internal/shared/cqrs"
 )
 
 // Service carries what the handlers share: the conversations, the rules that
 // decide who reads and posts, the photo signer, the flagged attempts a staff
-// member's direct thread shows, and the store and probe of messages' files.
+// member's direct thread shows, the store and probe of messages' files, and
+// the bell that holds the readers' in-app items, with the logger its
+// failures go to.
 type Service struct {
 	Repo    domain.Repository
 	Rules   domain.Eligibility
@@ -18,7 +22,55 @@ type Service struct {
 	Events  ports.ContextEvents
 	Files   ports.AttachmentStore
 	Audio   ports.AudioProbe
+	Bell    ports.Bell
+	Logger  *slog.Logger
 	Now     func() time.Time
+}
+
+// Ring tells the readers of a message just posted, once it has committed,
+// through the bell: one Notice each (domain.Delivery). A replayed post tells
+// nobody again. Telling never fails the post: a failure is logged.
+func (s *Service) Ring(ctx context.Context, posted domain.Posted) {
+	if s.Bell == nil || !posted.Created {
+		return
+	}
+	ring := cqrs.HandlerFunc[domain.Notice, cqrs.Nothing](func(ctx context.Context, n domain.Notice) (cqrs.Nothing, error) {
+		return cqrs.Nothing{}, s.Bell.Ring(ctx, n)
+	})
+	cqrs.Announce(ctx, ring, s.Logger, "message posted", func(ctx context.Context) ([]domain.Notice, error) {
+		delivery, err := s.Repo.Delivery(ctx, posted.Message.ID)
+		if err != nil {
+			return nil, err
+		}
+		return delivery.Notices(), nil
+	})
+}
+
+// MoveRead runs move, which moves readerID's read pointer, and then Seen with
+// the thread's state; move's error is returned as it is.
+func (s *Service) MoveRead(ctx context.Context, readerID string, move func() (domain.ReadState, error)) error {
+	state, err := move()
+	if err != nil {
+		return err
+	}
+	s.Seen(ctx, readerID, state)
+	return nil
+}
+
+// Seen clears readerID's in-app item for the thread state names once their
+// pointer has left nothing unread there, keeping one a message written after
+// the state was judged left unread. Clearing never fails the read: a failure
+// is logged.
+func (s *Service) Seen(ctx context.Context, readerID string, state domain.ReadState) {
+	if s.Bell == nil || !state.CaughtUp {
+		return
+	}
+	seen := cqrs.HandlerFunc[domain.ReadState, cqrs.Nothing](func(ctx context.Context, st domain.ReadState) (cqrs.Nothing, error) {
+		return cqrs.Nothing{}, s.Bell.Seen(ctx, readerID, st.ConversationID, st.At)
+	})
+	cqrs.Announce(ctx, seen, s.Logger, "thread read", func(context.Context) ([]domain.ReadState, error) {
+		return []domain.ReadState{state}, nil
+	})
 }
 
 // Sign returns the signed URL of the photo key names, once per key in signed,

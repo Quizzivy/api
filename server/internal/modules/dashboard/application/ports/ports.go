@@ -6,6 +6,7 @@ import (
 	aidomain "quizzivy/internal/modules/ai/domain"
 	auditquery "quizzivy/internal/modules/audit/application/query"
 	auditdomain "quizzivy/internal/modules/audit/domain"
+	messagingquery "quizzivy/internal/modules/messaging/application/query"
 	notificationsquery "quizzivy/internal/modules/notifications/application/query"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
@@ -33,3 +34,6 @@ type AICredits = cqrs.QueryHandler[aiquery.AdminCredits, aidomain.AdminCredits]
 
 // SharedWithMe is the sharing module's own count of the live grants to a user, the muted count beside "Shared with me".
 type SharedWithMe = cqrs.QueryHandler[sharingquery.CountSharedWithMe, int]
+
+// UnreadMessages is the messaging module's own count of a staff member's unread messages, the nav's Messages count.
+type UnreadMessages = cqrs.QueryHandler[messagingquery.StaffUnread, int]

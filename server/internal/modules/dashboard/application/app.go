@@ -65,6 +65,12 @@ func (a *Application) WithSharedWithMe(port ports.SharedWithMe) *Application {
 	return a
 }
 
+// WithUnreadMessages sets the messaging module's count behind the nav's Messages. Without it the count is 0.
+func (a *Application) WithUnreadMessages(port ports.UnreadMessages) *Application {
+	a.service.Messages = port
+	return a
+}
+
 // WithAdmin sets what the Admin readings are drawn from: the organization's name, the audit log's newest entries, the deploy's overrides of the usage limits and the zone whose days they count. A nil location counts days in the centre's default zone, and a nil recent leaves the Overview's recent changes empty.
 func (a *Application) WithAdmin(branding ports.Branding, recent ports.RecentChanges, env limits.Env, loc *time.Location) *Application {
 	a.service.Branding, a.service.Recent, a.service.LimitEnv = branding, recent, env

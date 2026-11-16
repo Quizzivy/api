@@ -1,8 +1,9 @@
 // Package ports is what the messaging context needs from outside it: the
 // signed URL of a profile photo, for the students and staff its threads name,
 // the flagged attempts a staff member's direct thread shows beside its
-// messages, the object store that holds messages' files, and the audio probe
-// that tells an MP3 or an M4A.
+// messages, the object store that holds messages' files, the audio probe
+// that tells an MP3 or an M4A, and the bell that holds each reader's in-app
+// item for a thread.
 package ports
 
 import (
@@ -52,4 +53,17 @@ type StoredObject struct {
 // duration cannot be read included.
 type AudioProbe interface {
 	Audio(r io.ReaderAt, size int64) (mime string, err error)
+}
+
+// Bell keeps the in-app item each reader holds for a thread: the
+// notifications context, behind an adapter, so the messaging context never
+// writes notifications itself.
+type Bell interface {
+	// Ring writes n into its reader's notifications, adding to the item they
+	// hold for the thread while it is unread, unless the reader switched off
+	// message.received.
+	Ring(ctx context.Context, n domain.Notice) error
+	// Seen marks read the item readerID holds for the thread conversationID
+	// when it was last written no later than at.
+	Seen(ctx context.Context, readerID, conversationID string, at time.Time) error
 }

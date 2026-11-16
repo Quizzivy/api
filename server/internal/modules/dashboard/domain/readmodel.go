@@ -91,9 +91,11 @@ type Activity struct {
 }
 
 // Nav is the caller's permission-aware shell counts. SharedWithMe counts the
-// live grants to the caller.
+// live grants to the caller, and UnreadMessages the messages past the
+// caller's read pointers, not their own, over their threads.
 type Nav struct {
 	LiveAssignments, AnswersToGrade *int
 	UnreadNotifications             int
 	SharedWithMe                    int
+	UnreadMessages                  int
 }

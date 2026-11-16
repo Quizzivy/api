@@ -35,6 +35,7 @@ func (s PostAnnouncementHandler) Handle(ctx context.Context, cmd PostAnnouncemen
 	if err != nil {
 		return domain.Posted{}, err
 	}
+	s.Ring(ctx, posted)
 	signed := map[string]*string{}
 	s.SignMessage(ctx, cmd.Actor.ID, &posted.Message, signed)
 	return posted, nil

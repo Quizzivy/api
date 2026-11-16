@@ -352,8 +352,8 @@ func (p PublishedByCollaborator) fields() fields {
 
 // MessageNotice is MessageReceived's params: who wrote the newest message of
 // a thread the teacher has not read, how many are unread, and the newest one's
-// first 80 characters or its file's name. No producer writes it before
-// T-R7.12.
+// first 80 characters or its file's name. The messaging module writes it
+// under MessageKey.
 type MessageNotice struct {
 	SenderName string
 	Count      int
@@ -367,8 +367,8 @@ func (p MessageNotice) fields() fields {
 }
 
 // TeacherMessageNotice is MessageFromTeacher's params: MessageNotice's, and
-// for a class announcement the class's name. No producer writes it before
-// T-R7.12.
+// for a class announcement the class's name. The messaging module writes it
+// under MessageKey.
 type TeacherMessageNotice struct {
 	SenderName string
 	Count      int

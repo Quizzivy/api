@@ -18,6 +18,11 @@ const (
 	// carries them, added to the stored ones; a stored row without one counts
 	// as zero.
 	Add
+	// Renew writes the notice in place of the stored row as a new
+	// notification: a new id, so it lists first, created now. Its count is
+	// added to the stored one while that row is unread, and starts again from
+	// the notice's once the row was read.
+	Renew
 )
 
 // Notice is one notification as a producer hands it in. DedupeKey names the
@@ -56,7 +61,7 @@ func (n Notice) Validate() error {
 	if length := utf8.RuneCountInString(n.DedupeKey); length < 1 || length > MaxDedupeKey {
 		return ErrInvalidDedupeKey
 	}
-	if n.Merge != Replace && n.Merge != Add {
+	if n.Merge != Replace && n.Merge != Add && n.Merge != Renew {
 		return ErrUnknownMerge
 	}
 	return nil

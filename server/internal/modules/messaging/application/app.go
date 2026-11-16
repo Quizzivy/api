@@ -5,10 +5,13 @@
 // which they post in as text, a class's channel, which they read only, and the
 // read pointer. Staff attach files to their posts (T-R7.11): an upload that
 // waits unsent, a download for the thread's participants, and the daily
-// sweeps of files nobody sent and of objects no row names.
+// sweeps of files nobody sent and of objects no row names. Each side counts
+// its unread messages for the shell, and each new message leaves its readers
+// an in-app item (T-R7.12).
 package application
 
 import (
+	"log/slog"
 	"time"
 
 	"quizzivy/internal/modules/messaging/application/command"
@@ -53,6 +56,9 @@ type Queries struct {
 
 	StaffAttachmentURL   cqrs.QueryHandler[query.StaffAttachmentURL, domain.AttachmentURL]
 	StudentAttachmentURL cqrs.QueryHandler[query.StudentAttachmentURL, domain.AttachmentURL]
+
+	StaffUnread   cqrs.QueryHandler[query.StaffUnread, int]
+	StudentUnread cqrs.QueryHandler[query.StudentUnread, int]
 }
 
 // New builds the application over repo.
@@ -80,6 +86,9 @@ func New(repo domain.Repository) *Application {
 
 			StaffAttachmentURL:   query.StaffAttachmentURLHandler{Service: service},
 			StudentAttachmentURL: query.StudentAttachmentURLHandler{Service: service},
+
+			StaffUnread:   query.StaffUnreadHandler{Service: service},
+			StudentUnread: query.StudentUnreadHandler{Service: service},
 		},
 		service: service,
 	}
@@ -106,6 +115,15 @@ func (a *Application) WithAttachments(files ports.AttachmentStore, audio ports.A
 	a.service.Files, a.service.Audio = files, audio
 	a.Commands.SweepUnsentAttachments = command.SweepUnsentAttachmentsHandler{Service: a.service}
 	a.Commands.SweepAttachmentObjects = command.SweepAttachmentObjectsHandler{Service: a.service, Cursor: &command.SweepCursor{}}
+	return a
+}
+
+// WithBell keeps each reader's in-app item for a thread in bell: a new
+// message adds to it, and a read pointer that leaves nothing unread clears
+// it. Failures go to logger. Without it nothing is written to anyone's
+// notifications.
+func (a *Application) WithBell(bell ports.Bell, logger *slog.Logger) *Application {
+	a.service.Bell, a.service.Logger = bell, logger
 	return a
 }
 

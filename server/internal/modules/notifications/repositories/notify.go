@@ -11,13 +11,15 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 )
 
-const upsert = `
+const insertUnlessSwitchedOff = `
 	INSERT INTO app.notifications AS n (user_id, kind, params, target, dedupe_key)
 	SELECT $1::uuid, $2::text, $3::text::jsonb, $4::text::jsonb, $5::text
 	 WHERE NOT EXISTS (
 	       SELECT 1 FROM app.notification_preferences p
 	        WHERE p.user_id = $1::uuid AND p.event = $6::text AND NOT p.in_app)
-	ON CONFLICT (user_id, dedupe_key) DO UPDATE
+	ON CONFLICT (user_id, dedupe_key) DO UPDATE`
+
+const upsert = insertUnlessSwitchedOff + `
 	   SET kind    = EXCLUDED.kind,
 	       target  = EXCLUDED.target,
 	       read_at = NULL,
@@ -28,13 +30,28 @@ const upsert = `
 	                 ELSE EXCLUDED.params END
 	RETURNING n.id::text`
 
+const renew = insertUnlessSwitchedOff + `
+	   SET kind       = EXCLUDED.kind,
+	       target     = EXCLUDED.target,
+	       read_at    = NULL,
+	       id         = uuidv7(),
+	       created_at = now(),
+	       params     = EXCLUDED.params || jsonb_build_object('count',
+	                      CASE WHEN n.read_at IS NULL THEN COALESCE((n.params->>'count')::int, 0) ELSE 0 END
+	                      + COALESCE((EXCLUDED.params->>'count')::int, 0))
+	RETURNING n.id::text`
+
 // Upsert writes the notice in one statement, so that concurrent notices for
 // one user and key each add to what the others stored and none is lost. The
 // insert is skipped while the user's switch for the kind's event is off; a
 // kind without a switch is always written. On a conflict the stored row takes
 // the notice's kind and target and becomes unread, and its params become the
 // notice's under Replace, or under Add the notice's with count and toGrade
-// summed with the stored ones where the notice carries them.
+// summed with the stored ones where the notice carries them. Under Renew it
+// also takes a new id and is created now, and its count is the notice's added
+// to the stored one while that was unread, or the notice's alone; only Renew
+// writes those two columns, so a role that may update a notification's kind,
+// params, target and read_at alone can write every other mode.
 func (p *Postgres) Upsert(ctx context.Context, n domain.Notice) (bool, error) {
 	params, err := domain.Encode(n.Params)
 	if err != nil {
@@ -52,8 +69,12 @@ func (p *Postgres) Upsert(ctx context.Context, n domain.Notice) (bool, error) {
 	if governing, ok := n.Kind.Event(); ok {
 		event = new(string(governing))
 	}
+	statement, args := upsert, []any{n.UserID, string(n.Kind), string(params), target, n.DedupeKey, event, n.Merge == domain.Add}
+	if n.Merge == domain.Renew {
+		statement, args = renew, args[:6]
+	}
 	var id string
-	err = p.QueryRow(ctx, upsert, n.UserID, string(n.Kind), string(params), target, n.DedupeKey, event, n.Merge == domain.Add).Scan(&id)
+	err = p.QueryRow(ctx, statement, args...).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

@@ -90,7 +90,7 @@ func TestANoticeIsRefusedForItsFirstFault(t *testing.T) {
 		"no dedupe key":                       {func(n *domain.Notice) { n.DedupeKey = "" }, domain.ErrInvalidDedupeKey},
 		"a dedupe key too long":               {func(n *domain.Notice) { n.DedupeKey = strings.Repeat("k", domain.MaxDedupeKey+1) }, domain.ErrInvalidDedupeKey},
 		"no merge mode":                       {func(n *domain.Notice) { n.Merge = 0 }, domain.ErrUnknownMerge},
-		"a merge mode that does not exist":    {func(n *domain.Notice) { n.Merge = domain.Add + 1 }, domain.ErrUnknownMerge},
+		"a merge mode that does not exist":    {func(n *domain.Notice) { n.Merge = domain.Renew + 1 }, domain.ErrUnknownMerge},
 	} {
 		if err := aNotice(c.change).Validate(); !errors.Is(err, c.want) {
 			t.Errorf("%s: err = %v, want %v", label, err, c.want)

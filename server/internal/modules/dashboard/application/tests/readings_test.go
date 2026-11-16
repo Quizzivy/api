@@ -6,6 +6,7 @@ import (
 	"quizzivy/internal/modules/dashboard/application"
 	"quizzivy/internal/modules/dashboard/application/query"
 	"quizzivy/internal/modules/dashboard/domain"
+	messagingquery "quizzivy/internal/modules/messaging/application/query"
 	notificationsquery "quizzivy/internal/modules/notifications/application/query"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	sharingquery "quizzivy/internal/modules/sharing/application/query"
@@ -182,6 +183,36 @@ func TestNavCountsWhatIsSharedWithTheCallerThroughTheSharingPort(t *testing.T) {
 		return 0, expected
 	}))
 	if _, err := failing.Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher"}}); !errors.Is(err, expected) {
+		t.Fatalf("a failing count gave %v", err)
+	}
+}
+
+func TestNavCountsTheCallersUnreadMessagesInTheirOwnScope(t *testing.T) {
+	unread := cqrs.HandlerFunc[notificationsquery.Summary, notificationsdomain.Summary](func(_ context.Context, q notificationsquery.Summary) (notificationsdomain.Summary, error) {
+		if q.Messages {
+			t.Error("the nav asked notifications for a student's messages")
+		}
+		return notificationsdomain.Summary{}, nil
+	})
+	out, err := application.New(&store{t: t}).WithNotifications(unread).Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher"}})
+	if err != nil || out.UnreadMessages != 0 {
+		t.Fatalf("without the port the nav counts %d messages (%v), want 0", out.UnreadMessages, err)
+	}
+	var asked messagingquery.StaffUnread
+	app := application.New(&store{t: t}).WithNotifications(unread).WithUnreadMessages(cqrs.HandlerFunc[messagingquery.StaffUnread, int](func(_ context.Context, q messagingquery.StaffUnread) (int, error) {
+		asked = q
+		return 120, nil
+	}))
+	scope := access.Scope{UserID: "teacher"}
+	out, err = app.Queries.Nav.Handle(context.Background(), query.Nav{Scope: scope})
+	if err != nil || out.UnreadMessages != 120 || asked.Scope != scope {
+		t.Fatalf("the nav counts %d messages (%v) after asking %+v, want 120 in the scope it was given", out.UnreadMessages, err, asked)
+	}
+	expected := errors.New("messaging unavailable")
+	failing := application.New(&store{t: t}).WithNotifications(unread).WithUnreadMessages(cqrs.HandlerFunc[messagingquery.StaffUnread, int](func(context.Context, messagingquery.StaffUnread) (int, error) {
+		return 0, expected
+	}))
+	if _, err := failing.Queries.Nav.Handle(context.Background(), query.Nav{Scope: scope}); !errors.Is(err, expected) {
 		t.Fatalf("a failing count gave %v", err)
 	}
 }

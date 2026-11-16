@@ -11,7 +11,8 @@ import (
 // MarkReadAsStudent moves StudentID's read pointer forward to MessageID in
 // their thread with TeacherID, or, with ClassID, in that class's channel. A
 // thread the student cannot read answers domain.ErrNotFound, and a message
-// that is not one of its domain.ErrNotInThread.
+// that is not one of its domain.ErrNotInThread. A pointer that leaves
+// nothing unread in the thread clears the student's in-app item for it.
 type MarkReadAsStudent struct {
 	StudentID string
 	TeacherID string
@@ -29,10 +30,12 @@ func (s MarkReadAsStudentHandler) Handle(ctx context.Context, cmd MarkReadAsStud
 		if _, err := s.Repo.StudentChannel(ctx, cmd.StudentID, cmd.ClassID); err != nil {
 			return cqrs.Nothing{}, err
 		}
-		return cqrs.Nothing{}, s.Repo.MarkChannelRead(ctx, cmd.ClassID, mark)
+		return cqrs.Nothing{}, s.MoveRead(ctx, mark.ReaderID, func() (domain.ReadState, error) { return s.Repo.MarkChannelRead(ctx, cmd.ClassID, mark) })
 	}
 	if _, err := s.AsStudent(ctx, cmd.StudentID, cmd.TeacherID); err != nil {
 		return cqrs.Nothing{}, err
 	}
-	return cqrs.Nothing{}, s.Repo.MarkDirectRead(ctx, cmd.TeacherID, cmd.StudentID, mark)
+	return cqrs.Nothing{}, s.MoveRead(ctx, mark.ReaderID, func() (domain.ReadState, error) {
+		return s.Repo.MarkDirectRead(ctx, cmd.TeacherID, cmd.StudentID, mark)
+	})
 }

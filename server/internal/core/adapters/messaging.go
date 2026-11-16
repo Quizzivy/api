@@ -11,6 +11,8 @@ import (
 	identityquery "quizzivy/internal/modules/identity/application/query"
 	messagingports "quizzivy/internal/modules/messaging/application/ports"
 	messagingdomain "quizzivy/internal/modules/messaging/domain"
+	notificationscommand "quizzivy/internal/modules/notifications/application/command"
+	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/probe"
 	"quizzivy/internal/platform/storage"
 	"quizzivy/internal/shared/access"
@@ -97,4 +99,39 @@ func (MessagingAudio) Audio(r io.ReaderAt, size int64) (string, error) {
 		return "", errors.Join(messagingdomain.ErrUnsupportedType, err)
 	}
 	return mime, err
+}
+
+// MessagingBell is the notifications module's Notify and MarkKeyRead behind
+// the messaging module's Bell port. A notice becomes message.from_teacher in
+// a student's bell, with the class's name for an announcement, and
+// message.received in a staff member's, renewed under the thread's key
+// (notificationsdomain.MessageKey) with a count of one, so the item counts the
+// messages since it was last read and lists first. The reader's
+// message.received switch governs both kinds.
+type MessagingBell struct {
+	Notify      cqrs.CommandHandler[notificationscommand.Notify, cqrs.Nothing]
+	MarkKeyRead cqrs.CommandHandler[notificationscommand.MarkKeyRead, cqrs.Nothing]
+}
+
+// Ring writes n into its reader's notifications.
+func (a MessagingBell) Ring(ctx context.Context, n messagingdomain.Notice) error {
+	cmd := notificationscommand.Notify{UserID: n.ReaderID, DedupeKey: notificationsdomain.MessageKey(n.ConversationID), Merge: notificationsdomain.Renew}
+	if n.ToStudent {
+		cmd.Kind = notificationsdomain.MessageFromTeacher
+		cmd.Params = notificationsdomain.TeacherMessageNotice{SenderName: n.SenderName, Count: 1, Excerpt: n.Excerpt, ClassName: n.ClassName}
+		cmd.Target = &notificationsdomain.Target{Route: notificationsdomain.RouteStudentMessages, TeacherID: n.TeacherID, ClassID: n.ClassID}
+	} else {
+		cmd.Kind = notificationsdomain.MessageReceived
+		cmd.Params = notificationsdomain.MessageNotice{SenderName: n.SenderName, Count: 1, Excerpt: n.Excerpt}
+		cmd.Target = &notificationsdomain.Target{Route: notificationsdomain.RouteMessages, StudentID: n.StudentID}
+	}
+	_, err := a.Notify.Handle(ctx, cmd)
+	return err
+}
+
+// Seen marks read the item readerID holds for the thread conversationID when
+// it was last written no later than at.
+func (a MessagingBell) Seen(ctx context.Context, readerID, conversationID string, at time.Time) error {
+	_, err := a.MarkKeyRead.Handle(ctx, notificationscommand.MarkKeyRead{UserID: readerID, DedupeKey: notificationsdomain.MessageKey(conversationID), WrittenBy: at})
+	return err
 }

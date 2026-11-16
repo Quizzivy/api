@@ -43,10 +43,21 @@ type Repository interface {
 	// ErrClassArchived.
 	PostChannel(ctx context.Context, scope access.Scope, classID string, mayWrite bool, post Post) (Posted, error)
 	// MarkDirectRead moves the reader's pointer in staffID's thread with
-	// studentID forward to the mark's message, or answers ErrNotInThread.
-	MarkDirectRead(ctx context.Context, staffID, studentID string, mark ReadMark) error
+	// studentID forward to the mark's message, or answers ErrNotInThread, and
+	// returns the thread's ReadState for the reader.
+	MarkDirectRead(ctx context.Context, staffID, studentID string, mark ReadMark) (ReadState, error)
 	// MarkChannelRead is MarkDirectRead for the channel of classID.
-	MarkChannelRead(ctx context.Context, classID string, mark ReadMark) error
+	MarkChannelRead(ctx context.Context, classID string, mark ReadMark) (ReadState, error)
+	// Delivery reads what the message messageID tells its thread's readers.
+	Delivery(ctx context.Context, messageID string) (Delivery, error)
+	// StaffUnread counts the messages past scope.UserID's read pointers, not
+	// counting their own, over their direct threads and the channels of the
+	// classes scope reaches that are not archived.
+	StaffUnread(ctx context.Context, scope access.Scope) (int, error)
+	// StudentUnread is StaffUnread for a student: over their direct threads
+	// and the channels of the classes they are in now that are not archived;
+	// 0 for an account that is not a student.
+	StudentUnread(ctx context.Context, studentID string) (int, error)
 	// FirstMessageAt is when the first message of staffID's thread with
 	// studentID was written, nil while the thread has none.
 	FirstMessageAt(ctx context.Context, staffID, studentID string) (*time.Time, error)

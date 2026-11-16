@@ -187,7 +187,7 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		Queries: application.Queries{
 			Summary: cqrs.HandlerFunc[query.Summary, domain.Summary](func(_ context.Context, q query.Summary) (domain.Summary, error) {
 				summarised = q
-				return domain.Summary{UnreadNotifications: 4}, nil
+				return domain.Summary{UnreadNotifications: 4, UnreadMessages: 2}, nil
 			}),
 			Preferences: cqrs.HandlerFunc[query.Preferences, []domain.Preference](func(_ context.Context, q query.Preferences) ([]domain.Preference, error) {
 				read = q
@@ -209,8 +209,8 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		}
 		return out.VisitGetMySummaryResponse(w)
 	})
-	if got := summary.Body.String(); got != `{"unreadMessages":0,"unreadNotifications":4}`+"\n" || summarised.UserID != caller {
-		t.Errorf("the summary is %s for %q", got, summarised.UserID)
+	if got := summary.Body.String(); got != `{"unreadMessages":2,"unreadNotifications":4}`+"\n" || summarised.UserID != caller || !summarised.Messages {
+		t.Errorf("the summary is %s for %+v, want the caller's, with their messages", got, summarised)
 	}
 
 	const switches = `[{"email":false,"event":"attempt.submitted","inApp":true},{"email":true,"event":"attempt.flagged","inApp":false},` +

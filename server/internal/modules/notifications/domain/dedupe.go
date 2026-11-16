@@ -111,3 +111,13 @@ func SharedKey(kind, resourceID string) string {
 func CollaboratorPublishedKey(testID string, version int) string {
 	return "collaborator_published:" + testID + ":" + strconv.Itoa(version)
 }
+
+// MessageKeyPrefix begins the dedupe key of every message item, so that a
+// statement can name the items of a set of threads.
+const MessageKeyPrefix = "msg:"
+
+// MessageKey is the dedupe key of the item a reader holds for one thread,
+// the conversation conversationID: one per reader per thread.
+func MessageKey(conversationID string) string {
+	return MessageKeyPrefix + conversationID
+}

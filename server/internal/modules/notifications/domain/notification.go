@@ -123,7 +123,9 @@ type Page struct {
 	NextBefore string
 }
 
-// Summary is what the reader's shell shows before any page is open.
+// Summary is what the reader's shell shows before any page is open: the
+// unread notifications and, for a student, the unread messages.
 type Summary struct {
 	UnreadNotifications int
+	UnreadMessages      int
 }

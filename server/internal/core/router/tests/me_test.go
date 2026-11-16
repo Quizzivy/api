@@ -57,6 +57,11 @@ func (s *meStore) MarkRead(_ context.Context, userID string, ids []string, audie
 	return nil
 }
 
+func (s *meStore) MarkKeyRead(_ context.Context, userID, _ string, _ time.Time) error {
+	s.record("MarkKeyRead", userID)
+	return nil
+}
+
 func (s *meStore) MarkAllRead(_ context.Context, userID string, audience notificationsdomain.Audience) error {
 	s.record("MarkAllRead", userID)
 	s.audience = audience

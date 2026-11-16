@@ -162,20 +162,19 @@ func unknownAudience(ctx context.Context) openapi.BadRequestJSONResponse {
 }
 
 // GetMySummary implements GET /me/summary: the caller's unread count, of one
-// console's kinds when the request names it.
+// console's kinds when the request names it, and a student's unread messages.
 func (h Notifications) GetMySummary(ctx context.Context, request openapi.GetMySummaryRequestObject) (openapi.GetMySummaryResponseObject, error) {
 	userID, ok := h.caller(ctx)
 	if !ok {
 		return nil, httpx.ErrNotImplemented
 	}
 	h.materialise(ctx, userID)
-	summary, err := h.app.Queries.Summary.Handle(ctx, query.Summary{UserID: userID, Audience: audienceOf(request.Params.Audience)})
+	summary, err := h.app.Queries.Summary.Handle(ctx, query.Summary{UserID: userID, Audience: audienceOf(request.Params.Audience), Messages: true})
 	if errors.Is(err, domain.ErrUnknownAudience) {
 		return openapi.GetMySummary400JSONResponse{BadRequestJSONResponse: unknownAudience(ctx)}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	// unreadMessages is 0 until the messaging module counts it (T-R7.12).
-	return openapi.GetMySummary200JSONResponse{UnreadNotifications: summary.UnreadNotifications, UnreadMessages: 0}, nil
+	return openapi.GetMySummary200JSONResponse{UnreadNotifications: summary.UnreadNotifications, UnreadMessages: summary.UnreadMessages}, nil
 }

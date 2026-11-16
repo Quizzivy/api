@@ -37,6 +37,7 @@ func (s PostDirectHandler) Handle(ctx context.Context, cmd PostDirect) (domain.P
 	if err != nil {
 		return domain.Posted{}, err
 	}
+	s.Ring(ctx, posted)
 	s.SignMessage(ctx, cmd.Actor.ID, &posted.Message, map[string]*string{})
 	return posted, nil
 }
