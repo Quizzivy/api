@@ -129,3 +129,43 @@ func TestARefusedDeletionNamesTheSetsAndGrantsAUserHolds(t *testing.T) {
 		}
 	}
 }
+
+// TestARefusedDeletionNamesTheMessagesAUserHolds keeps T-R7.9's keys to
+// app.users mapped: a student with a direct thread, one who sent a message,
+// and one who uploaded a file each answer referencedBy messages, never a 500.
+func TestARefusedDeletionNamesTheMessagesAUserHolds(t *testing.T) {
+	w := newRosterWorld(t)
+	ctx := context.Background()
+	admin := domain.WriteRequest{ActorID: w.admin, All: true, Grants: access.NewSet(access.All()...)}
+	thread := func(t *testing.T, student string) string {
+		t.Helper()
+		return w.id(t, `INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at)
+			VALUES ('direct', $1, $2, now()) RETURNING id::text`, w.a, student)
+	}
+	holders := map[string]func(t *testing.T, user string){
+		"has a direct thread": func(t *testing.T, user string) {
+			w.exec(t, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body) VALUES ($1, $2, uuidv7(), 'Chào em')`, thread(t, user), w.a)
+		},
+		"sent a message": func(t *testing.T, user string) {
+			other := w.user(t, "student", "Bạn cùng lớp", nil)
+			w.exec(t, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body) VALUES ($1, $2, uuidv7(), 'Em chào cô')`, thread(t, other), user)
+		},
+		"uploaded a file": func(t *testing.T, user string) {
+			w.exec(t, `INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+				VALUES ($1, 'messages/' || uuidv7() || '.pdf', 'application/pdf', 1024, 'bai-tap.pdf', sha256('x'))`, user)
+		},
+	}
+	for name, hold := range holders {
+		user := w.user(t, "student", "Người giữ "+name, nil)
+		hold(t, user)
+		w.exec(t, `UPDATE app.users SET disabled_at = now() WHERE id = $1`, user)
+		_, err := w.app.Commands.DeleteStudent.Handle(ctx, command.DeleteStudent{Request: admin, ID: user})
+		var refused *domain.ReferencedError
+		if !errors.As(err, &refused) || refused.By != domain.ReferencedByMessages {
+			t.Errorf("deleting a user who %s answered %v, want messages", name, err)
+		}
+		if w.id(t, `SELECT count(*)::text FROM app.users WHERE id = $1`, user) != "1" {
+			t.Errorf("the user who %s was deleted", name)
+		}
+	}
+}

@@ -98,7 +98,7 @@ func TestAppRoleCanReadAndWriteEveryTable(t *testing.T) {
 func TestTheAppendOnlyTablesAreAppendOnlyForTheAppRole(t *testing.T) {
 	conn := migrated(t)
 
-	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger"} {
+	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger", "app.messages"} {
 		t.Run(table, func(t *testing.T) {
 			for _, priv := range []string{"SELECT", "INSERT"} {
 				if !hasTablePrivilege(t, conn, appRole, table, priv) {
@@ -271,9 +271,14 @@ var maintenanceGrants = map[string]map[string]string{
 	"audit_log":                    {"INSERT": "*"},
 	"class_join_codes":             {"SELECT": "class_id,code_ciphertext,id,key_id,lookup_scheme,revoked_at", "UPDATE": "code_ciphertext,code_hash,key_id"},
 	"classes":                      {"SELECT": "teacher_id"},
+	"conversation_reads":           {"SELECT": "conversation_id,user_id", "DELETE": "*"},
+	"conversations":                {"SELECT": "id,kind,staff_id,student_id", "DELETE": "*"},
 	"leads":                        {"SELECT": "created_at,id", "DELETE": "*"},
 	"maintenance_windows":          {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
 	"media_assets":                 {"SELECT": "owner_id"},
+	"message_attachments":          {"SELECT": "id,uploaded_by", "DELETE": "*"},
+	"messages":                     {"SELECT": "attachment_id,conversation_id,id", "DELETE": "*"},
+	"messaging_ties":               {"SELECT": "staff_id,student_id", "DELETE": "*"},
 	"notification_preferences":     {"SELECT": "event,in_app,user_id"},
 	"notifications": {
 		"SELECT": "dedupe_key,id,kind,params,target,user_id",
@@ -358,7 +363,7 @@ func TestTheMaintenanceRoleHoldsExactlyTheGrantsItsCommandsUse(t *testing.T) {
 func TestTheMaintenanceRoleCannotRewriteARecordOrCreateAnything(t *testing.T) {
 	conn := migrated(t)
 
-	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger"} {
+	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger", "app.messages"} {
 		for _, priv := range []string{"UPDATE", "TRUNCATE"} {
 			if hasTablePrivilege(t, conn, maintenanceRole, table, priv) {
 				t.Errorf("%s can %s %s; a record the application can rewrite is not evidence", maintenanceRole, priv, table)
@@ -432,6 +437,63 @@ func TestTheAppRoleCannotRewriteFrozenMediaReferences(t *testing.T) {
 	for _, priv := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
 		if !hasTablePrivilege(t, conn, appRole, "app.question_media_references", priv) {
 			t.Errorf("%s cannot %s the bank's media references", appRole, priv)
+		}
+	}
+}
+
+// TestTheMessagingTablesHoldWhatT_R7_9Grants pins the five messaging files
+// (00163 to 00167). For quizzivy_app a message is append-only and never
+// deleted, a thread changes only last_message_at and is never deleted, a file
+// is never rewritten and may go only while no message holds it (the RESTRICT
+// key's part), a read pointer moves and stays, and a tie is a fact. For
+// quizzivy_maintenance, D16's anonymisation (T-R7.12) deletes from all four
+// message tables and the ties and writes nothing there, and reads no body, file
+// name or storage key (D17).
+func TestTheMessagingTablesHoldWhatT_R7_9Grants(t *testing.T) {
+	conn := migrated(t)
+	for table, want := range map[string]map[string]bool{
+		"app.message_attachments": {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": true},
+		"app.conversations":       {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+		"app.messages":            {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+		"app.conversation_reads":  {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": false},
+		"app.messaging_ties":      {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+	} {
+		for priv, allowed := range want {
+			if got := hasTablePrivilege(t, conn, appRole, table, priv); got != allowed {
+				t.Errorf("%s %s on %s = %v, want %v", appRole, priv, table, got, allowed)
+			}
+		}
+	}
+	var updatable string
+	if err := conn.QueryRow(`SELECT string_agg(a.attname, ',' ORDER BY a.attname) FROM pg_attribute a
+		 WHERE a.attrelid = 'app.conversations'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+		   AND has_column_privilege($1, a.attrelid, a.attnum, 'UPDATE')`, appRole).Scan(&updatable); err != nil {
+		t.Fatal(err)
+	}
+	if updatable != "last_message_at" {
+		t.Errorf("%s may UPDATE app.conversations(%s), want last_message_at alone", appRole, updatable)
+	}
+
+	for _, table := range []string{"app.message_attachments", "app.conversations", "app.messages", "app.conversation_reads", "app.messaging_ties"} {
+		if !hasTablePrivilege(t, conn, maintenanceRole, table, "DELETE") {
+			t.Errorf("%s cannot DELETE %s; anonymisation removes an account's threads there", maintenanceRole, table)
+		}
+		var writes bool
+		if err := conn.QueryRow(`SELECT has_any_column_privilege($1, $2, 'INSERT, UPDATE, REFERENCES')
+			OR has_table_privilege($1, $2, 'TRUNCATE, TRIGGER')`, maintenanceRole, table).Scan(&writes); err != nil {
+			t.Fatal(err)
+		}
+		if writes {
+			t.Errorf("%s may write %s beyond DELETE", maintenanceRole, table)
+		}
+	}
+	for _, c := range [][2]string{{"app.messages", "body"}, {"app.message_attachments", "original_filename"}, {"app.message_attachments", "storage_key"}} {
+		var reads bool
+		if err := conn.QueryRow(`SELECT has_column_privilege($1, $2, $3, 'SELECT')`, maintenanceRole, c[0], c[1]).Scan(&reads); err != nil {
+			t.Fatal(err)
+		}
+		if reads {
+			t.Errorf("%s may read %s.%s; D17 keeps contents with their participants", maintenanceRole, c[0], c[1])
 		}
 	}
 }

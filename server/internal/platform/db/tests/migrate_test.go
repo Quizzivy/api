@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -291,5 +292,127 @@ func TestTheSharingFilesApplyOverPopulatedTablesAndRollBack(t *testing.T) {
 	}
 	if tables, columns := present(); tables != 3 || columns != 2 {
 		t.Errorf("after the second up: %d tables and %d columns, want 3 and 2", tables, columns)
+	}
+}
+
+// The messaging files (00162 to 00167, T-R7.9): the sixth switch, then the five tables.
+const messaging int64 = 167
+
+// TestTheMessagingFilesFillTheTiesAndRollBack runs 00162 to 00167 over a class
+// that already has a member and a past: a student who joined with a code and
+// left, whose class.member_enrolled row is all that is left of it, and a
+// student staff added and removed, whose class.member_added row names the
+// class only. The fill ties the class's teacher to the first two, since the
+// earliest moment known, and cannot know the third (O-R7.8). Then the files go
+// down, taking the tables and a saved message.received switch with them, and
+// come up again.
+func TestTheMessagingFilesFillTheTiesAndRollBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, sharing); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, member, joinedAndLeft, addedAndLeft, class string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, member, class = f.adminID, f.studentID, f.classID
+		student := func(name string) string {
+			var id string
+			if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+				VALUES ($1 || '-' || uuidv7() || '@example.com', $1, (SELECT id FROM app.roles WHERE builtin_key = 'student')) RETURNING id`, name).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		joinedAndLeft, addedAndLeft = student("joined"), student("added")
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, joined_at, added_by)
+			VALUES ($1, $2, 'admin', '2026-09-01T08:00:00Z', $3)`, class, member, teacher)
+		mustExec(t, tx, `INSERT INTO app.audit_log (actor_user_id, action, entity, entity_id, occurred_at, diff) VALUES
+			($2::uuid, 'class.member_enrolled', 'class_member', $1::uuid, '2026-08-01T08:00:00Z', jsonb_build_object('class_id', $1::text, 'user_id', $2::text, 'join_code_id', uuidv7()::text)),
+			($2::uuid, 'class.member_enrolled', 'class_member', $1::uuid, '2026-08-15T08:00:00Z', jsonb_build_object('class_id', $1::text, 'user_id', $2::text, 'join_code_id', uuidv7()::text)),
+			($3::uuid, 'class.member_enrolled', 'class_member', $1::uuid, '2026-07-01T08:00:00Z', jsonb_build_object('class_id', $1::text, 'user_id', $3::text, 'join_code_id', uuidv7()::text)),
+			($3::uuid, 'class.member_enrolled', 'class_member', $1::uuid, now(), '{"class_id": "not-a-uuid", "user_id": 7}'),
+			($4::uuid, 'class.member_added', 'class_member', $1::uuid, now(), NULL),
+			($4::uuid, 'class.member_removed', 'class_member', $1::uuid, now(), NULL)`, class, joinedAndLeft, member, teacher)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	present := func() (tables int) {
+		t.Helper()
+		if err := conn.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app'
+			AND table_name IN ('message_attachments', 'conversations', 'messages', 'conversation_reads', 'messaging_ties')`).Scan(&tables); err != nil {
+			t.Fatal(err)
+		}
+		return tables
+	}
+	if err := goose.UpTo(conn, dir, messaging); err != nil {
+		t.Fatalf("up over populated tables: %v", err)
+	}
+	if n := present(); n != 5 {
+		t.Fatalf("after up: %d tables, want 5", n)
+	}
+	rows, err := conn.Query(`SELECT student_id::text, since FROM app.messaging_ties WHERE staff_id = $1`, teacher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ties := map[string]time.Time{}
+	for rows.Next() {
+		var student string
+		var since time.Time
+		if err := rows.Scan(&student, &since); err != nil {
+			t.Fatal(err)
+		}
+		ties[student] = since
+	}
+	_ = rows.Close()
+	want := map[string]time.Time{
+		member:        time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC),
+		joinedAndLeft: time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC),
+	}
+	if len(ties) != len(want) {
+		t.Errorf("the fill tied the teacher to %v, want the member and the student who joined and left", ties)
+	}
+	for student, since := range want {
+		if got, ok := ties[student]; !ok || !got.Equal(since) {
+			t.Errorf("tie to %s since %v (%v), want since %v", student, got, ok, since)
+		}
+	}
+	if _, ok := ties[addedAndLeft]; ok {
+		t.Error("a student staff added and removed is tied; their audit rows name no student")
+	}
+	if _, err := conn.Exec(`INSERT INTO app.notification_preferences (user_id, event, in_app) VALUES ($1, 'message.received', false)`, member); err != nil {
+		t.Fatalf("the sixth switch is refused: %v", err)
+	}
+
+	if err := goose.DownTo(conn, dir, sharing); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if n := present(); n != 0 {
+		t.Fatalf("after down: %d messaging tables left", n)
+	}
+	var switches int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.notification_preferences WHERE user_id = $1`, member).Scan(&switches); err != nil || switches != 0 {
+		t.Errorf("after down the student keeps %d switches (%v), want the message.received row gone", switches, err)
+	}
+	if _, err := conn.Exec(`INSERT INTO app.notification_preferences (user_id, event, in_app) VALUES ($1, 'message.received', false)`, member); !db.IsCheckViolation(err, "notification_preferences_event_check") {
+		t.Errorf("after down message.received is %v, want R4's check to refuse it", err)
+	}
+	if err := goose.UpTo(conn, dir, messaging); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	if n := present(); n != 5 {
+		t.Errorf("after the second up: %d tables, want 5", n)
 	}
 }
