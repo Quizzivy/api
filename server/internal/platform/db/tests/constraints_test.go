@@ -2044,6 +2044,52 @@ func TestAReaderHasOnePointerPerThread(t *testing.T) {
 	})
 }
 
+// The R6 binary, still serving between 00167 and the new binary, writes no
+// tie. 00167's triggers write them at its commit; SET CONSTRAINTS fires them
+// here, in a transaction that rolls back (T-R7.9).
+func TestTheOldBinarysEnrolmentsAndChangesOfTeacherAreTiedAtCommit(t *testing.T) {
+	const fire = `SET CONSTRAINTS app.class_members_fill_messaging_ties, app.classes_fill_messaging_ties IMMEDIATE`
+	tied := func(t *testing.T, tx *sql.Tx, staff, student string) bool {
+		t.Helper()
+		var ok bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2)`, staff, student).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		if tied(t, tx, f.adminID, f.studentID) {
+			t.Fatal("the member is tied before the commit; the trigger is not deferred, so the module's own write goes untested")
+		}
+		mustExec(t, tx, fire)
+		if !tied(t, tx, f.adminID, f.studentID) {
+			t.Error("a member the old binary enrolled is not tied to the class's teacher")
+		}
+
+		var heir string
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('heir-' || uuidv7() || '@example.com', 'Giáo viên mới', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&heir); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, `UPDATE app.classes SET teacher_id = $2 WHERE id = $1`, f.classID, heir)
+		mustExec(t, tx, fire)
+		if !tied(t, tx, heir, f.studentID) {
+			t.Error("a class the old binary gave another teacher does not tie them to its member")
+		}
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		mustExec(t, tx, `DELETE FROM app.class_members WHERE user_id = $1`, f.studentID)
+		mustExec(t, tx, `DELETE FROM app.users WHERE id = $1`, f.studentID)
+		mustExec(t, tx, fire)
+		var left int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE staff_id = $1`, f.adminID).Scan(&left); err != nil || left != 0 {
+			t.Errorf("a member whose account went in the same transaction left %d ties (%v)", left, err)
+		}
+	})
+}
+
 func TestATieIsBetweenTwoAccountsOnceAndGoesWithEither(t *testing.T) {
 	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
 		rejectsWith(t, tx, "messaging_ties_participants_differ",

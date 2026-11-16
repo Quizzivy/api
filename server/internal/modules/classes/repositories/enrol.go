@@ -98,6 +98,23 @@ type claimedCode struct {
 	lookup  domain.StoredLookup
 }
 
+// lockCodesClass takes the class of the code FOR SHARE before claimCode locks
+// the code row, the order Rotate and Revoke take them in, so the tie the
+// enrolment records names the class's teacher even when a change of teacher is
+// in flight (ties.Enrolled, T-R7.9). A redemption no longer reads the class
+// while an Archive, a rename or a change of teacher is uncommitted: it waits
+// for it. A code that matches nothing locks nothing.
+func lockCodesClass(ctx context.Context, tx pgx.Tx, code domain.JoinCodeLookup) error {
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM app.classes c
+		 WHERE c.id IN (SELECT jc.class_id FROM app.class_join_codes jc WHERE jc.code_hash = ANY($1::bytea[]))
+		 ORDER BY c.id
+		   FOR SHARE OF c`, code.Hashes()); err != nil {
+		return fmt.Errorf("lock the code's class: %w", err)
+	}
+	return nil
+}
+
 func claimCode(ctx context.Context, tx pgx.Tx, code domain.JoinCodeLookup) (claimedCode, error) {
 	const claim = `
 		SELECT jc.id::text, jc.class_id::text, jc.lookup_scheme, jc.key_id, jc.code_hash,
@@ -111,6 +128,9 @@ func claimCode(ctx context.Context, tx pgx.Tx, code domain.JoinCodeLookup) (clai
 		   FOR UPDATE OF jc`
 
 	var c claimedCode
+	if err := lockCodesClass(ctx, tx, code); err != nil {
+		return c, err
+	}
 	err := tx.QueryRow(ctx, claim, code.Hashes()).Scan(
 		&c.id, &c.classID, &c.lookup.Scheme, &c.lookup.KeyID, &c.lookup.Hash,
 		&c.RevokedAt, &c.ExpiresAt, &c.MaxUses, &c.UsesCount, &c.SelfJoinEnabled)

@@ -13,12 +13,19 @@ import (
 )
 
 // Enrolled records that classID's teacher teaches studentID, after a write
-// that put the student in the class.
+// that put the student in the class. It reads the teacher with the class held
+// FOR SHARE, which a change of teacher's FOR NO KEY UPDATE waits for and which
+// waits for it: the member's foreign key takes only FOR KEY SHARE, which does
+// not. So a change that commits first is the teacher read here, and one that
+// comes later sees the new member when it calls Reassigned. The caller takes
+// that lock before any join code row, in the order Rotate and Revoke take the
+// class and the code, or a redemption and a rotation can deadlock.
 func Enrolled(ctx context.Context, db audit.Execer, classID, studentID string) error {
 	if _, err := db.Exec(ctx, `
 		INSERT INTO app.messaging_ties (staff_id, student_id)
 		SELECT c.teacher_id, $2::uuid FROM app.classes c
 		 WHERE c.id = $1::uuid AND c.teacher_id <> $2::uuid
+		   FOR SHARE OF c
 		ON CONFLICT (staff_id, student_id) DO NOTHING`, classID, studentID); err != nil {
 		return fmt.Errorf("ties: record %s in class %s: %w", studentID, classID, err)
 	}
