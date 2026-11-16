@@ -672,3 +672,60 @@ func TestThePreR7SwitchesGetTheDecksEmailAndUpRunsAgain(t *testing.T) {
 		t.Fatalf("second up: %v", err)
 	}
 }
+
+// TestTheSuppressionListComesAndGoesWithItsMigration runs 00172 up, down and
+// up again on a database whose outbox already holds mail: Down drops the
+// table, rows included, and leaves the outbox alone.
+func TestTheSuppressionListComesAndGoesWithItsMigration(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, suppressions int64 = 171, 172
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO app.email_outbox (to_address, template, locale) VALUES ('waiting@example.com', 'account_invite', 'vi')`); err != nil {
+		t.Fatal(err)
+	}
+	present := func() bool {
+		t.Helper()
+		var table *string
+		if err := conn.QueryRow(`SELECT to_regclass('app.email_suppressions')::text`).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		return table != nil
+	}
+	if present() {
+		t.Fatal("the list exists before 00172")
+	}
+	if err := goose.UpTo(conn, dir, suppressions); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO app.email_suppressions (address, reason, provider_event_id) VALUES ('waiting@example.com', 'bounced', 'msg_1')`); err != nil {
+		t.Fatalf("after up a suppression is refused: %v", err)
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	var waiting int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.email_outbox WHERE to_address = 'waiting@example.com'`).Scan(&waiting); err != nil || waiting != 1 || present() {
+		t.Errorf("after down: list present %v, outbox rows %d %v; want the list gone and the outbox kept", present(), waiting, err)
+	}
+	if err := goose.UpTo(conn, dir, suppressions); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	var listed int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.email_suppressions`).Scan(&listed); err != nil || listed != 0 {
+		t.Errorf("after the second up the list holds %d rows (%v), want an empty table", listed, err)
+	}
+}

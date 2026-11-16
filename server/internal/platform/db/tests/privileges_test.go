@@ -498,3 +498,23 @@ func TestTheMessagingTablesHoldWhatT_R7_9Grants(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSuppressionListHoldsWhatT_R7_15Grants pins 00172: quizzivy_app reads
+// the list (the dispatcher), adds to it (the webhook) and may remove from it,
+// but never rewrites a row, and quizzivy_maintenance holds nothing on it.
+func TestTheSuppressionListHoldsWhatT_R7_15Grants(t *testing.T) {
+	conn := migrated(t)
+	for priv, want := range map[string]bool{"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": true, "TRUNCATE": false} {
+		if got := hasTablePrivilege(t, conn, appRole, "app.email_suppressions", priv); got != want {
+			t.Errorf("%s %s on app.email_suppressions = %v, want %v", appRole, priv, got, want)
+		}
+	}
+	var any bool
+	if err := conn.QueryRow(`SELECT has_any_column_privilege($1, 'app.email_suppressions', 'SELECT, INSERT, UPDATE, REFERENCES')
+		OR has_table_privilege($1, 'app.email_suppressions', 'DELETE, TRUNCATE, TRIGGER')`, maintenanceRole).Scan(&any); err != nil {
+		t.Fatal(err)
+	}
+	if any {
+		t.Errorf("%s holds a privilege on app.email_suppressions; no maintenance command reads or writes it", maintenanceRole)
+	}
+}
