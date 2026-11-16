@@ -58,6 +58,7 @@ func TestARefusedUserDeletionNamesWhatHoldsIt(t *testing.T) {
 	for want, err := range map[openapi.ReferencedBy]error{
 		"owned_content": &domain.ReferencedError{By: domain.ReferencedByOwnedContent},
 		"audit":         &domain.ReferencedError{By: domain.ReferencedByAudit},
+		"messages":      &domain.ReferencedError{By: domain.ReferencedByMessages},
 		"other":         domain.ErrReferenced,
 	} {
 		response, callErr := identityhttp.NewIdentity(refusing(err), 0, false, nil).DeleteUser(ctx, openapi.DeleteUserRequestObject{Id: uuid.New()})

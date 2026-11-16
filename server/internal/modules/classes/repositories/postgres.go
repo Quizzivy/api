@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/paging"
+	"quizzivy/internal/shared/ties"
 	"quizzivy/internal/shared/visibility"
 	"strings"
 	"time"
@@ -471,6 +472,9 @@ func (s *Postgres) AddMember(ctx context.Context, in domain.AddMemberInput) (dom
 	}
 
 	if tag.RowsAffected() > 0 {
+		if err := ties.Enrolled(ctx, tx, in.ClassID, in.UserID); err != nil {
+			return domain.Member{}, err
+		}
 		if err := audit.Write(ctx, tx, audit.Entry{
 			ActorUserID: &in.ActorUserID,
 			Action:      "class.member_added",

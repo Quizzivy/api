@@ -11,6 +11,7 @@ func TestAClassConstraintTheMapDoesNotNameIsOther(t *testing.T) {
 	for constraint, want := range map[string]domain.Reference{
 		"assignment_classes_class_id_fkey": domain.ReferencedByAssignments,
 		"class_members_join_code_id_fkey":  domain.ReferencedByMembers,
+		"conversations_class_id_fkey":      domain.ReferencedByMessages,
 		"class_sessions_class_id_fkey":     domain.ReferencedByOther,
 		"":                                 domain.ReferencedByOther,
 	} {

@@ -8,6 +8,7 @@ import (
 	"quizzivy/internal/modules/classes/domain"
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/limits"
+	"quizzivy/internal/shared/ties"
 	"strings"
 	"time"
 
@@ -126,7 +127,10 @@ func addMember(ctx context.Context, tx pgx.Tx, code claimedCode, userID string, 
 	if err != nil {
 		return false, fmt.Errorf("enrol member: %w", err)
 	}
-	return tag.RowsAffected() == 0, nil
+	if tag.RowsAffected() == 0 {
+		return true, nil
+	}
+	return false, ties.Enrolled(ctx, tx, code.classID, userID)
 }
 
 func countUse(ctx context.Context, tx pgx.Tx, code claimedCode, userID string, in domain.EnrolInput) error {
