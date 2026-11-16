@@ -6,8 +6,8 @@ name: Deploy
 # deployed while its own test run is still red.
 #
 # It is a separate workflow, not a job inside CI, for one reason worth stating:
-# a deploy that fails for an infrastructure reason -- an expired token, a Fly
-# region hiccup -- can be re-run on its own from workflow_dispatch, without
+# a deploy that fails for an infrastructure reason -- an expired key, the box
+# unreachable for a minute -- can be re-run on its own from workflow_dispatch, without
 # paying for twenty minutes of tests that already passed on the same commit.
 on:
   workflow_run:
@@ -16,8 +16,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Never cancel a deploy in flight. A cancelled `flyctl deploy` can leave the app
-# mid-rollout, and a cancelled release_command can leave migrations half applied
+# Never cancel a deploy in flight. A cancelled deploy can leave the box
+# mid-rollout, and a cancelled migration step can leave migrations half applied
 # -- both far worse than one queued run waiting its turn.
 concurrency:
   group: deploy-production
@@ -58,16 +58,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           API_HOST: ${{ vars.API_HOST }}
         run: |
-          # Where the API runs: the repository variable API_HOST, `fly` or
-          # `vps`. Unset deploys nothing: this repository took over production
-          # only when the owner set it (repo split, GĐ 6). Anything else stops
-          # here rather than deploying nowhere, or to the wrong place.
+          # Where the API runs: the repository variable API_HOST, `vps`.
+          # Unset deploys nothing: this repository took over production only
+          # when the owner set it (repo split, GĐ 6). Anything else stops here
+          # rather than deploying nowhere, or to the wrong place.
           host="${API_HOST:-}"
           api=true
           case "$host" in
-            fly|vps) ;;
+            vps) ;;
             "") echo "::notice::API_HOST is not set, so nothing is deployed"; api=false ;;
-            *) echo "::error::API_HOST must be fly or vps, not '$host'"; exit 1 ;;
+            *) echo "::error::API_HOST must be vps, not '$host'"; exit 1 ;;
           esac
           sha="${{ github.event.workflow_run.head_sha || github.sha }}"
           if [ "$TRIGGER" = workflow_run ] && [ "$api" = true ]; then
@@ -83,217 +83,7 @@ jobs:
           echo "Deploying the API at $sha (api=$api on ${host:-nowhere})"
 
   # ------------------------------------------------------------------- api
-  api:
-    name: API → Fly
-    needs: resolve
-    if: needs.resolve.outputs.api == 'true' && needs.resolve.outputs.host == 'fly'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      # Fail before touching production rather than half way through it. A
-      # missing token otherwise surfaces as an auth error from flyctl after the
-      # image has already been built.
-      - name: Check the token is present
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::error::FLY_API_TOKEN is not set. Create a deploy token with"
-            echo "::error::  fly tokens create deploy -a quizzivy-api"
-            echo "::error::then add it with: gh secret set FLY_API_TOKEN"
-            exit 1
-          fi
-
-      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
-
-      # Ask, before building anything, whether the configuration this app will
-      # boot with is one it accepts.
-      #
-      # config.Load has two all-or-nothing groups -- Google and object storage --
-      # and refuses a partial set by exiting 1. Both have now shipped partial,
-      # and each cost a full build, a migration, a rollout and a health check to
-      # discover, with the cause visible only in the app's own stderr. The names
-      # are knowable up front: fly.toml is in this checkout and `secrets list`
-      # prints the rest.
-      #
-      # Names only, never values. A secret set to the wrong string still gets
-      # through here, and that is a different failure with a different symptom.
-      - name: Preflight the production configuration
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          secrets=$(flyctl secrets list -a quizzivy-api --json | jq -r '.[] | (.Name // .name)')
-          have=$( {
-            sed -n '/^\[env\]/,/^\[[a-z]/p' fly.toml | grep -oE '^ *[A-Z0-9_]+' | tr -d ' '
-            echo "$secrets"
-          } | sort -u )
-          echo "configured names:"; echo "$have" | sed 's/^/  /'
-
-          fail=0
-          has() { echo "$have" | grep -qx "$1"; }
-          need() { has "$1" || { echo "::error::$1 is required and is not set"; fail=1; }; }
-
-          # Configured as a set or not at all, never in between.
-          group() {
-            label=$1; shift
-            present=0; total=0; missing=
-            for name in "$@"; do
-              total=$((total + 1))
-              if has "$name"; then present=$((present + 1)); else missing="$missing $name"; fi
-            done
-            if [ "$present" -ne 0 ] && [ "$present" -ne "$total" ]; then
-              echo "::error::$label is $present of $total configured — the app refuses this and exits. Missing:$missing"
-              fail=1
-            fi
-          }
-
-          need DATABASE_URL
-          need JWT_SIGNING_KEY
-          need JOIN_CODE_KEY
-          need SECRETS_KEY
-          need CORS_ALLOWED_ORIGINS
-
-          # loadGoogle takes the client id from either name, so the group is
-          # satisfied by whichever is present.
-          if has GOOGLE_CLIENT_ID || has VITE_GOOGLE_CLIENT_ID; then
-            for name in GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI; do
-              has "$name" || { echo "::error::google sign-in is partly configured; $name is missing"; fail=1; }
-            done
-          fi
-
-          group "object storage" S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
-          group "Word import storage" IMPORT_S3_BUCKET IMPORT_WORK_DIR
-          # Production sends through Resend or does not start: loadEmail
-          # refuses the sink there, so both are required, not optional.
-          need RESEND_API_KEY
-          need EMAIL_FROM
-          # The two web hosts: whose session a request opens, and where an
-          # email's link points. Production does not start without both.
-          need STUDENT_APP_URL
-          need STAFF_APP_URL
-          if has EMAIL_SINK_DIR; then
-            echo "::error::EMAIL_SINK_DIR is set. The app refuses it in production: it writes every message, links included, to disk instead of sending it"
-            fail=1
-          fi
-
-          # The processing switch says a worker process runs beside the API.
-          # deployment_test.go checks that against fly.toml's [processes]; as a
-          # secret it would skip that check and queue runs nothing claims (#138).
-          if echo "$secrets" | grep -qx IMPORT_PROCESSING_ENABLED; then
-            echo "::error::IMPORT_PROCESSING_ENABLED is a Fly secret. Set it in fly.toml [env] beside the worker process, and unset the secret"
-            fail=1
-          fi
-
-          # R2_* are read by `make verify-r2` and by nothing else. Setting those
-          # instead of the S3_* names is what docs/setup/dns.md used to instruct,
-          # and it looks like storage is configured when none of it reaches the
-          # server.
-          if has R2_ACCESS_KEY_ID && ! has S3_ACCESS_KEY_ID; then
-            echo "::error::R2_ACCESS_KEY_ID is set but S3_ACCESS_KEY_ID is not. The server reads the S3_* names and derives nothing from R2_*; see docs/setup/dns.md"
-            fail=1
-          fi
-
-          [ "$fail" -eq 0 ] || exit 1
-          echo "configuration is complete"
-
-      # --remote-only builds on Fly's builders, so this runner needs no Docker
-      # layer cache and the image is built next to where it will run.
-      #
-      # fly.toml's release_command applies migrations before the new version
-      # takes traffic and rolls the deploy back if they fail, which is why the
-      # schema change and the code that needs it ship as one action.
-      #
-      # --ha=false: when a process group has no machine yet, flyctl creates
-      # one and, by default, a stopped standby beside it. For the worker group
-      # (no services) that standby would be started by the next step and run
-      # as a second import worker -- a second 1 GB Machine and a second idle
-      # poller keeping Neon awake. The flag affects only groups with no
-      # machine; existing groups keep their count.
-      - name: Deploy
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only --ha=false --wait-timeout 10m
-
-      # `flyctl deploy` updated the config of a machine that was already
-      # stopped, logged "reached stopped state" followed by "is now in a good
-      # state", and exited 0. Nothing was started and no smoke check ran, so the
-      # deploy reported success on a version that had never executed.
-      #
-      # A machine is left stopped by the PREVIOUS deploy failing, which makes
-      # this the exact path a recovery deploy takes -- the one run where the
-      # difference matters most.
-      #
-      # A standby machine is stopped on purpose, so it is never started here.
-      # Every process group in fly.toml must end with a started machine: the
-      # app alone passing would hide a worker that never came up.
-      - name: Make sure every process group is actually running
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          flyctl machines list -a quizzivy-api
-          stopped=$(flyctl machines list -a quizzivy-api --json \
-            | jq -r '.[] | select(.state != "started" and ((.config.standbys // []) | length) == 0) | .id')
-          for id in $stopped; do
-            echo "starting $id"
-            flyctl machine start "$id" -a quizzivy-api
-          done
-          # Started is not serving. Give the process a moment to bind before the
-          # health check below decides.
-          sleep 10
-          flyctl machines list -a quizzivy-api
-          groups=$(sed -n '/^\[processes\]/,/^\[/p' fly.toml | grep -oE '^ *[a-z0-9_-]+ *=' | tr -d ' =')
-          [ -n "$groups" ] || groups=app
-          fail=0
-          for group in $groups; do
-            running=$(flyctl machines list -a quizzivy-api --json \
-              | jq --arg g "$group" '[.[] | select(.state == "started" and (.config.metadata.fly_process_group // "app") == $g)] | length')
-            echo "$group machines started: $running"
-            [ "$running" -ge 1 ] || { echo "::error::no $group machine is running"; fail=1; }
-          done
-          [ "$fail" -eq 0 ] || exit 1
-
-      # Fly reports a deploy as successful once health checks pass; this asks
-      # the app the one question the health check exists to answer.
-      - name: Verify the API answers
-        run: |
-          for attempt in 1 2 3 4 5; do
-            body=$(curl -fsS --max-time 10 "$API_ORIGIN/healthz") && break
-            echo "attempt $attempt failed; retrying in 6s"; sleep 6
-          done
-          echo "$body"
-          echo "$body" | grep -q '"database":"ok"' || {
-            echo "::error::/healthz did not report database:ok"; exit 1; }
-
-      # What Fly's own failure output does not give you.
-      #
-      # A crash-on-boot is reported as "the app appears to be crashing" followed
-      # by "here's the last lines below" and then nothing at all -- the machine
-      # died before Fly attached to its log stream. The actual cause was one
-      # line on the app's stderr, and finding it took reproducing the production
-      # environment locally. This prints that line in the run that failed.
-      #
-      # Names only from `secrets list`: Fly does not print values, and the
-      # question a boot failure raises is almost always which name is missing.
-      - name: Why it crashed
-        if: failure()
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          echo "::group::app logs"
-          flyctl logs -a quizzivy-api --no-tail | tail -80 || echo "(no logs available)"
-          echo "::endgroup::"
-          echo "::group::configured secret names (values are never printed)"
-          flyctl secrets list -a quizzivy-api || true
-          echo "::endgroup::"
-          echo "::group::env baked into fly.toml"
-          flyctl config env -a quizzivy-api || true
-          echo "::endgroup::"
-
-  # ------------------------------------------------------------- api (vps)
-  # The same release on the VPS (infra: github.com/Quizzivy/infra, docs/vps.md).
+  # The release on the VPS (infra: github.com/Quizzivy/infra, docs/vps.md).
   # The image is built here and pushed to ghcr.io; the box pulls it, runs the
   # migrations as a one-shot container, replaces api and worker, and rolls back
   # on a failed health check. The key below can run `deploy <sha>` and
@@ -303,7 +93,7 @@ jobs:
   # VPS_KNOWN_HOSTS (the box's host key line, from `ssh-keyscan -t ed25519`).
   # The box's compose.env must name this image repository in API_IMAGE_REPO and
   # `docker login ghcr.io` there must hold a token with read:packages.
-  api-vps:
+  api:
     name: API → VPS
     needs: resolve
     if: needs.resolve.outputs.api == 'true' && needs.resolve.outputs.host == 'vps'
@@ -394,8 +184,8 @@ jobs:
   # so the run shows it; the owner can then run Promote there by hand.
   sdk:
     name: Promote the SDK
-    needs: [resolve, api, api-vps]
-    if: ${{ !cancelled() && (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && needs.resolve.outputs.api == 'true' && contains(fromJSON('["success","skipped"]'), needs.api.result) && contains(fromJSON('["success","skipped"]'), needs.api-vps.result) && (needs.api.result == 'success' || needs.api-vps.result == 'success') }}
+    needs: [resolve, api]
+    if: ${{ !cancelled() && (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && needs.resolve.outputs.api == 'true' && needs.api.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

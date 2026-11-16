@@ -1,8 +1,9 @@
 # Production operations
 
 Owner: Thuong. These procedures accompany issues #78–#82. Repository tooling is
-available; **production restore history, a completed Neon drill and delivered
-alerts are not yet verified**. Never substitute a local test for that evidence.
+available; **application checks on a restored copy and delivered alerts are not
+yet verified**. Never substitute a local test for that evidence. The box itself
+(backups, restore, deploys, logs) is run from `Quizzivy/infra`, `docs/vps.md`.
 
 ## Deployment verification and alerts
 
@@ -16,13 +17,10 @@ it does not load Google's GIS SDK. Test login, image display, audio playback and
 upload previews on the deployed origin before closing #78. The headers
 themselves were observed on 2026-10-04; see the last section.
 
-Fly's own check calls `/livez`, which never touches the database, so Neon's
-compute can suspend after five idle minutes. `/healthz` is the database-aware
-probe: every call is a query that wakes the compute and keeps it billed for at
-least five more minutes. Point only deliberate probes at it. At three probes an
-hour, the monitor below would keep the compute running for about a quarter of
-otherwise idle hours; choose its cadence with that cost in mind. Both routes
-are rate-limited per client address (`/livez` 30/min, `/healthz` 10/min).
+`/livez` never touches the database. `/healthz` is the database-aware probe:
+every call is a query. The box's deploy waits for `/healthz` before it keeps a
+new image. Both routes are rate-limited per client address (`/livez` 30/min,
+`/healthz` 10/min).
 
 The proposed initial monitor is `.github/workflows/production-monitor.yml`:
 three checks per hour, with a three-minute job limit. To activate it:
@@ -37,18 +35,19 @@ three checks per hour, with a three-minute job limit. To activate it:
 This is a best-effort starting point: GitHub schedules can be delayed, and
 notification routing depends on the workflow actor/account settings. Upgrade to
 an external uptime service if prompt detection is required. No service account
-or billable subscription was created. Unexpected errors remain in structured
-Fly logs with request IDs; an external error collector is deferred until a
+or billable subscription was created. Unexpected errors remain in the API
+container's structured logs with request IDs (`vps/scripts/compose logs api` on
+the box); an external error collector is deferred until a
 service and data handling policy are chosen. Never send answers, tokens or
 integrity payloads to an error collector by default.
 
-Fly health checks remove unhealthy Machines from routing; they do not themselves
-restart a failing Machine. During an incident, inspect `fly checks list` and
-request-ID logs, then explicitly choose rollback or restart.
+Only a deploy checks `/healthz` on the box. Docker restarts a container that
+exits, but nothing takes an API that answers badly out of service. During an
+incident, read the request-ID logs, then explicitly choose a rollback (deploy the
+previous sha, `docs/vps.md`, "Deploying") or a restart.
 
 References: [GitHub scheduled-workflow limitations](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows),
-[notification recipients](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs),
-[Fly health checks](https://fly.io/docs/reference/health-checks/).
+[notification recipients](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs).
 
 ## Request logs and what counts as a server error
 
@@ -100,20 +99,23 @@ cannot read only costing them its key.
 
 ## Backup and recovery drill
 
-The proposed restore-history target is seven days, subject to the owner's Neon
-plan and cost approval. **The actual production window is unknown.** Record the
-project, parent branch, PostgreSQL version and configured window from the Neon
-console before accepting #79. PITR history is separate from student-record
-retention. Neon can create an isolated child branch using past data only within
-its available history; do not restore over the production branch for a drill.
-See [Neon branch creation and restoration](https://neon.com/docs/manage/branches).
+Backups, point-in-time restore and the monthly restore drill run on the box and
+are described in `Quizzivy/infra`, `docs/vps.md`, "Backups and restore":
+pgBackRest keeps enough to restore to any moment of the last seven days, a
+nightly dump to R2 is a second copy, and each drill is recorded there. PITR
+history is separate from student-record retention. Never restore over the
+production database for a drill.
+
+The steps below are this repository's part: the evidence a drill needs beyond
+the runbook's row counts and hashes.
 
 1. Choose a known checkpoint in the available history. Record the UTC timestamp,
    migration version, expected assignment/attempt IDs and expected scores using
    a restricted incident record, not a public issue.
-2. Create a separate recovery branch at that timestamp. Keep its credentials
-   away from the production deployment and disable application writes/jobs.
-3. Set `RESTORE_DATABASE_URL` to that branch's direct connection URL (PG18).
+2. Restore a separate copy at that timestamp, beside production as the
+   runbook's drill does. Keep its credentials away from the production
+   deployment and disable application writes/jobs.
+3. Set `RESTORE_DATABASE_URL` to the copy's connection URL (PG18).
    Run `node scripts/verify-recovery.mjs > recovery.json`. The script uses a
    read-only repeatable-read transaction and never prints credentials or names.
 4. If an evidence file was captured at the same immutable checkpoint, run
@@ -127,14 +129,14 @@ See [Neon branch creation and restoration](https://neon.com/docs/manage/branches
    request does not expose it. The manifest leaves out a file the retention
    sweep has purged, whose object is gone by design. Database recovery cannot restore missing R2
    objects. Keep a separate private object backup and rehearse restoring it.
-6. Record start/end time, branch ID, source timestamp, recovery evidence,
-   application check, media check and operator. Remove the temporary branch
-   after review so it does not accrue storage charges.
+6. Record start/end time, the backup restored, source timestamp, recovery
+   evidence, application check, media check and operator. Remove the copy after
+   review: it takes space on the box's disk.
 
 For a local logical-backup rehearsal, stop application writes, capture evidence,
 use PG18 `pg_dump --format=custom`, restore into a new empty database owned by
 `quizzivy_migrate`, and compare the evidence. Preserve roles/ACLs; never use
-`--clean` against the source. This proves the local procedure, not Neon PITR.
+`--clean` against the source. This proves the local procedure, not the box's PITR.
 A database-level privilege is restored only by `pg_restore --create`, which
 this procedure does not use: after restoring into a new database, run
 `REVOKE TEMPORARY ON DATABASE <database> FROM PUBLIC;` as its owner, or the
@@ -209,7 +211,7 @@ audit log, cannot touch `ai_usage_ledger`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
 more adds the grant in its own migration.
 
-**Never set `MAINTENANCE_DATABASE_URL` on the API or on Fly.** Against a managed database the
+**Never set `MAINTENANCE_DATABASE_URL` on the API.** Against a managed database the
 credential lives in two places: the GitHub environment `production-maintenance` (as the secret
 `MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine. On
 the server that production runs on since 2026-11-12 it lives in one: the role's password is in
@@ -285,7 +287,7 @@ The owner sets this up once, in this order:
    the environment):
 
    ```sh
-   QUIZZIVY_MAINTENANCE_PASSWORD='<new random password>' scripts/provision-db.sh "$NEON_ADMIN_URL"
+   QUIZZIVY_MAINTENANCE_PASSWORD='<new random password>' scripts/provision-db.sh "<an admin connection string>"
    ```
 
    Against a database that is not local, the script creates `quizzivy_maintenance` and sets its
@@ -298,7 +300,7 @@ The owner sets this up once, in this order:
    `CREATEDB`, no `CREATEROLE` and `CONNECTION LIMIT 2` (a managed provider's admin has `CREATEROLE`
    and `CREATEDB` and is not a superuser; the script once failed there after creating the roles,
    QC-RS-16). Use the provider's own host. A tunnel to a production database on `localhost`
-   (`fly proxy`, an SSH forward) looks local to the script, which says so on stderr before it runs a
+   (an SSH forward, say) looks local to the script, which says so on stderr before it runs a
    statement and then goes on with the local rules, so it cannot be stopped in time; run it with
    `QUIZZIVY_MANAGED=1` and it applies the rules above. It repeats the grants of the original setup (`CONNECT` on the database,
    `public` denied to everyone but the migrate and app roles), which change nothing on a database
@@ -406,9 +408,9 @@ test version, of any owner. Then the API removes the object for good and marks t
 to the replace or the delete and by the figures on the media page (F-68, the owner's decision
 of 2026-10-12; `docs/plan/20-data-model.md` §45).
 
-The API runs the sweep (`jobs.SweepRetiredMedia`) on every machine, only where media storage is
-configured, at start-up and then every hour. A row is taken under a lock the other machines
-skip, so a second machine removes nothing twice. It logs one line a run, with counts and no
+The API runs the sweep (`jobs.SweepRetiredMedia`) in every API process, only where media storage
+is configured, at start-up and then every hour. A row is taken under a lock the other processes
+skip, so a second process removes nothing twice. It logs one line a run, with counts and no
 title or filename:
 
 | Log line | Level | Meaning |
@@ -426,18 +428,20 @@ therefore seven days after the deploy. A file stays while a question, a group or
 and naming it again before its day clears the wait.
 
 **The switch.** `MEDIA_RETENTION_SWEEP` is `on` (the default) or `off`, nothing else, and is read
-when the API starts. Off means that machine never runs the sweep and logs `media retention sweep is
+when the API starts. Off means that process never runs the sweep and logs `media retention sweep is
 off` at WARN once; quota counting and the dating that replace and delete do go on, so files pile up
 as pending and the usage figures still say so. Use it in an incident, to stop removals while
 something is investigated, and turn it back on afterwards:
 
 ```sh
-fly secrets set MEDIA_RETENTION_SWEEP=off -a quizzivy-api     # restarts the machines
-fly secrets unset MEDIA_RETENTION_SWEEP -a quizzivy-api       # back to on
+# on the box, as deploy: add MEDIA_RETENTION_SWEEP=off to /opt/quizzivy/app.secrets.env, then
+vps/scripts/compose up -d api worker            # recreates both on the new value
+# back to on: remove the line and run the same command
 ```
 
-Keep it out of `fly.toml`, so that a secret is the only place it is set. A value other than `on`
-or `off` stops the API at start-up, naming the setting.
+Keep it out of `deploy/production.env` and the box's `vps/app.env`, so that
+`app.secrets.env` is the only place it is set. A value other than `on` or
+`off` stops the API at start-up, naming the setting.
 
 ### Rolling back past the sweep
 
@@ -579,9 +583,9 @@ production, and the API refuses to start when one equals `STUDENT_APP_URL` or
 origin written twice and an empty item (`a,,b`, or a trailing comma), so a typo
 stops the start rather than admit less than was meant. The refusal of a list
 names the item, as `LANDING_URL (origin 2) must be https in production`. Only
-the API reads the setting; the worker does not. On the box it is set where the
-two web hosts' settings are (`Quizzivy/infra`, `docs/vps.md`); on Fly it would
-be a line of `fly.toml`'s `[env]`.
+the API reads the setting; the worker does not. It is set where the two web
+hosts' settings are: `deploy/production.env` here, and the box's `vps/app.env`
+in `Quizzivy/infra`.
 
 To check it from a shell, with the origin the browser would send:
 
@@ -656,7 +660,8 @@ A window takes effect within 30 seconds of being written, which is how long the
 API may serve its cached answer to "is there a window?". Schedule the start at
 least a minute ahead of the work. The import worker is not gated: it keeps
 processing the imports it already holds (O-R1.1). If a window is needed for work
-that must not race imports, stop the worker's process group for its length.
+that must not race imports, stop the worker's container for its length
+(`vps/scripts/compose stop worker` on the box, then `up -d worker`).
 
 ## Join-code key
 
@@ -665,9 +670,9 @@ the API finds it by (D5). It is standard base64 of exactly 32 random bytes.
 The API refuses to start without it, and never logs it.
 
 - **Generate** it with `openssl rand -base64 32`.
-- **Store** it as a Fly secret (`fly secrets set JOIN_CODE_KEY=...`), with an
-  offline copy in the owner's password manager. The offline copy is the only
-  way back from a lost Fly secret.
+- **Store** it in the box's `/opt/quizzivy/app.secrets.env`, with an offline
+  copy in the owner's password manager. The offline copy is the only way back
+  from a lost secrets file.
 - **Never** paste the key into a log, a ticket, a chat or a workflow. No
   GitHub workflow environment holds it.
 
@@ -680,17 +685,17 @@ The role can read `class_join_codes` and write only `code_hash`, `code_ciphertex
 `key_id`. The GitHub environment `production-maintenance` holds the role's connection string
 for the retention workflow and no join-code key.
 
-1. Stage both keys in **one** command, so they reach the machines in the
-   same release:
+1. In `app.secrets.env`, set `JOIN_CODE_KEY_PREVIOUS` to the old key and
+   `JOIN_CODE_KEY` to the new one in **one** edit, before anything restarts.
+   Never restart between the two: a half-changed pair either stops the API
+   from starting (the two keys equal) or makes every code under the old key
+   unredeemable until the second change lands.
+2. Recreate the API and the worker on the pair, as `deploy` on the box:
    ```sh
-   fly secrets set --stage JOIN_CODE_KEY_PREVIOUS=<old key> JOIN_CODE_KEY=<new key>
+   vps/scripts/compose up -d api worker
    ```
-   Never set them one at a time. Without `--stage` every `fly secrets set`
-   restarts the machines, and a half-changed pair either stops the API from
-   starting (the two keys equal) or makes every code under the old key
-   unredeemable until the second command lands.
-2. Deploy. The API now issues codes under the new key and still finds and
-   reads codes under the old one. Its startup log line `join code keys`
+   The API now issues codes under the new key and still finds and reads codes
+   under the old one. Its startup log line `join code keys`
    names `current_key_id` and `previous_key_id`.
 3. Run the dry run and read its report:
    ```sh
@@ -722,11 +727,8 @@ for the retention workflow and no join-code key.
    neither be read nor redeemed. A revoked one needs nothing.
 5. Run the dry run again and verify: `pending` is 0, `unknown` is 0, and
    every `unopened` code shows `revoked: true`.
-6. Stage the removal of the old key:
-   ```sh
-   fly secrets unset --stage JOIN_CODE_KEY_PREVIOUS
-   ```
-7. Deploy.
+6. Remove the `JOIN_CODE_KEY_PREVIOUS` line from `app.secrets.env`.
+7. Recreate the API and the worker again, as in step 2.
 
 The report is JSON, like every other maintenance command's.
 
@@ -734,8 +736,8 @@ The report is JSON, like every other maintenance command's.
 
 Every code sealed under it becomes unreadable and unredeemable: its class's
 code reads back as `code: null, legacy: false`, and joining with it answers
-`JOIN_CODE_INVALID`. Generate a new key, deploy it, rotate every class's code,
-and tell the teachers to share the new codes.
+`JOIN_CODE_INVALID`. Generate a new key, set it and restart, rotate every
+class's code, and tell the teachers to share the new codes.
 
 ## Secrets key
 
@@ -749,10 +751,10 @@ the worker both read it, and neither logs it. Production refuses to start
 without it.
 
 - **Generate** it with `openssl rand -base64 32`.
-- **Store** it as a Fly secret (`fly secrets set SECRETS_KEY=...`), with an
-  offline copy in the owner's password manager. Fly secrets reach every process
-  group, so the worker has it too. It is not `JOIN_CODE_KEY`: that key seals
-  join codes and rotates on its own schedule.
+- **Store** it in the box's `/opt/quizzivy/app.secrets.env`, with an offline
+  copy in the owner's password manager. The API, the worker and the migration
+  step read that one file, so the worker has it too. It is not `JOIN_CODE_KEY`:
+  that key seals join codes and rotates on its own schedule.
 - **Never** paste it into a log, a ticket, a chat or a workflow.
 
 ### Rotating the key
@@ -763,16 +765,16 @@ There is no previous-key slot, so rotation drains first:
    failed_at IS NULL AND secret_ciphertext IS NOT NULL` is 0. Nothing pending
    then depends on the old key.
 2. Let any pending import sheet expire (24 hours, T-R5.14), or download it.
-3. Set the new key and deploy.
+3. Set the new key and recreate the API and the worker.
 4. Re-issue any set-password link that was unsent at the swap.
 
 ### If the key is lost
 
 Every sealed row fails closed: the dispatcher marks a message it cannot open
 failed with `secret_unreadable`, and sends nothing. Nothing else is damaged.
-Generate a new key, deploy it, and issue the unsent links again from the
-console. Links already sent keep working, since the database holds only their
-hash.
+Generate a new key, set it and restart, and issue the unsent links again from
+the console. Links already sent keep working, since the database holds only
+their hash.
 
 ## Outgoing email
 
@@ -812,7 +814,7 @@ The landing site's form sends `POST /public/leads` (R11). A request that passes
 validation is stored in `app.leads` with the consent it carried: the notice's
 version and the time. The row holds what the form asked for and nothing about
 the caller, no IP address and no user agent. The limit is 3 a minute and 10 an
-hour per address, in memory, on each machine.
+hour per address, in memory, in each API process.
 
 Two requests are answered `202 {"received": true}` like any other and not
 stored: one that filled the form's unseen `website` field, and one whose phone
@@ -849,10 +851,9 @@ and anonymization", above), and the data export holds them in `leads.csv`.
 
 ## Daily housekeeping
 
-Each API machine runs the housekeeping when it starts and then every 24 hours,
-on the tick of the refresh-token prune, so it adds no timer and no database
-wake of its own. It removes, in this order: `user_activity_days` rows older
-than 400 days; outbox rows sent or failed more than 30 days ago (a pending row
+Each API process runs the housekeeping when it starts and then every 24 hours,
+on the tick of the refresh-token prune, so it adds no timer of its own. It
+removes, in this order: `user_activity_days` rows older than 400 days; outbox rows sent or failed more than 30 days ago (a pending row
 never); set-password links that were used, revoked or expired more than 30 days
 ago (a link that still works never); the sealed passwords of a hand-out sheet
 nobody downloaded in its 24 hours (where the import worker is configured); user
@@ -862,7 +863,7 @@ exports past their 24 hours, which are then marked `expired` (this step needs `I
 profile photo objects under `avatars/<id>/` of every anonymised account, once per account (this step
 needs media storage); and
 the `branding/` logo objects that neither the light nor the dark logo names, once
-they are 24 hours old (this step needs media storage). Two machines running it
+they are 24 hours old (this step needs media storage). Two processes running it
 at once only repeat each other's deletes, and one can end a step early, as done,
 when the other has taken the rows it was about to; nothing is lost and the next
 run goes on.
@@ -922,12 +923,12 @@ plan's figure in `server/internal/shared/limits`, read on 2026-10-21:
 | Media library per teacher | 5 GB | the app | that teacher's upload is refused |
 | Import documents, centre / per teacher | 1 GB / 256 MB | the app | a new import is refused |
 | Emails per day / per month | 100 / 3,000 | Resend free | the rest waits for the next local day or the 1st |
-| Database size | 10 GB | warning line for Neon Launch | the Overview warns; nothing is refused |
+| Database size | 10 GB | warning line for the server's 50 GB disk, which also holds the monthly restore drill's copy | the Overview warns; nothing is refused |
 | Warn at | 80% | the app | the share at which the Overview's storage row appears |
 
 Leave the deploy variables unset in production so the page is the one place a limit is changed. If
-Resend or R2 moves off its free plan, raise the matching limits on the page; if Neon's plan changes,
-move the database line. The guards for accounts and teachers count under advisory lock `(73819, 45)`
+Resend or R2 moves off its free plan, raise the matching limits on the page; if the server's disk
+changes, move the database line. The guards for accounts and teachers count under advisory lock `(73819, 45)`
 only while a seat or teacher limit is set. The storage guard takes `(73819, 46)` on every media
 upload and import, since the total file storage always resolves to a limit (10 GB by default), so
 uploads across the centre are taken one at a time. An Admin counts as a teacher. Editing the role
@@ -935,7 +936,7 @@ matrix can take the centre past the teacher limit without a refusal; the Overvie
 cap holds (`email_outbox.held_by`) goes out first as soon as a cap allows, so raising a cap
 releases it at once. A sign-in link expires 24 hours after it was made, so mail held past that is
 failed `expired`; the Overview counts it, and those invitations need sending again. Database size is
-`pg_database_size`, which is close to but not what Neon bills. Days and months are local to
+`pg_database_size`. Days and months are local to
 `APP_TIMEZONE`. The `PLAN_*` variables of v0.12.0 are retired and ignored.
 
 ## Legacy join codes
@@ -950,7 +951,7 @@ without a ciphertext.
 
 `00141` stops with an error if a live legacy code is still there. That cannot
 happen after a v0.10.0 start-up; if it does, start a v0.11.x API once before
-deploying v0.12.0. The check it runs, on a Neon branch before the release:
+deploying v0.12.0. The check it runs, on a copy of production before the release:
 
 ```sql
 SELECT count(*) AS live_legacy_codes FROM app.class_join_codes
@@ -1029,29 +1030,35 @@ price per token or per thousand tokens would make a credit (0.001 US dollars)
 undercount the pool, so it is refused. No model identifier is written in the
 repository: take both from the provider's current model list.
 
-- **Set** them as Fly secrets, all nine in one command so they reach the
-  machines in the same release, and then deploy:
-  ```sh
-  fly secrets set --stage ANTHROPIC_API_KEY=<key> \
-    AI_TIER_FAST_MODEL=<model> AI_TIER_CAPABLE_MODEL=<model> \
-    AI_TIER_FAST_PRICE_INPUT=<usd> AI_TIER_FAST_PRICE_OUTPUT=<usd> AI_TIER_FAST_PRICE_CACHE_READ=<usd> \
-    AI_TIER_CAPABLE_PRICE_INPUT=<usd> AI_TIER_CAPABLE_PRICE_OUTPUT=<usd> AI_TIER_CAPABLE_PRICE_CACHE_READ=<usd>
+- **Set** them in the box's `/opt/quizzivy/app.secrets.env`, all nine in one
+  edit, so the API and the worker start on the whole group:
   ```
-  The startup log line `ai assistant enabled` names both models; `ai
+  ANTHROPIC_API_KEY=<key>
+  AI_TIER_FAST_MODEL=<model>
+  AI_TIER_CAPABLE_MODEL=<model>
+  AI_TIER_FAST_PRICE_INPUT=<usd>
+  AI_TIER_FAST_PRICE_OUTPUT=<usd>
+  AI_TIER_FAST_PRICE_CACHE_READ=<usd>
+  AI_TIER_CAPABLE_PRICE_INPUT=<usd>
+  AI_TIER_CAPABLE_PRICE_OUTPUT=<usd>
+  AI_TIER_CAPABLE_PRICE_CACHE_READ=<usd>
+  ```
+  Then recreate both on them, as `deploy`: `vps/scripts/compose up -d api
+  worker`. The startup log line `ai assistant enabled` names both models; `ai
   assistant disabled` means no key was read.
-- **Rotate** the key by creating the new one in the provider console, running
-  `fly secrets set ANTHROPIC_API_KEY=<new key>` (which restarts the machines
-  on it) and revoking the old one once the log line is back. A call in flight
-  during the restart can fail once.
-- **The import worker** reads the same nine variables when it starts: Fly secrets
-  reach every process group, so nothing more is set. It meters the "Read with AI"
-  of scanned PDFs (`docs/setup/word-import-worker.md`) through the same credits.
-  With the key unset or misconfigured the worker refuses a scan as `PDF_NO_TEXT`
-  or refuses to start, as the API does.
-- **Change a model or a price** by setting its secret and deploying. Prices and
-  models are read once, at start-up; a call is metered at the prices the
-  process started with, so re-read them whenever the provider's list price
-  changes.
+- **Rotate** the key by creating the new one in the provider console, putting
+  it in `app.secrets.env`, recreating the API and the worker on it, and
+  revoking the old one once the log line is back. A call in flight during the
+  restart can fail once.
+- **The import worker** reads the same nine variables when it starts: it reads
+  the same `app.secrets.env` as the API, so nothing more is set. It meters the
+  "Read with AI" of scanned PDFs (`docs/setup/word-import-worker.md`) through
+  the same credits. With the key unset or misconfigured the worker refuses a
+  scan as `PDF_NO_TEXT` or refuses to start, as the API does.
+- **Change a model or a price** by changing its line and recreating the API and
+  the worker. Prices and models are read once, at start-up; a call is metered
+  at the prices the process started with, so re-read them whenever the
+  provider's list price changes.
 - **Never** paste the key into a log, a ticket, a chat or a workflow. No
   GitHub workflow environment holds it, and it never appears in a test
   fixture: a task that calls the provider for real does so on the builder's
@@ -1184,8 +1191,9 @@ hold a student's words.
 
 ## Evidence still required in production
 
-- Neon project/branch and observed history window: pending access.
-- PITR drill, application checks and private media restoration: pending access.
+- Restore drill: run monthly on the box and recorded in `Quizzivy/infra`,
+  `docs/vps.md`. Application checks and private media restoration on a restored
+  copy ("Backup and recovery drill", steps 4 and 5): pending.
 - Monitor recipient and delivered test notification: pending owner setup.
   `PRODUCTION_MONITOR_ENABLED` is not set (checked 2026-10-04), so the monitor
   has never run on its schedule (#81).

@@ -31,11 +31,12 @@ var configuredBy = slices.Concat(aiVariables, emailVariables, hostVariables, []s
 	"IMPORT_GLOBAL_MIB", "MEDIA_OWNER_QUOTA_MIB", "MEDIA_RETENTION_SWEEP",
 })
 
-// What `fly secrets set` supplies, by name, per docs/setup/dns.md. Values are
-// placeholders: this asks whether the NAMES add up to a config Load accepts,
-// which is the half that a committed file can be wrong about.
-var flySecrets = map[string]string{
-	"DATABASE_URL":         "postgres://quizzivy_app:pw@example.neon.tech/quizzivy?sslmode=require",
+// What the box's app.secrets.env supplies, by name (Quizzivy/infra
+// vps/secrets/app.secrets.env.example). Values are placeholders: this asks
+// whether the NAMES add up to a config Load accepts, which is the half that a
+// committed file can be wrong about.
+var productionSecrets = map[string]string{
+	"DATABASE_URL":         "postgres://quizzivy_app:pw@postgres:5432/quizzivy?sslmode=disable",
 	"JWT_SIGNING_KEY":      "0123456789abcdef0123456789abcdef0123456789abcdef",
 	"JOIN_CODE_KEY":        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 	"GOOGLE_CLIENT_SECRET": "placeholder-secret",
@@ -47,40 +48,29 @@ var flySecrets = map[string]string{
 	"SECRETS_KEY":          "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 }
 
-var tableLine = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#"']+))\s*(?:#.*)?$`)
+var envLine = regexp.MustCompile(`^([A-Z0-9_]+)=(?:"([^"]*)"|'([^']*)'|([^\s#"']*))\s*(?:#.*)?$`)
 
-// flyEnv parses the [env] table out of the committed fly.toml.
+// productionEnv parses the committed deploy/production.env.
 //
-// Hand-parsed rather than pulling in a TOML decoder: the block is a flat list of
-// scalars that this repo writes itself, and a dependency added for a test
-// needs a better reason than a few lines.
-func flyEnv(t *testing.T) map[string]string {
-	t.Helper()
-	out := flyTable(t, "env")
-	if len(out) == 0 {
-		t.Fatal("fly.toml has no [env] entries; this test is not reading what it thinks it is")
-	}
-	return out
-}
-
-func flyTable(t *testing.T, name string) map[string]string {
+// Hand-parsed rather than pulling in a dotenv reader: the file is a flat list
+// of KEY=value lines that this repo writes itself, and a dependency added for a
+// test needs a better reason than a few lines.
+func productionEnv(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	inTable := false
-	for _, line := range strings.Split(repoFile(t, "fly.toml"), "\n") {
+	for _, line := range strings.Split(repoFile(t, "deploy/production.env"), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			inTable = trimmed == "["+name+"]"
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if !inTable || trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		m := tableLine.FindStringSubmatch(line)
+		m := envLine.FindStringSubmatch(trimmed)
 		if m == nil {
-			t.Fatalf("fly.toml [%s] line %q is not a key = value this test can read", name, trimmed)
+			t.Fatalf("deploy/production.env line %q is not a KEY=value this test can read", trimmed)
 		}
 		out[m[1]] = m[2] + m[3] + m[4]
+	}
+	if len(out) == 0 {
+		t.Fatal("deploy/production.env has no entries; this test is not reading what it thinks it is")
 	}
 	return out
 }
@@ -112,12 +102,12 @@ func apply(t *testing.T, sets ...map[string]string) {
 
 // The production deployment, assembled from the two places its configuration
 // actually lives, and asked the only question that matters: does it boot.
-func TestTheCommittedFlyConfigBootsWithTheDocumentedSecrets(t *testing.T) {
-	apply(t, flyEnv(t), flySecrets)
+func TestTheCommittedProductionConfigBootsWithTheDocumentedSecrets(t *testing.T) {
+	apply(t, productionEnv(t), productionSecrets)
 
 	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("fly.toml [env] plus the secrets in docs/setup/dns.md does not boot: %v", err)
+		t.Fatalf("deploy/production.env plus the box's secrets does not boot: %v", err)
 	}
 	if !cfg.MediaEnabled() {
 		t.Error("object storage is not configured; audio upload would be dead in production")
@@ -129,7 +119,7 @@ func TestTheCommittedFlyConfigBootsWithTheDocumentedSecrets(t *testing.T) {
 		t.Error("the API reference is open to anyone; production must keep the docs gate on")
 	}
 	if len(cfg.Limits) != 0 {
-		t.Errorf("fly.toml overrides the usage limits %v; production takes them from Settings → Plan & usage, whose defaults are the hosting plans (CR-002)", cfg.Limits)
+		t.Errorf("deploy/production.env overrides the usage limits %v; production takes them from Settings → Plan & usage, whose defaults are the hosting plans (CR-002)", cfg.Limits)
 	}
 }
 
@@ -159,123 +149,63 @@ func dockerfileShipsTheWorker(t *testing.T) bool {
 	return built && copied
 }
 
-func TestProductionProcessesWordImportsOnlyBesideADeployedWorker(t *testing.T) {
-	apply(t, flyEnv(t), flySecrets)
+func TestProductionProcessesWordImportsWithAWorkerTheImageShips(t *testing.T) {
+	apply(t, productionEnv(t), productionSecrets)
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := false
-	for _, command := range flyTable(t, "processes") {
-		worker = worker || strings.HasPrefix(command, "/app/import-worker")
+	if cfg.ImportProcessing && !dockerfileShipsTheWorker(t) {
+		t.Fatal("deploy/production.env turns import processing on, but the Dockerfile does not build /app/import-worker and copy it there")
 	}
-	if cfg.ImportProcessing != worker {
-		t.Fatalf("fly.toml: IMPORT_PROCESSING_ENABLED=%v, import worker process declared=%v; the two go together", cfg.ImportProcessing, worker)
-	}
-	if worker && !dockerfileShipsTheWorker(t) {
-		t.Fatal("fly.toml runs /app/import-worker but the Dockerfile does not build it and copy it there")
-	}
-	if worker {
+	if cfg.ImportProcessing {
 		assertTheWorkerCanBeWoken(t)
-		assertTheWorkerHasItsOwnMachine(t)
-		assertTheDeployCreatesOneWorker(t)
 	}
 	if cfg.ImportLegacyDoc {
 		t.Fatal("production accepts .doc uploads, but the converter .doc needs is a Docker container, and the production image has no Docker daemon")
 	}
 }
 
+// The API and the worker are two containers on the box's network: the worker
+// must listen beyond its own loopback, and the API must wake it on that port.
 func assertTheWorkerCanBeWoken(t *testing.T) {
 	t.Helper()
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	apply(t, flyEnv(t), flySecrets)
+	apply(t, productionEnv(t), productionSecrets)
 	worker, err := config.LoadImportWorker()
 	if err != nil {
-		t.Fatalf("the worker process does not boot on fly.toml: %v", err)
+		t.Fatalf("the worker process does not boot on deploy/production.env: %v", err)
 	}
 	host, port, _ := net.SplitHostPort(worker.WakeAddress)
 	if host == "localhost" || strings.HasPrefix(host, "127.") || host == "::1" {
-		t.Fatalf("the worker listens on %s, where the API machine cannot reach it", worker.WakeAddress)
+		t.Fatalf("the worker listens on %s, where the API container cannot reach it", worker.WakeAddress)
 	}
-	if wake, err := url.Parse(cfg.ImportWorkerWakeURL); err != nil || wake.Port() != port || !strings.HasSuffix(wake.Hostname(), ".internal") {
+	if wake, err := url.Parse(cfg.ImportWorkerWakeURL); err != nil || wake.Port() != port || wake.Hostname() == "localhost" || strings.HasPrefix(wake.Hostname(), "127.") {
 		t.Fatalf("the API wakes %q but the worker listens on %s", cfg.ImportWorkerWakeURL, worker.WakeAddress)
 	}
 	if worker.IdlePoll < time.Hour {
-		t.Fatalf("IMPORT_WORKER_IDLE_POLL=%v keeps Neon awake; use hours in production", worker.IdlePoll)
-	}
-}
-
-func flyBlocks(t *testing.T, header string) [][]string {
-	t.Helper()
-	var out [][]string
-	in := false
-	for _, line := range strings.Split(repoFile(t, "fly.toml"), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			in = trimmed == header
-			if in {
-				out = append(out, []string{})
-			}
-			continue
-		}
-		if in && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-			out[len(out)-1] = append(out[len(out)-1], trimmed)
-		}
-	}
-	return out
-}
-
-func assertTheWorkerHasItsOwnMachine(t *testing.T) {
-	t.Helper()
-	service := flyBlocks(t, "[http_service]")
-	if len(service) != 1 || !slices.Contains(service[0], `processes = ["app"]`) {
-		t.Fatal(`[http_service] must name processes = ["app"]; otherwise Fly routes requests and health checks to the worker, which serves neither`)
-	}
-	sized := false
-	for _, vm := range flyBlocks(t, "[[vm]]") {
-		if slices.Contains(vm, `processes = ["worker"]`) {
-			sized = slices.Contains(vm, `memory = "1gb"`) || slices.Contains(vm, `memory = "2gb"`)
-		}
-	}
-	if !sized {
-		t.Fatal("the worker needs its own [[vm]] with at least 1gb: a 512 MiB Go target plus up to 256 MiB of PDF sandbox")
-	}
-}
-
-func assertTheDeployCreatesOneWorker(t *testing.T) {
-	t.Helper()
-	deploys := 0
-	for _, line := range strings.Split(repoFile(t, ".github/workflows/deploy.yml"), "\n") {
-		if strings.Contains(line, "flyctl deploy") && !strings.HasPrefix(strings.TrimSpace(line), "#") {
-			deploys++
-			if !strings.Contains(line, "--ha=false") {
-				t.Fatalf("deploy.yml runs %q: without --ha=false flyctl gives the new worker group a standby, which the next step starts as a second worker", strings.TrimSpace(line))
-			}
-		}
-	}
-	if deploys == 0 {
-		t.Fatal("deploy.yml runs no flyctl deploy; this test is not reading what it thinks it is")
+		t.Fatalf("IMPORT_WORKER_IDLE_POLL=%v: the API wakes the worker, so polling is only the fallback; use hours in production", worker.IdlePoll)
 	}
 }
 
 func TestImportsWithoutObjectStorageRefuseToBoot(t *testing.T) {
 	secrets := map[string]string{}
-	for name, value := range flySecrets {
+	for name, value := range productionSecrets {
 		if !strings.HasPrefix(name, "S3_") {
 			secrets[name] = value
 		}
 	}
-	apply(t, flyEnv(t), secrets)
+	apply(t, productionEnv(t), secrets)
 	if _, err := config.Load(); err == nil {
 		t.Fatal("Load accepted import storage without the S3_* credentials it reuses")
 	}
 }
 
 func TestPublicDocsAreRefusedInProduction(t *testing.T) {
-	apply(t, flyEnv(t), flySecrets, map[string]string{"DOCS_PUBLIC": "true"})
+	apply(t, productionEnv(t), productionSecrets, map[string]string{"DOCS_PUBLIC": "true"})
 
 	if _, err := config.Load(); err == nil {
 		t.Fatal("Load accepted DOCS_PUBLIC=true with APP_ENV=production")
@@ -285,9 +215,9 @@ func TestPublicDocsAreRefusedInProduction(t *testing.T) {
 // Proves the test above bites. Drop the one value that was missing and Load must
 // refuse, rather than starting with Google half configured.
 func TestRemovingTheClientIdIsRefusedRatherThanIgnored(t *testing.T) {
-	env := flyEnv(t)
+	env := productionEnv(t)
 	delete(env, "GOOGLE_CLIENT_ID")
-	apply(t, env, flySecrets)
+	apply(t, env, productionSecrets)
 
 	if _, err := config.Load(); err == nil {
 		t.Fatal("Load accepted Google configured two-of-three; that is the state that crashed production")
@@ -299,13 +229,13 @@ func TestRemovingTheClientIdIsRefusedRatherThanIgnored(t *testing.T) {
 // to set exactly those until 2026-09-01.
 func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 	secrets := map[string]string{}
-	for name, value := range flySecrets {
+	for name, value := range productionSecrets {
 		if strings.HasPrefix(name, "S3_") {
 			continue
 		}
 		secrets[name] = value
 	}
-	env := flyEnv(t)
+	env := productionEnv(t)
 	for name := range env {
 		if strings.HasPrefix(name, "IMPORT_") {
 			delete(env, name)
@@ -324,7 +254,7 @@ func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 	}
 }
 
-// The VPS half of deploy.yml, which deploys production since API_HOST is vps.
+// The api job of deploy.yml, which deploys production to the VPS.
 // Only a release runs it, so this reads the file as text and asks the things
 // that would go wrong without anyone noticing: a deploy that trusts any host
 // key, one that reaches the box before the image exists, a push from the
@@ -332,23 +262,23 @@ func TestObjectStorageUnderTheWrongNamesLeavesMediaOff(t *testing.T) {
 // API job that ran.
 func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	text := repoFile(t, ".github/workflows/deploy.yml")
-	start := strings.Index(text, "\n  api-vps:")
+	start := strings.Index(text, "\n  api:")
 	end := strings.Index(text, "\n  sdk:")
 	if start < 0 || end < start {
-		t.Fatal("deploy.yml has no api-vps job; this test is not reading what it thinks it is")
+		t.Fatal("deploy.yml has no api job; this test is not reading what it thinks it is")
 	}
 	job := text[start:end]
 
 	if strings.Contains(job, "StrictHostKeyChecking=no") || strings.Contains(job, "StrictHostKeyChecking no") {
-		t.Fatal("api-vps turns host key checking off: the host key must come from VPS_KNOWN_HOSTS")
+		t.Fatal("api turns host key checking off: the host key must come from VPS_KNOWN_HOSTS")
 	}
 	if !strings.Contains(job, "StrictHostKeyChecking=yes") {
-		t.Fatal("api-vps does not require a known host key")
+		t.Fatal("api does not require a known host key")
 	}
 	push := strings.Index(job, `scripts/ci/push-image.sh "$image"`)
 	ssh := strings.Index(job, `deploy "$SHA"`)
 	if push < 0 || ssh < 0 || push > ssh {
-		t.Fatal(`api-vps must run scripts/ci/push-image.sh before it asks the box to deploy "$SHA"`)
+		t.Fatal(`api must run scripts/ci/push-image.sh before it asks the box to deploy "$SHA"`)
 	}
 	// The first deploy to the VPS pushed with `docker push`, which mounted the
 	// distroless layers out of an image the runner ships with, and ghcr.io
@@ -356,12 +286,12 @@ func TestTheVPSDeployJobPushesBeforeItDeploysAndChecksTheHostKey(t *testing.T) {
 	// run it.
 	for _, line := range strings.Split(job, "\n") {
 		if code := strings.TrimSpace(line); !strings.HasPrefix(code, "#") && strings.Contains(code, "docker push") {
-			t.Fatalf("api-vps runs %q: push with scripts/ci/push-image.sh, whose header says why", code)
+			t.Fatalf("api runs %q: push with scripts/ci/push-image.sh, whose header says why", code)
 		}
 	}
 
 	sdk := text[end:]
-	if !strings.Contains(sdk, "api-vps") {
-		t.Fatal("the sdk job no longer waits for api-vps: it could promote the SDK before the API that serves it is live")
+	if !strings.Contains(sdk, "needs: [resolve, api]") || !strings.Contains(sdk, "needs.api.result == 'success'") {
+		t.Fatal("the sdk job no longer waits for a successful api job: it could promote the SDK before the API that serves it is live")
 	}
 }

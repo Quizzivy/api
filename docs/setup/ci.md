@@ -101,8 +101,8 @@ Today's cross-tree reads:
 | Reader | File |
 |---|---|
 | `server/internal/modules/identity/repositories/tests/stored_email_test.go` | `docs/setup/operations.md` |
-| Server tests | `api/`, `migrations/`, `fly.toml`, `Dockerfile`, `docker/word-converter/`, `.github/workflows/deploy.yml` |
-| Production image | `Dockerfile`, `.dockerignore`, `fly.toml`, `server/`, `migrations/`, `scripts/provision-db.sh` (its set, `image`, holds these and nothing else) |
+| Server tests | `api/`, `migrations/`, `deploy/production.env`, `Dockerfile`, `docker/word-converter/`, `.github/workflows/deploy.yml` |
+| Production image | `Dockerfile`, `.dockerignore`, `deploy/production.env`, `server/`, `migrations/`, `scripts/provision-db.sh` (its set, `image`, holds these and nothing else) |
 
 The reads that crossed into the web before the split now go through the SDK
 package (D-082 (ii)): `server/tests/isolation_world_test.go` and the media
@@ -212,22 +212,22 @@ the pull request that added the steps did.
 
 Every other job runs the code on the runner's file system, so a start-up check
 that depends on the image's own (INC-5: `/home/nonroot/imports` shipped at 0755
-and the API refused it, on Fly only) passed every test. **Production image**
+and the API refused it, in production only) passed every test. **Production image**
 builds the root `Dockerfile` and runs `scripts/ci/smoke-production-image.sh`,
 which does what a deploy does:
 
 1. Checks that the image's user is `nonroot:nonroot`.
-2. Runs `/app/migrate -dir /app/migrations up` from the image, as Fly's
-   `release_command` does, against the job's `postgres:18` service.
+2. Runs `/app/migrate -dir /app/migrations up` from the image, as the box's
+   one-shot migration container does, against the job's `postgres:18` service.
 3. Runs `/app/maintenance retention-sweep` from the image as
    `quizzivy_maintenance`, with no `-apply`, and fails unless the report says
    it wrote nothing and names that role. The server starts the nightly sweep
    from this image (`docs/setup/operations.md`, "Where the sweep runs").
 4. Starts `/app/api` and `/app/import-worker` from the image, each in its own
    container on the host network and with no `--user`, so they run as the
-   image's. The environment is `fly.toml`'s `[env]` read by the script, plus
+   image's. The environment is `deploy/production.env` read by the script, plus
    throwaway values for the secrets `docs/setup/dns.md` lists, and the worker's
-   wake address and URL moved from `fly-local-6pn` to `localhost`.
+   wake address and URL moved from the `worker` service to `localhost`.
 5. Waits up to 60 seconds for `GET /livez` to answer and for the worker to log
    `import worker started`, and fails, printing both logs, when either
    container exits first or the time runs out.
@@ -261,7 +261,7 @@ pull request that changes `docker/minio` does on its first run.
 ## Pushing an image
 
 The two images this repository publishes, MinIO and the API image of the
-deploy's `api-vps` job, are built and pushed by `scripts/ci/push-image.sh`, in
+deploy's `api` job, are built and pushed by `scripts/ci/push-image.sh`, in
 a BuildKit builder that runs in its own container. Not by `docker build` and
 `docker push`: a hosted runner's Docker pushes from containerd's store, which
 mounts a layer it knows from another `ghcr.io` repository instead of uploading
@@ -308,7 +308,7 @@ create a read-only access token and add it as a secret, and is not built.
 
 An action from outside `actions/` is pinned to a full commit SHA, with the tag
 it was resolved from in a trailing comment (`uses: owner/name@<sha> # v1.2.3`).
-A tag or branch moves, and the deploy workflow holds `FLY_API_TOKEN`, so a moved
+A tag or branch moves, and the deploy workflow holds `VPS_SSH_KEY`, so a moved
 ref would run someone else's code with it. To update one, resolve the new tag
 to its commit (the peeled one, `git ls-remote <repo> 'refs/tags/<tag>^{}'`, when
 the tag is annotated), check that the action file exists there, and change the

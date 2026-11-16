@@ -1261,7 +1261,7 @@
       },
       "UsageLimitDefault": {
         "type": "object",
-        "description": "What a limit is when nothing is stored. `value` is `null` for no limit.\n`source` says where it comes from: `r2_free` (Cloudflare R2's free tier,\n10 GB), `neon_launch` (the warning line chosen for Neon's Launch plan,\nwhich has no cap), `resend_free` (Resend's free plan, 100 a day and\n3,000 a month), `deploy` (a deploy variable that overrides the plan),\n`app` (the app's own figure) or `none`.\n",
+        "description": "What a limit is when nothing is stored. `value` is `null` for no limit.\n`source` says where it comes from: `r2_free` (Cloudflare R2's free tier,\n10 GB), `vps_disk` (the warning line chosen for the database on the\nserver's 50 GB disk, which also holds the monthly restore drill's copy\nbeside it), `resend_free` (Resend's free plan, 100 a day and\n3,000 a month), `deploy` (a deploy variable that overrides the plan),\n`app` (the app's own figure) or `none`.\n",
         "required": [
           "value",
           "source"
@@ -1283,7 +1283,7 @@
               "app",
               "deploy",
               "r2_free",
-              "neon_launch",
+              "vps_disk",
               "resend_free"
             ]
           }
@@ -8490,7 +8490,7 @@
       },
       "Usage": {
         "type": "object",
-        "description": "What the centre uses against its limits (CR-002, D-060), each limit\nresolved as `UsageLimits` says, `null` where there is none.\n\n`seats` counts the enabled accounts and `teachers` the enabled accounts\nwhose role opens the teacher workspace. `storage` is every file the\ncentre keeps in its buckets, the sum `storageBytes` bounds: `media`,\n`imports` and the exports ready to download. `media.largestLibrary` is\nthe fullest teacher's library against `mediaPerTeacherBytes`.\n`imports.bytes` and `imports.count` are the kept documents and their\nimports; `imports.openBytes` the documents of the imports still open,\nwhich `importBytes` bounds. `email` counts what was sent today and this\nmonth in `APP_TIMEZONE`, and `held` the messages a cap moved to a\nlater day or month. `database.bytes` is PostgreSQL's\n`pg_database_size`, which approximates and is not what Neon bills.\n`attemptsKept` has no limit.\n",
+        "description": "What the centre uses against its limits (CR-002, D-060), each limit\nresolved as `UsageLimits` says, `null` where there is none.\n\n`seats` counts the enabled accounts and `teachers` the enabled accounts\nwhose role opens the teacher workspace. `storage` is every file the\ncentre keeps in its buckets, the sum `storageBytes` bounds: `media`,\n`imports` and the exports ready to download. `media.largestLibrary` is\nthe fullest teacher's library against `mediaPerTeacherBytes`.\n`imports.bytes` and `imports.count` are the kept documents and their\nimports; `imports.openBytes` the documents of the imports still open,\nwhich `importBytes` bounds. `email` counts what was sent today and this\nmonth in `APP_TIMEZONE`, and `held` the messages a cap moved to a\nlater day or month. `database.bytes` is PostgreSQL's\n`pg_database_size`, which approximates the files the database takes\non the server's disk.\n`attemptsKept` has no limit.\n",
         "required": [
           "seats",
           "teachers",

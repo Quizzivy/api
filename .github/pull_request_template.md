@@ -58,7 +58,7 @@ Leaving an unticked block is a request for changes.
 
 - [ ] Migration file named here: `_____.sql`
 - [ ] `-- +goose Down` written and verified (`up` → `down` → `up` is clean)
-- [ ] DDL reviewed against spec §13, `docs/plan/20-data-model.md`, and the Neon
+- [ ] DDL reviewed against spec §13, `docs/plan/20-data-model.md`, and the
       `postgres-best-practices` skill
 - [ ] Any deviation from `20-data-model.md` is recorded there with a `D-nn` entry
 - [ ] `CREATE INDEX CONCURRENTLY` (if any) is in a `-- +goose NO TRANSACTION` file

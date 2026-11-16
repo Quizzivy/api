@@ -51,7 +51,7 @@ verify-r2: ## T-0.3 -- check the R2 bucket, credentials and privacy
 
 R2_IMPORT_BUCKET ?= quizzivy-imports
 
-verify-r2-imports: ## check the private Word import bucket on R2 (R2_IMPORT_BUCKET, the same as IMPORT_S3_BUCKET on Fly)
+verify-r2-imports: ## check the private Word import bucket on R2 (R2_IMPORT_BUCKET, the same as IMPORT_S3_BUCKET in deploy/production.env)
 	@cd server && go run ./cmd/verify-import-storage -bucket "$(R2_IMPORT_BUCKET)"
 
 up: ## Start postgres:18 + MinIO

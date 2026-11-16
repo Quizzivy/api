@@ -27,7 +27,7 @@ func TestPreferencePatchCarriesFalseAndNestedReplacementWithoutDefaults(t *testi
 			t.Fatalf("patch=%s want%s", repo.prefs.Patch, want)
 		}
 	}
-	for _, p := range []domain.Preferences{{Theme: profileName("neon")}, {Workspace: profileName("app")}, {Workspace: profileName("")}, {AssignmentDefaults: &domain.AssignmentDefaults{DurationMinutes: profileInt(0)}}, {AssignmentDefaults: &domain.AssignmentDefaults{DurationMinutes: profileInt(601)}}} {
+	for _, p := range []domain.Preferences{{Theme: profileName("sepia")}, {Workspace: profileName("app")}, {Workspace: profileName("")}, {AssignmentDefaults: &domain.AssignmentDefaults{DurationMinutes: profileInt(0)}}, {AssignmentDefaults: &domain.AssignmentDefaults{DurationMinutes: profileInt(601)}}} {
 		repo := &profileUsers{}
 		app := application.New(repo, nil, time.Hour, nil, nil)
 		_, err := app.Commands.UpdatePreferences.Handle(context.Background(), command.UpdatePreferences{UserID: "a", Preferences: p})

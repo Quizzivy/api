@@ -644,7 +644,7 @@ func TestASaveCarriesTheLimitsAndAnswersEachDefaultWithItsSource(t *testing.T) {
 	if d.EmailsPerDay.Source != "deploy" || d.EmailsPerDay.Value == nil || *d.EmailsPerDay.Value != 40 {
 		t.Errorf("emails per day default = %+v, want the deploy's 40", d.EmailsPerDay)
 	}
-	if d.StorageBytes.Source != "r2_free" || d.EmailsPerMonth.Source != "resend_free" || d.DatabaseBytes.Source != "neon_launch" {
+	if d.StorageBytes.Source != "r2_free" || d.EmailsPerMonth.Source != "resend_free" || d.DatabaseBytes.Source != "vps_disk" {
 		t.Errorf("defaults = %+v, want the hosting plans named", d)
 	}
 	if d.Seats.Source != "none" || d.Seats.Value != nil {

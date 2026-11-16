@@ -85,7 +85,7 @@ func TestAFailedRefreshKeepsTheLastDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.mu.Lock()
-	repo.readErr = errors.New("neon is waking up")
+	repo.readErr = errors.New("the database is restarting")
 	repo.mu.Unlock()
 	clock.advance(time.Minute)
 	got, err := app.Queries.Current.Handle(context.Background(), query.Current{})
