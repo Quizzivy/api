@@ -148,6 +148,21 @@ func TeacherChangedOf(key string) (string, bool) {
 	return id, ok && id != ""
 }
 
+// SubmittedFrom is the start of the bucket a SubmittedKey names, and false
+// for a key that is not one.
+func SubmittedFrom(key string) (time.Time, bool) {
+	rest, ok := strings.CutPrefix(key, "submitted:")
+	i := strings.LastIndexByte(rest, ':')
+	if !ok || i <= 0 {
+		return time.Time{}, false
+	}
+	bucket, err := strconv.ParseInt(rest[i+1:], 10, 64)
+	if err != nil || bucket < 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(bucket*int64(SubmittedBucket/time.Second), 0).UTC(), true
+}
+
 // SubmittedBucketOf is the start of the fifteen-minute bucket SubmittedKey
 // puts at in.
 func SubmittedBucketOf(at time.Time) time.Time {

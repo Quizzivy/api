@@ -42,9 +42,9 @@ func TestEachNoticeThatEmailsPlansItsTemplateIdsTimeAndSwitch(t *testing.T) {
 			Target: &domain.Target{Route: domain.RouteResult, AttemptID: mailAttempt, AssignmentID: mailAssignment}, DedupeKey: domain.ReadyKey(mailAttempt)},
 			domain.EmailResultReady, domain.EventResultReady, domain.EmailIDs{AttemptID: mailAttempt}, time.Time{}},
 		{domain.Notice{Kind: domain.AttemptSubmitted, Params: domain.Submitted{Title: "Đề", Count: 1},
-			Target: &domain.Target{Route: domain.RouteAssignment, AssignmentID: mailAssignment}, DedupeKey: domain.SubmittedKey(mailAssignment, mailNow)},
+			Target: &domain.Target{Route: domain.RouteAssignment, AssignmentID: mailAssignment}, DedupeKey: domain.SubmittedKey(mailAssignment, mailNow), AttemptID: mailAttempt},
 			domain.EmailSubmissionsDigest, domain.EventAttemptSubmitted,
-			domain.EmailIDs{AssignmentID: mailAssignment, From: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)},
+			domain.EmailIDs{AssignmentID: mailAssignment, AttemptID: mailAttempt, From: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)},
 			time.Date(2026, 11, 17, 9, 15, 0, 0, time.UTC)},
 		{domain.Notice{Kind: domain.MessageReceived, Params: domain.MessageNotice{SenderName: "My", Count: 1, Excerpt: "Chào cô"},
 			Target: &domain.Target{Route: domain.RouteMessages, StudentID: mailStudent}, DedupeKey: domain.MessageKey(mailThread)},
@@ -81,6 +81,30 @@ func TestEachNoticeThatEmailsPlansItsTemplateIdsTimeAndSwitch(t *testing.T) {
 	}
 }
 
+// TestADigestTakesTheBucketOfItsInAppItem fails when a paper's digest is
+// bucketed by the moment Notify runs rather than by the notice's own key,
+// which names the moment the paper was announced: the bell and the email
+// would then count it in different buckets.
+func TestADigestTakesTheBucketOfItsInAppItem(t *testing.T) {
+	announced := time.Date(2026, 11, 17, 9, 14, 59, 0, time.UTC)
+	n := domain.Notice{UserID: mailReader, Kind: domain.AttemptSubmitted, Params: domain.Submitted{Title: "Đề", Count: 1},
+		Target:    &domain.Target{Route: domain.RouteAssignment, AssignmentID: mailAssignment},
+		DedupeKey: domain.SubmittedKey(mailAssignment, announced), AttemptID: mailAttempt}
+	e, ok := domain.PlanEmail(n, announced.Add(2*time.Second))
+	from := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	if !ok || !e.IDs.From.Equal(from) || !e.DeliverAfter.Equal(from.Add(domain.SubmittedBucket)) {
+		t.Errorf("a paper announced at %v and mailed in the next bucket plans %+v, want the bucket from %v", announced, e, from)
+	}
+	if got, ok := domain.SubmittedFrom(domain.SubmittedKey(mailAssignment, announced)); !ok || !got.Equal(from) {
+		t.Errorf("the key's bucket reads %v %v, want %v", got, ok, from)
+	}
+	for _, key := range []string{"submitted:", "submitted:" + mailAssignment, "submitted:" + mailAssignment + ":x", domain.FlaggedKey(mailAttempt)} {
+		if _, ok := domain.SubmittedFrom(key); ok {
+			t.Errorf("%q reads as a submission's bucket", key)
+		}
+	}
+}
+
 func TestNoticesThatEmailNothingPlanNothing(t *testing.T) {
 	for _, n := range []domain.Notice{
 		{Kind: domain.ClassJoined, Params: domain.Joined{StudentName: "Nam", ClassName: "Lớp"}, DedupeKey: domain.JoinedKey(mailClass, mailStudent)},
@@ -91,6 +115,8 @@ func TestNoticesThatEmailNothingPlanNothing(t *testing.T) {
 		{Kind: domain.TestPublishedByCollaborator, Params: domain.PublishedByCollaborator{EditorName: "Khoa", Title: "Đề", Version: 2},
 			DedupeKey: domain.CollaboratorPublishedKey(mailAssignment, 2)},
 		{Kind: domain.AttemptFlagged, Params: domain.Flagged{StudentName: "Nam", Title: "Đề"}, DedupeKey: domain.FlaggedKey(mailAttempt)},
+		{Kind: domain.AttemptSubmitted, Params: domain.Submitted{Title: "Đề", Count: 1}, DedupeKey: domain.SubmittedKey(mailAssignment, mailNow),
+			Target: &domain.Target{Route: domain.RouteAssignment, AssignmentID: mailAssignment}},
 		{Kind: domain.MessageReceived, Params: domain.MessageNotice{SenderName: "My", Count: 1, Excerpt: "Chào"}, DedupeKey: "msg:",
 			Target: &domain.Target{Route: domain.RouteMessages, StudentID: mailStudent}},
 		{Kind: domain.ContentShared, Params: domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse}, DedupeKey: "shared:test"},

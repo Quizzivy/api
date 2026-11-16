@@ -87,6 +87,7 @@ func TestANoticeIsRefusedForItsFirstFault(t *testing.T) {
 		"an assignment id that is not a uuid": {func(n *domain.Notice) { n.Target.AssignmentID = "a1" }, domain.ErrInvalidTarget},
 		"an attempt id that is not a uuid":    {func(n *domain.Notice) { n.Target.AttemptID = "../teacher/classes" }, domain.ErrInvalidTarget},
 		"an id not in its canonical form":     {func(n *domain.Notice) { n.Target.AssignmentID = strings.ToUpper(someAssignment) }, domain.ErrInvalidTarget},
+		"a paper that is not a uuid":          {func(n *domain.Notice) { n.AttemptID = "a1" }, domain.ErrInvalidTarget},
 		"no dedupe key":                       {func(n *domain.Notice) { n.DedupeKey = "" }, domain.ErrInvalidDedupeKey},
 		"a dedupe key too long":               {func(n *domain.Notice) { n.DedupeKey = strings.Repeat("k", domain.MaxDedupeKey+1) }, domain.ErrInvalidDedupeKey},
 		"no merge mode":                       {func(n *domain.Notice) { n.Merge = 0 }, domain.ErrUnknownMerge},

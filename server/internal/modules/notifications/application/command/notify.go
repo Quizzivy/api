@@ -25,6 +25,9 @@ type Notify struct {
 	Target    *domain.Target
 	DedupeKey string
 	Merge     domain.Merge
+	// AttemptID is the paper a submission notice is about, which only its
+	// email reads (domain.Notice.AttemptID).
+	AttemptID string
 }
 
 type NotifyHandler struct {
@@ -34,6 +37,7 @@ type NotifyHandler struct {
 func (s NotifyHandler) Handle(ctx context.Context, cmd Notify) (cqrs.Nothing, error) {
 	notice := domain.Notice{
 		UserID: cmd.UserID, Kind: cmd.Kind, Params: cmd.Params, Target: cmd.Target, DedupeKey: cmd.DedupeKey, Merge: cmd.Merge,
+		AttemptID: cmd.AttemptID,
 	}
 	if err := notice.Validate(); err != nil {
 		return cqrs.Nothing{}, err

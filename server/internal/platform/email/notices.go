@@ -121,11 +121,14 @@ type ClassTeacherChangedParams struct {
 
 // SubmissionsDigestParams tell a teacher how many papers were handed in on an
 // assignment during one fifteen-minute bucket, sent at its end. The outbox
-// holds AssignmentID and From, the bucket's start; FullName, Title, Count and
-// ToGrade are read when it is sent.
+// holds AssignmentID, From, the bucket's start, and AttemptIDs, the papers
+// announced during it, which are the ones it counts: a paper whose time ran
+// out is announced when it is closed, later than its submitted_at.
+// FullName, Title, Count and ToGrade are read when it is sent.
 type SubmissionsDigestParams struct {
 	AssignmentID string    `json:"assignmentId"`
 	From         time.Time `json:"from"`
+	AttemptIDs   []string  `json:"attemptIds,omitempty"`
 	FullName     string    `json:"fullName,omitempty"`
 	Title        string    `json:"title,omitempty"`
 	Count        int       `json:"count,omitempty"`
@@ -163,7 +166,7 @@ type WeeklySummaryParams struct {
 }
 
 // DigestBucket is how long the papers one SubmissionsDigestParams counts
-// were handed in over: the notifications module's fifteen-minute bucket.
+// were announced over: the notifications module's fifteen-minute bucket.
 const DigestBucket = 15 * time.Minute
 
 // Until is the end of the digest's bucket, when it is sent.

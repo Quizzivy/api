@@ -46,7 +46,9 @@ const (
 
 // EmailIDs are what a notification email's outbox row holds: ids, and the
 // two facts that are not names (the bucket's start, whether a teacher is the
-// one a class left). Everything the email says is read when it is sent.
+// one a class left). Everything the email says is read when it is sent. A
+// digest's AttemptID is the paper its notice announced; the store adds each
+// later paper of the bucket to the row.
 type EmailIDs struct {
 	AttemptID      string
 	AssignmentID   string
@@ -81,7 +83,12 @@ type Email struct {
 // for a notice that sends none: the flag on a paper, a moved close, a result
 // shown when it is graded, a share, a change of teacher, the papers of a
 // fifteen-minute bucket, due at its end, and a message, due
-// MessageEmailDelay later. The due-time items written when a user reads their
+// MessageEmailDelay later. A paper falls in the bucket its in-app item does
+// (the notice's SubmittedKey, the moment it was announced), not the one its
+// submitted_at names: a paper whose time ran out is closed, and announced,
+// when someone next touches it, with submitted_at its deadline. The digest
+// counts the papers its bucket's notices named (EmailIDs.AttemptID), so the
+// bell and the email agree. The due-time items written when a user reads their
 // notifications never come through Notify and send nothing here.
 func PlanEmail(n Notice, now time.Time) (Email, bool) {
 	e := Email{UserID: n.UserID}
@@ -102,9 +109,15 @@ func PlanEmail(n Notice, now time.Time) (Email, bool) {
 	case ResultReady:
 		return e.of(EmailResultReady, EmailIDs{AttemptID: t.AttemptID}, t.AttemptID, "ready:"+t.AttemptID)
 	case AttemptSubmitted:
-		from := SubmittedBucketOf(now)
+		from, ok := SubmittedFrom(n.DedupeKey)
+		if !ok {
+			from = SubmittedBucketOf(now)
+		}
+		if n.AttemptID == "" {
+			return Email{}, false
+		}
 		e.DeliverAfter = from.Add(SubmittedBucket)
-		return e.of(EmailSubmissionsDigest, EmailIDs{AssignmentID: t.AssignmentID, From: from}, t.AssignmentID,
+		return e.of(EmailSubmissionsDigest, EmailIDs{AssignmentID: t.AssignmentID, AttemptID: n.AttemptID, From: from}, t.AssignmentID,
 			"submitted:"+t.AssignmentID+":"+n.UserID+":"+unix(from))
 	case MessageReceived, MessageFromTeacher:
 		id, _ := ConversationOf(n.DedupeKey)

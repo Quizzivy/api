@@ -38,7 +38,8 @@ func TestHandingInAPaperTellsTheTeachersWhoReachItAndNoOtherTeacher(t *testing.T
 	svc := announcing(pool, tell, nil)
 	title := titleOf(t, pool, w)
 
-	hand(t, svc, startFor(t, svc, w, w.student), w.student)
+	session := startFor(t, svc, w, w.student)
+	hand(t, svc, session, w.student)
 	sent := tell.of(notificationsdomain.AttemptSubmitted)
 	if len(sent) != 1 || sent[0].UserID != w.admin {
 		t.Fatalf("a student of the first class handed in; the notices went to %+v, want the creator and class teacher once", sent)
@@ -52,6 +53,9 @@ func TestHandingInAPaperTellsTheTeachersWhoReachItAndNoOtherTeacher(t *testing.T
 	}
 	if n.Merge != notificationsdomain.Add {
 		t.Errorf("merge %d, want Add: papers in a bucket count together", n.Merge)
+	}
+	if n.AttemptID != session.Attempt.ID {
+		t.Errorf("the submission notice names paper %q, want %s, which its digest email counts", n.AttemptID, session.Attempt.ID)
 	}
 	if bucket, now := submittedBucket(t, n.DedupeKey, w.assignment), time.Now().Unix()/900; bucket < now-1 || bucket > now {
 		t.Errorf("bucket %d, want the current fifteen minutes %d", bucket, now)

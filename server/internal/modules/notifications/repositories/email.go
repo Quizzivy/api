@@ -72,10 +72,11 @@ func (m *Mail) Recipient(ctx context.Context, userID string, sw *domain.Event) (
 // Enqueue writes e in one transaction with the reads that decide it
 // (application/email.Outbox): nothing when its switch is off for its
 // recipient, their address otherwise, and e's ids as the template's params.
-// A message's email writes nothing while an email about the thread waits for
-// the reader, is keyed by the last one closed, so that two concurrent
-// messages write one, and is held until domain.MessageEmailSpacing after the
-// last one sent.
+// A digest whose bucket already has its row adds its paper to that row's
+// (gather). A message's email writes nothing while an email about the
+// thread waits for the reader, is keyed by the last one closed, so that two
+// concurrent messages write one, and is held until
+// domain.MessageEmailSpacing after the last one sent.
 func (m *Mail) Enqueue(ctx context.Context, e domain.Email) (bool, error) {
 	if m.outbox == nil {
 		return false, errors.New("notifications: an email store without an outbox cannot enqueue")
@@ -86,18 +87,8 @@ func (m *Mail) Enqueue(ctx context.Context, e domain.Email) (bool, error) {
 	}
 	msg := email.Mail{ToUserID: e.UserID, Params: params, DedupeKey: e.DedupeKey, DeliverAfter: e.DeliverAfter}
 	var wrote bool
-	err = m.InTx(ctx, "notifications: enqueue email", func(tx pgx.Tx) error {
-		address, _, sends, err := decide(ctx, tx, e.UserID, e.Switch)
-		if err != nil || !sends {
-			return err
-		}
-		msg.To = address
-		if e.Thread != "" {
-			if free, err := spaced(ctx, tx, e.UserID, e.Thread, &msg); err != nil || !free {
-				return err
-			}
-		}
-		_, wrote, err = m.outbox.Enqueue(ctx, tx, msg)
+	err = m.InTx(ctx, "notifications: enqueue email", func(tx pgx.Tx) (err error) {
+		wrote, err = m.write(ctx, tx, e, msg)
 		return err
 	})
 	if err != nil {
@@ -107,6 +98,26 @@ func (m *Mail) Enqueue(ctx context.Context, e domain.Email) (bool, error) {
 		m.outbox.Notify()
 	}
 	return wrote, nil
+}
+
+// write is Enqueue's transaction: msg, as e's email, to its recipient when
+// their switch lets it.
+func (m *Mail) write(ctx context.Context, tx pgx.Tx, e domain.Email, msg email.Mail) (bool, error) {
+	address, _, sends, err := decide(ctx, tx, e.UserID, e.Switch)
+	if err != nil || !sends {
+		return false, err
+	}
+	msg.To = address
+	if e.Thread != "" {
+		if free, err := spaced(ctx, tx, e.UserID, e.Thread, &msg); err != nil || !free {
+			return false, err
+		}
+	}
+	id, wrote, err := m.outbox.Enqueue(ctx, tx, msg)
+	if err != nil || wrote || e.Template != domain.EmailSubmissionsDigest {
+		return wrote, err
+	}
+	return m.gather(ctx, tx, id, e.IDs.AttemptID, msg)
 }
 
 // paramsOf is e's ids as its template's params, which the outbox stores.
@@ -124,11 +135,42 @@ func paramsOf(e domain.Email) (email.Params, error) {
 	case domain.EmailClassTeacherChanged:
 		return email.ClassTeacherChangedParams{ClassID: ids.ClassID, Previous: ids.Previous}, nil
 	case domain.EmailSubmissionsDigest:
-		return email.SubmissionsDigestParams{AssignmentID: ids.AssignmentID, From: ids.From}, nil
+		return email.SubmissionsDigestParams{AssignmentID: ids.AssignmentID, From: ids.From, AttemptIDs: []string{ids.AttemptID}}, nil
 	case domain.EmailMessageReceived:
 		return email.MessageReceivedParams{ConversationID: ids.ConversationID, StudentID: ids.StudentID, TeacherID: ids.TeacherID, ClassID: ids.ClassID}, nil
 	}
 	return nil, fmt.Errorf("notifications: %s is not an email Notify sends", e.Template)
+}
+
+// gather adds attemptID to the digest row id, which its bucket's first paper
+// wrote, while that row waits, and answers false: the row counts the papers
+// it names when it is sent. A paper it already names is not added twice. It
+// waits for a dispatcher that holds the row. When the row was already sent or
+// dropped without it, which a paper announced at the bucket's very end can
+// find, the paper gets a row of its own beside it, keyed by the paper, that
+// counts that paper alone.
+func (m *Mail) gather(ctx context.Context, tx pgx.Tx, id, attemptID string, msg email.Mail) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE app.email_outbox
+		   SET params = jsonb_set(params, '{attemptIds}', coalesce(params->'attemptIds', '[]'::jsonb) || to_jsonb($2::text))
+		 WHERE id = $1::uuid AND sent_at IS NULL AND failed_at IS NULL
+		   AND NOT coalesce(params->'attemptIds', '[]'::jsonb) ? $2`, id, attemptID)
+	if err != nil {
+		return false, fmt.Errorf("notifications: add a paper to its digest: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return false, nil
+	}
+	var named bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce(params->'attemptIds', '[]'::jsonb) ? $2 FROM app.email_outbox WHERE id = $1::uuid`, id, attemptID).Scan(&named); err != nil {
+		return false, fmt.Errorf("notifications: a digest's papers: %w", err)
+	}
+	if named {
+		return false, nil
+	}
+	msg.DedupeKey += ":" + attemptID
+	_, wrote, err := m.outbox.Enqueue(ctx, tx, msg)
+	return wrote, err
 }
 
 func spaced(ctx context.Context, tx pgx.Tx, userID, thread string, msg *email.Mail) (bool, error) {
@@ -294,10 +336,11 @@ func (m *Mail) TeacherChanged(ctx context.Context, userID string, p email.ClassT
 	return p, true, nil
 }
 
-// Digest counts the papers handed in on the assignment during the bucket
-// that begins at p.From that userID reaches, and those with an answer still
-// waiting for a mark, and reads the test's title. It answers false when none
-// came in, or the assignment is gone.
+// Digest counts the papers the digest names (p.AttemptIDs, those announced
+// during its bucket) that are still handed in on the assignment and that
+// userID reaches, and those with an answer still waiting for a mark, and
+// reads the test's title. It answers false when none is left, or the
+// assignment is gone.
 func (m *Mail) Digest(ctx context.Context, userID string, p email.SubmissionsDigestParams, _ time.Time) (email.SubmissionsDigestParams, bool, error) {
 	ok, err := one(m.QueryRow(ctx, `
 		SELECT t.title, counted.papers::int, counted.waiting::int
@@ -308,12 +351,10 @@ func (m *Mail) Digest(ctx context.Context, userID string, p email.SubmissionsDig
 		              count(*) FILTER (WHERE EXISTS (SELECT 1 FROM app.attempt_answers ans
 		                                              WHERE ans.attempt_id = at.id AND `+answered.AwaitsGrade("ans")+`)) AS waiting
 		         FROM app.attempts at
-		        WHERE at.assignment_id = a.id AND at.status IN ('submitted', 'timed_out', 'graded')
-		          AND coalesce(at.submitted_at, at.deadline_at) >= $3::timestamptz
-		          AND coalesce(at.submitted_at, at.deadline_at) < $4::timestamptz
+		        WHERE at.id = ANY($3::uuid[]) AND at.assignment_id = a.id AND at.status IN ('submitted', 'timed_out', 'graded')
 		          AND $1::uuid IN `+visibility.PaperReaders("at.assignment_id", "at.student_id")+`) counted
 		 WHERE a.id = $2::uuid AND counted.papers > 0`,
-		userID, p.AssignmentID, p.From, p.Until()).Scan(&p.Title, &p.Count, &p.ToGrade), "digest")
+		userID, p.AssignmentID, p.AttemptIDs).Scan(&p.Title, &p.Count, &p.ToGrade), "digest")
 	return p, ok, err
 }
 

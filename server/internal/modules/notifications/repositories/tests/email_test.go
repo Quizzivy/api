@@ -4,6 +4,8 @@ package repositories_test
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,11 +70,11 @@ func flaggedNotice(userID, attemptID, assignmentID string) domain.Notice {
 		DedupeKey: domain.FlaggedKey(attemptID), Merge: domain.Replace}
 }
 
-func submittedNotice(userID, assignmentID string, at time.Time) domain.Notice {
+func submittedNotice(userID, assignmentID, attemptID string, at time.Time) domain.Notice {
 	return domain.Notice{UserID: userID, Kind: domain.AttemptSubmitted,
 		Params:    domain.Submitted{Title: "Đề", Count: 1},
 		Target:    &domain.Target{Route: domain.RouteAssignment, AssignmentID: assignmentID},
-		DedupeKey: domain.SubmittedKey(assignmentID, at), Merge: domain.Add}
+		DedupeKey: domain.SubmittedKey(assignmentID, at), Merge: domain.Add, AttemptID: attemptID}
 }
 
 func readyNotice(userID, attemptID, assignmentID string) domain.Notice {
@@ -94,7 +96,7 @@ func TestTheEmailFollowsTheSwitchOrTheDecksDefaultAndAStudentsOneSwitch(t *testi
 	count := func(user string) int { return len(w.outbox(user)) }
 
 	w.mail(flaggedNotice(w.creator, attempt, a), w.now)
-	w.mail(submittedNotice(w.creator, a, w.now), w.now)
+	w.mail(submittedNotice(w.creator, a, attempt, w.now), w.now)
 	if got := w.outbox(w.creator); len(got) != 1 || got[0].template != string(email.AttemptFlagged) {
 		t.Fatalf("a teacher with no saved switch has %+v, want the flag's email alone", got)
 	}
@@ -103,7 +105,7 @@ func TestTheEmailFollowsTheSwitchOrTheDecksDefaultAndAStudentsOneSwitch(t *testi
 	w.emailSwitch(other, domain.EventAttemptFlagged, true, false)
 	w.emailSwitch(other, domain.EventAttemptSubmitted, true, true)
 	w.mail(flaggedNotice(other, attempt, a), w.now)
-	w.mail(submittedNotice(other, a, w.now), w.now)
+	w.mail(submittedNotice(other, a, attempt, w.now), w.now)
 	if got := w.outbox(other); len(got) != 1 || got[0].template != string(email.SubmissionsDigest) {
 		t.Errorf("a teacher who turned the flag's email off and the submissions' on has %+v", got)
 	}
@@ -140,54 +142,110 @@ func TestTheEmailFollowsTheSwitchOrTheDecksDefaultAndAStudentsOneSwitch(t *testi
 
 // TestTheOutboxHoldsIdsAloneAndTheDigestWaitsForItsBucketsEnd fails when a
 // notification email's row carries what it says rather than ids, or when the
-// papers of one bucket write more than one digest, or one due before the
-// bucket's end.
+// papers of one bucket write more than one digest, leave one out of it, or
+// make one due before the bucket's end.
 func TestTheOutboxHoldsIdsAloneAndTheDigestWaitsForItsBucketsEnd(t *testing.T) {
 	w := newDueWorld(t)
 	w.emailSwitch(w.creator, domain.EventAttemptSubmitted, true, true)
 	a := w.assignment(spec{opens: w.now.Add(-2 * time.Hour), closes: w.now.Add(time.Hour)})
 	start := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	var papers []string
 	for _, at := range []time.Time{start.Add(time.Minute), start.Add(9 * time.Minute), start.Add(14 * time.Minute)} {
-		w.mail(submittedNotice(w.creator, a, at), at)
+		paper := w.attempt(a, w.user("student"), "submitted", at)
+		papers = append(papers, paper)
+		w.mail(submittedNotice(w.creator, a, paper, at), at)
 	}
+	w.mail(submittedNotice(w.creator, a, papers[1], start.Add(10*time.Minute)), start.Add(10*time.Minute))
 	got := w.outbox(w.creator)
 	if len(got) != 1 || !got[0].deliverAfter.Equal(start.Add(15*time.Minute)) {
 		t.Fatalf("three papers in one bucket queued %+v, want one digest due at %v", got, start.Add(15*time.Minute))
 	}
-	if got[0].params != `{"from": "2026-10-10T12:00:00Z", "assignmentId": "`+a+`"}` {
-		t.Errorf("the digest's row holds %s, want the assignment and the bucket alone", got[0].params)
+	if want := `{"from": "2026-10-10T12:00:00Z", "attemptIds": ["` + strings.Join(papers, `", "`) + `"], "assignmentId": "` + a + `"}`; got[0].params != want {
+		t.Errorf("the digest's row holds %s, want the assignment, the bucket and its three papers once each: %s", got[0].params, want)
 	}
-	w.mail(submittedNotice(w.creator, a, start.Add(16*time.Minute)), start.Add(16*time.Minute))
+	w.mail(submittedNotice(w.creator, a, w.attempt(a, w.user("student"), "submitted", start.Add(16*time.Minute)), start.Add(16*time.Minute)), start.Add(16*time.Minute))
 	if n := len(w.outbox(w.creator)); n != 2 {
 		t.Errorf("the next bucket's paper queued %d digests in all, want 2", n)
 	}
 }
 
+// TestALateAnnouncedPaperIsInTheDigestOfItsAnnouncement fails when a paper
+// is counted by its submitted_at rather than in the bucket it was announced
+// in. A paper whose time ran out at 12:03 is closed, and announced, when the
+// teacher opens the monitor at 12:40: it belongs to the 12:30 digest, as it
+// does to the bell's 12:30 item, and to no other. A paper announced after its
+// bucket's digest went gets a digest of its own.
+func TestALateAnnouncedPaperIsInTheDigestOfItsAnnouncement(t *testing.T) {
+	w := newDueWorld(t)
+	w.emailSwitch(w.creator, domain.EventAttemptSubmitted, true, true)
+	a := w.assignment(spec{opens: w.now.Add(-2 * time.Hour), closes: w.now.Add(time.Hour)})
+	start := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	expired := w.attempt(a, w.student, "timed_out", start.Add(3*time.Minute))
+	announced := start.Add(40 * time.Minute)
+	w.mail(submittedNotice(w.creator, a, expired, announced), announced)
+	got := w.outbox(w.creator)
+	if len(got) != 1 || !got[0].deliverAfter.Equal(start.Add(45*time.Minute)) {
+		t.Fatalf("the expired paper queued %+v, want one digest due at the 12:30 bucket's end", got)
+	}
+	var params email.SubmissionsDigestParams
+	if err := json.Unmarshal([]byte(got[0].params), &params); err != nil {
+		t.Fatal(err)
+	}
+	store := w.mailStore()
+	filled, ok, err := store.Digest(context.Background(), w.creator, params, w.now)
+	if err != nil || !ok || filled.Count != 1 || !filled.From.Equal(start.Add(30*time.Minute)) {
+		t.Errorf("the 12:30 digest read %+v (%v %v), want the expired paper counted", filled, ok, err)
+	}
+	if _, ok, err := store.Digest(context.Background(), w.creator, email.SubmissionsDigestParams{AssignmentID: a, From: start}, w.now); err != nil || ok {
+		t.Errorf("the 12:00 bucket, whose notices named no paper, sends a digest (%v %v)", ok, err)
+	}
+
+	w.exec(`UPDATE app.email_outbox SET sent_at = $2 WHERE dedupe_key = $1`, got[0].key, start.Add(45*time.Minute))
+	last := w.attempt(a, w.user("student"), "submitted", start.Add(44*time.Minute))
+	w.mail(submittedNotice(w.creator, a, last, start.Add(44*time.Minute)), start.Add(45*time.Minute))
+	w.mail(submittedNotice(w.creator, a, expired, announced), announced)
+	late := w.outbox(w.creator)
+	if len(late) != 1 || late[0].key == got[0].key {
+		t.Fatalf("a paper announced after its bucket's digest went queued %+v, want a digest of its own", late)
+	}
+	if err := json.Unmarshal([]byte(late[0].params), &params); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.AttemptIDs) != 1 || params.AttemptIDs[0] != last {
+		t.Errorf("the late paper's digest names %v, want %s alone", params.AttemptIDs, last)
+	}
+}
+
 // TestTheDigestCountsItsBucketsPapersWhenItIsSent fails when the digest's
-// count is the one at enqueue rather than at send, counts a paper outside its
-// bucket or one the teacher does not reach, or is sent for a bucket with none.
+// count is the one at enqueue rather than at send, counts a paper its notices
+// did not name, one voided since or one the teacher does not reach, or is
+// sent for a bucket with none.
 func TestTheDigestCountsItsBucketsPapersWhenItIsSent(t *testing.T) {
 	w := newDueWorld(t)
 	a := w.assignment(spec{title: "Đề Unit 5", opens: w.now.Add(-2 * time.Hour), closes: w.now.Add(time.Hour)})
 	start := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
-	others := []string{w.user("student"), w.user("student")}
+	others := []string{w.user("student"), w.user("student"), w.user("student")}
 	for _, s := range others {
 		w.join(w.class, s)
 	}
-	w.attempt(a, w.student, "submitted", start.Add(time.Minute))
-	w.pending(w.attempt(a, others[0], "submitted", start.Add(5*time.Minute)))
-	w.attempt(a, others[1], "graded", start.Add(14*time.Minute))
-	w.attempt(a, w.user("student"), "submitted", start.Add(16*time.Minute))
-	store := w.mailStore()
-	got, ok, err := store.Digest(context.Background(), w.creator, email.SubmissionsDigestParams{AssignmentID: a, From: start}, w.now)
-	if err != nil || !ok || got.Count != 3 || got.ToGrade != 1 || got.Title != "Đề Unit 5" {
-		t.Errorf("the digest read %+v (%v %v), want 3 papers in the bucket, 1 to grade", got, ok, err)
+	named := []string{
+		w.attempt(a, w.student, "submitted", start.Add(time.Minute)),
+		w.attempt(a, others[0], "submitted", start.Add(5*time.Minute)),
+		w.attempt(a, others[1], "graded", start.Add(14*time.Minute)),
+		w.attempt(a, others[2], "voided", start.Add(6*time.Minute)),
 	}
-	if _, ok, err := store.Digest(context.Background(), w.user("teacher"), email.SubmissionsDigestParams{AssignmentID: a, From: start}, w.now); err != nil || ok {
+	w.pending(named[1])
+	w.attempt(a, w.user("student"), "submitted", start.Add(7*time.Minute))
+	store := w.mailStore()
+	got, ok, err := store.Digest(context.Background(), w.creator, email.SubmissionsDigestParams{AssignmentID: a, From: start, AttemptIDs: named}, w.now)
+	if err != nil || !ok || got.Count != 3 || got.ToGrade != 1 || got.Title != "Đề Unit 5" {
+		t.Errorf("the digest read %+v (%v %v), want the 3 named papers still handed in, 1 to grade", got, ok, err)
+	}
+	if _, ok, err := store.Digest(context.Background(), w.user("teacher"), email.SubmissionsDigestParams{AssignmentID: a, From: start, AttemptIDs: named}, w.now); err != nil || ok {
 		t.Errorf("a teacher who reaches none of the papers gets a digest (%v %v)", ok, err)
 	}
-	if _, ok, err := store.Digest(context.Background(), w.creator, email.SubmissionsDigestParams{AssignmentID: a, From: start.Add(time.Hour)}, w.now); err != nil || ok {
-		t.Errorf("a bucket with no paper sends a digest (%v %v)", ok, err)
+	if _, ok, err := store.Digest(context.Background(), w.creator, email.SubmissionsDigestParams{AssignmentID: a, From: start, AttemptIDs: named[3:]}, w.now); err != nil || ok {
+		t.Errorf("a bucket whose one paper was voided sends a digest (%v %v)", ok, err)
 	}
 }
 
