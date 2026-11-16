@@ -13,8 +13,10 @@ type StudentFacts struct {
 	// wrote first.
 	Conversation bool
 	// Teaches is the account being the teacher of a class the student is a
-	// member of now (classes.teacher_id). A class the student left counts no
-	// more: the student may not write first to a teacher they no longer have.
+	// member of now (classes.teacher_id) that is not archived. A class the
+	// student left counts no more, nor one that is archived (the owner,
+	// 2026-11-17): the student may not write first to a teacher they no longer
+	// have.
 	Teaches bool
 	// TeacherEnabled is the teacher's account not being disabled.
 	TeacherEnabled bool
@@ -28,9 +30,10 @@ type StudentFacts struct {
 
 // Teacher reports whether the account is someone the student may name in a
 // direct thread: one they already have a thread with, or, for a student, the
-// teacher of a class they are in now. A thread outlives the class it started
-// from, but a student cannot write first to a teacher of a class they left
-// (the owner, 2026-11-13). scope.all plays no part: the caller is a student.
+// teacher of a class they are in now that is not archived. A thread outlives
+// the class it started from, but a student cannot write first to a teacher of
+// a class they left (the owner, 2026-11-13) or of an archived class (the
+// owner, 2026-11-17). scope.all plays no part: the caller is a student.
 func (Eligibility) Teacher(f StudentFacts) bool {
 	return f.Exists && !f.Self && (f.Conversation || (f.Teaches && f.Student))
 }
@@ -62,10 +65,12 @@ func (e Eligibility) CanPostAsStudent(f StudentFacts) bool { return e.PostAsStud
 
 // StudentThread is a row of the student's Messages. A direct row names its
 // teacher by TeacherID, its Title the teacher's name and ClassNames the
-// student's classes that teacher teaches now ("Your teacher · …"); Former
-// when the teacher taught the student and teaches them in no class now
-// ("Former teacher"). A class row names its class by ClassID and is titled
-// with the class's name ("Class announcements").
+// student's classes that teacher teaches now that are not archived ("Your
+// teacher · …"); Former when the teacher taught the student and teaches them
+// in no such class now ("Former teacher"). Neither, for a staff member who
+// never taught the student, reads "Your teacher" alone. A class row names its
+// class by ClassID and is titled with the class's name ("Class
+// announcements").
 type StudentThread struct {
 	Kind          Kind
 	ClassID       string
@@ -81,9 +86,9 @@ type StudentThread struct {
 }
 
 // Teacher is the teacher of a student's direct thread, as its header shows
-// them: the student's classes the teacher teaches now, whether the teacher
-// taught the student and teaches them in none now, and whether a post would
-// be taken.
+// them: the student's classes the teacher teaches now that are not archived,
+// whether the teacher taught the student and teaches them in none now, and
+// whether a post would be taken.
 type Teacher struct {
 	ID         string
 	Name       string
