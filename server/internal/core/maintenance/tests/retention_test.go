@@ -991,3 +991,162 @@ func TestAnonymizeUserLeavesTheLastActiveAdminAlone(t *testing.T) {
 		t.Error("anonymize-user disabled the last active Admin")
 	}
 }
+
+// TestAnAccountThatOwnsOnlyAQuestionSetIsSkippedLikeAnyOwner fails when the
+// owner check leaves question sets out (T-R7.12): the sweep would anonymise
+// a teacher whose only content is a set, and count them nowhere.
+func TestAnAccountThatOwnsOnlyAQuestionSetIsSkippedLikeAnyOwner(t *testing.T) {
+	eachWorld(t, func(t *testing.T, w *sweepWorld) {
+		w.retention(nil, 13, months(12))
+		owner := w.user("Đỗ Thị Thu", "teacher")
+		w.exec(`INSERT INTO app.question_sets(owner_id, name, created_by) VALUES ($1, 'Bộ câu hỏi ôn tập', $1)`, owner)
+		w.disable(owner, w.cutoff(12).Add(-w.margin))
+
+		dry := w.sweep(maintenance.SweepOptions{})
+		if dry.Accounts.Anonymise != 0 || dry.Accounts.SkippedOwners != 1 {
+			t.Errorf("the dry run counts %+v, want the set's owner among the skipped owners", dry.Accounts)
+		}
+		report := w.sweep(maintenance.SweepOptions{Apply: true})
+		if report.Accounts.Anonymise != 0 || report.Accounts.SkippedOwners != 1 {
+			t.Errorf("accounts step = %+v, want the set's owner skipped and counted", report.Accounts)
+		}
+		if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, owner, true); err == nil {
+			t.Error("anonymize-user accepted the owner of a question set")
+		}
+		if w.count(`SELECT count(*) FROM app.users WHERE id = $1 AND email NOT LIKE 'anonymous-%'`, owner) != 1 {
+			t.Error("the owner of a question set was anonymised")
+		}
+	})
+}
+
+type threadFixture struct {
+	student, assistant, pupil, teacher string
+	studentThread, assistantThread     string
+	kept, channel                      string
+	file, post                         string
+}
+
+// threads gives the disabled student a direct thread with the teacher, with
+// a file the teacher sent, read pointers on both sides and both bells' items;
+// the disabled assistant a post in the teacher's class channel and a direct
+// thread with an active pupil; and the pupil a thread with the teacher, which
+// nobody anonymised takes part in.
+func (w *sweepWorld) threads(disabledAt time.Time) threadFixture {
+	w.t.Helper()
+	f := threadFixture{teacher: w.teacher}
+	f.student = w.user("Nguyễn Thị Hằng", "student")
+	f.assistant = w.user("Trợ giảng Minh", "assistant")
+	f.pupil = w.user("Học viên Phúc", "student")
+	w.disable(f.student, disabledAt)
+	w.disable(f.assistant, disabledAt)
+	class := w.id(`INSERT INTO app.classes(name, teacher_id) VALUES ('Lớp nhắn tin', $1) RETURNING id::text`, w.teacher)
+	for _, s := range []string{f.student, f.pupil} {
+		w.exec(`INSERT INTO app.class_members(class_id, user_id, joined_via) VALUES ($1, $2, 'admin')`, class, s)
+	}
+	w.exec(`INSERT INTO app.messaging_ties(staff_id, student_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, w.teacher, f.student)
+	w.exec(`INSERT INTO app.messaging_ties(staff_id, student_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, w.teacher, f.pupil)
+	w.exec(`INSERT INTO app.messaging_ties(staff_id, student_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, f.assistant, f.pupil)
+	direct := func(staff, student string) string {
+		return w.id(`INSERT INTO app.conversations(kind, staff_id, student_id, last_message_at) VALUES ('direct', $1, $2, now()) RETURNING id::text`, staff, student)
+	}
+	message := func(thread, sender, body string, file *string) string {
+		return w.id(`INSERT INTO app.messages(conversation_id, sender_id, client_id, body, attachment_id)
+			VALUES ($1, $2, gen_random_uuid(), $3, $4) RETURNING id::text`, thread, sender, body, file)
+	}
+	item := func(user, thread string) {
+		w.exec(`INSERT INTO app.notifications(user_id, kind, params, dedupe_key)
+			VALUES ($1, 'message.received', '{"senderName": "Ai đó", "count": 1, "excerpt": "Tin nhắn"}', 'msg:' || $2)`, user, thread)
+	}
+	f.studentThread = direct(w.teacher, f.student)
+	f.file = w.id(`INSERT INTO app.message_attachments(uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+		VALUES ($1, 'messages/' || gen_random_uuid() || '.pdf', 'application/pdf', 10, 'bai-tap.pdf', decode(repeat('ab', 32), 'hex')) RETURNING id::text`, w.teacher)
+	message(f.studentThread, w.teacher, "Em xem bài tập nhé", &f.file)
+	last := message(f.studentThread, f.student, "Dạ em cảm ơn cô", nil)
+	for _, u := range []string{w.teacher, f.student} {
+		w.exec(`INSERT INTO app.conversation_reads(conversation_id, user_id, last_read_message_id) VALUES ($1, $2, $3)`, f.studentThread, u, last)
+		item(u, f.studentThread)
+	}
+	f.assistantThread = direct(f.assistant, f.pupil)
+	message(f.assistantThread, f.pupil, "Thầy ơi", nil)
+	item(f.pupil, f.assistantThread)
+	f.kept = direct(w.teacher, f.pupil)
+	message(f.kept, f.pupil, "Em chào cô", nil)
+	item(w.teacher, f.kept)
+	f.channel = w.id(`INSERT INTO app.conversations(kind, class_id, last_message_at) VALUES ('class', $1, now()) RETURNING id::text`, class)
+	f.post = message(f.channel, f.assistant, "Lớp nghỉ thứ Sáu", nil)
+	return f
+}
+
+func (w *sweepWorld) threadsAreGone(f threadFixture) {
+	w.t.Helper()
+	gone := []string{f.studentThread, f.assistantThread}
+	accounts := []string{f.student, f.assistant}
+	for _, c := range []struct {
+		what string
+		sql  string
+		arg  any
+	}{
+		{"direct threads", `SELECT count(*) FROM app.conversations WHERE id = ANY($1::uuid[])`, gone},
+		{"their messages", `SELECT count(*) FROM app.messages WHERE conversation_id = ANY($1::uuid[])`, gone},
+		{"their pointers", `SELECT count(*) FROM app.conversation_reads WHERE conversation_id = ANY($1::uuid[])`, gone},
+		{"their bell items", `SELECT count(*) FROM app.notifications WHERE dedupe_key IN (SELECT 'msg:' || g FROM unnest($1::text[]) AS g)`, gone},
+		{"their file's row", `SELECT count(*) FROM app.message_attachments WHERE id = $1::uuid`, f.file},
+		{"the accounts' ties", `SELECT count(*) FROM app.messaging_ties WHERE staff_id = ANY($1::uuid[]) OR student_id = ANY($1::uuid[])`, accounts},
+	} {
+		if n := w.count(c.sql, c.arg); n != 0 {
+			w.t.Errorf("%d rows of %s outlive the anonymisation", n, c.what)
+		}
+	}
+	if n := w.count(`SELECT count(*) FROM app.messages WHERE conversation_id = $1`, f.kept); n != 1 {
+		w.t.Errorf("the pupil's thread with the teacher holds %d messages, want 1: nobody anonymised takes part in it", n)
+	}
+	if n := w.count(`SELECT count(*) FROM app.notifications WHERE dedupe_key = 'msg:' || $1::text`, f.kept); n != 1 {
+		w.t.Errorf("the pupil's thread with the teacher has %d bell items, want 1", n)
+	}
+	if n := w.count(`SELECT count(*) FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2`, w.teacher, f.pupil); n != 1 {
+		w.t.Errorf("the teacher's tie to the pupil: %d rows, want 1", n)
+	}
+	var sender, name string
+	if err := w.q.QueryRow(w.ctx, `SELECT m.sender_id::text, u.full_name FROM app.messages m JOIN app.users u ON u.id = m.sender_id WHERE m.id = $1`, f.post).Scan(&sender, &name); err != nil {
+		w.t.Fatalf("the assistant's post in the class channel is gone: %v", err)
+	}
+	if sender != f.assistant || name != userPlaceholder {
+		w.t.Errorf("the channel post is by %s, named %q, want the assistant under the placeholder", sender, name)
+	}
+}
+
+// TestAnonymisationRemovesTheDirectThreadsAndKeepsTheChannelPosts fails when
+// the accounts step leaves an anonymised account's direct threads, their
+// messages, pointers, files' rows or bell items, or its ties, or deletes a
+// class channel's post or a thread it took no part in (D16, D17, T-R7.12).
+func TestAnonymisationRemovesTheDirectThreadsAndKeepsTheChannelPosts(t *testing.T) {
+	eachWorld(t, func(t *testing.T, w *sweepWorld) {
+		w.retention(nil, 13, months(12))
+		f := w.threads(w.cutoff(12).Add(-w.margin))
+		report := w.sweep(maintenance.SweepOptions{Apply: true})
+		if report.Accounts.Anonymise != 2 {
+			t.Fatalf("accounts step = %+v, want the student and the assistant anonymised", report.Accounts)
+		}
+		w.threadsAreGone(f)
+	})
+}
+
+// TestAnonymizeUserRemovesTheDirectThreadsInItsTransaction fails when an
+// explicit request leaves the account's threads, or a dry run removes them.
+func TestAnonymizeUserRemovesTheDirectThreadsInItsTransaction(t *testing.T) {
+	eachWorld(t, func(t *testing.T, w *sweepWorld) {
+		f := w.threads(time.Now().Add(-time.Hour))
+		if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, f.student, false); err != nil {
+			t.Fatal(err)
+		}
+		if n := w.count(`SELECT count(*) FROM app.messages WHERE conversation_id = $1`, f.studentThread); n != 2 {
+			t.Errorf("a dry run left %d of the thread's 2 messages", n)
+		}
+		for _, who := range []string{f.student, f.assistant} {
+			if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, who, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		w.threadsAreGone(f)
+	})
+}

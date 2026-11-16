@@ -66,12 +66,13 @@ const AnonymousEmail = `'anonymous-' || u.id::text || '@anonymous.invalid'`
 const NotAnonymous = `u.email <> ` + AnonymousEmail
 
 // OwnsContent is the boolean SQL expression over app.users u that the account
-// teaches a class or owns a test, question, group, media asset or assignment,
-// which keeps it from being anonymised.
+// teaches a class or owns a test, question, group, question set, media asset
+// or assignment, which keeps it from being anonymised.
 const OwnsContent = `(EXISTS (SELECT 1 FROM app.classes c WHERE c.teacher_id = u.id)
   OR EXISTS (SELECT 1 FROM app.tests t WHERE t.owner_id = u.id)
   OR EXISTS (SELECT 1 FROM app.questions q WHERE q.owner_id = u.id)
   OR EXISTS (SELECT 1 FROM app.question_groups g WHERE g.owner_id = u.id)
+  OR EXISTS (SELECT 1 FROM app.question_sets qs WHERE qs.owner_id = u.id)
   OR EXISTS (SELECT 1 FROM app.media_assets m WHERE m.owner_id = u.id)
   OR EXISTS (SELECT 1 FROM app.assignments s WHERE s.created_by = u.id))`
 

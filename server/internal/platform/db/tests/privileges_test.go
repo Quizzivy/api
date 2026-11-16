@@ -288,6 +288,7 @@ var maintenanceGrants = map[string]map[string]string{
 	},
 	"organization_settings": {"SELECT": "anonymise_disabled_after_months,keep_answers_months,keep_focus_events_months"},
 	"question_groups":       {"SELECT": "owner_id"},
+	"question_sets":         {"SELECT": "owner_id"},
 	"questions":             {"SELECT": "owner_id"},
 	"refresh_tokens":        {"SELECT": "user_id", "DELETE": "*"},
 	"role_permissions":      {"SELECT": "*"},
