@@ -5256,10 +5256,15 @@
           "lastActiveAt",
           "accountStatus",
           "classes",
-          "stats"
+          "stats",
+          "canMessage"
         ],
         "additionalProperties": false,
         "properties": {
+          "canMessage": {
+            "type": "boolean",
+            "description": "The caller may open a direct thread with this student and post in\nit (`postStaffDirectMessage` would be accepted): an existing thread,\nor a tie (a class of the caller's, now or before, or an account the\ncaller created), with the account enabled and still a student.\n`scope.all` does not widen it. The row menu's \"Send message\" reads it.\n"
+          },
           "id": {
             "$ref": "#/components/schemas/Uuid"
           },
@@ -6834,10 +6839,15 @@
           "email",
           "joinedVia",
           "joinedAt",
-          "stats"
+          "stats",
+          "canMessage"
         ],
         "additionalProperties": false,
         "properties": {
+          "canMessage": {
+            "type": "boolean",
+            "description": "As `StudentRow.canMessage`, for the caller and this member. Another teacher's class read through `scope.all` answers false for its students the caller never taught."
+          },
           "userId": {
             "$ref": "#/components/schemas/Uuid"
           },

@@ -2957,9 +2957,17 @@ components:
         rejects the very body it documents (see issue #41).
       required:
         [id, email, fullName, hasPassword, linkedProviders, mustChangePassword,
-         createdAt, disabledAt, lastActiveAt, accountStatus, classes, stats]
+         createdAt, disabledAt, lastActiveAt, accountStatus, classes, stats, canMessage]
       additionalProperties: false
       properties:
+        canMessage:
+          type: boolean
+          description: |
+            The caller may open a direct thread with this student and post in
+            it (`postStaffDirectMessage` would be accepted): an existing thread,
+            or a tie (a class of the caller's, now or before, or an account the
+            caller created), with the account enabled and still a student.
+            `scope.all` does not widen it. The row menu's "Send message" reads it.
         id: { $ref: '#/components/schemas/Uuid' }
         email: { type: string, format: email, maxLength: 254 }
         fullName: { type: string, minLength: 1, maxLength: 200 }
@@ -3761,9 +3769,12 @@ components:
 
     ClassMember:
       type: object
-      required: [userId, fullName, email, joinedVia, joinedAt, stats]
+      required: [userId, fullName, email, joinedVia, joinedAt, stats, canMessage]
       additionalProperties: false
       properties:
+        canMessage:
+          type: boolean
+          description: As `StudentRow.canMessage`, for the caller and this member. Another teacher's class read through `scope.all` answers false for its students the caller never taught.
         userId: { $ref: '#/components/schemas/Uuid' }
         stats:
           $ref: '#/components/schemas/StudentStats'
