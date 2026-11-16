@@ -10,6 +10,9 @@ import (
 type Repository interface {
 	List(ctx context.Context, in ListInput) ([]Question, paging.Page, error)
 	Get(ctx context.Context, scope access.Scope, id string) (Question, error)
+	// Access is what scope may do with the live standalone question id, or
+	// ErrNotFound for one it cannot read.
+	Access(ctx context.Context, scope access.Scope, id string) (Access, error)
 	GetIncludingDeleted(ctx context.Context, id string) (Question, error)
 	Create(ctx context.Context, in WriteInput) (Question, error)
 	Update(ctx context.Context, in WriteInput) (Question, error)

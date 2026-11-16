@@ -35,6 +35,9 @@ func (h Tests) PublishTest(ctx context.Context, request openapi.PublishTestReque
 	}})
 	switch {
 	case err == nil:
+	case errors.Is(err, domain.ErrReadOnly), errors.Is(err, domain.ErrOwnerOnly):
+		refused, _ := shareRefusal(ctx, err)
+		return refused, nil
 	case errors.Is(err, domain.ErrDraftNotFound):
 		return openapi.PublishTest404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil

@@ -12,7 +12,9 @@ import (
 // -- options, blanks, media and tags copied, ids fresh -- that no test holds
 // yet. It goes through the same write as a create, so it is validated and
 // audited like one. With ForTestID the copy is made in that test's owner's
-// bank, as Create makes one.
+// bank, as Create makes one. Duplicating is the owner's: a caller who reads the
+// question through a share gets ErrOwnerOnly, and makes copies through the
+// test or set instead (T-R7.7).
 type Duplicate struct {
 	Request   domain.WriteRequest
 	ForTestID string
@@ -26,6 +28,9 @@ func (s DuplicateHandler) Handle(ctx context.Context, cmd Duplicate) (domain.Que
 	source, err := s.Repo.Get(ctx, cmd.Request.Scope(), cmd.Request.ID)
 	if err != nil {
 		return domain.Question{}, err
+	}
+	if !source.Access.Owner() {
+		return domain.Question{}, domain.ErrOwnerOnly
 	}
 	cmd.Request.ID = ""
 	cmd.Request.Input = support.InputOf(source)

@@ -80,18 +80,18 @@ func (s *Postgres) Publish(ctx context.Context, req domain.PublishRequest, now t
 	return published, nil
 }
 
+// lockTest locks the draft a publish freezes. Publishing needs edit access
+// (and content.tests.publish, which the router checks); a test the scope
+// cannot read is domain.ErrDraftNotFound.
 func lockTest(ctx context.Context, tx pgx.Tx, testID string, scope access.Scope) (int, error) {
-	var lastPublished int
-	err := tx.QueryRow(ctx,
-		`SELECT last_published_version FROM app.tests WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest+` FOR UPDATE`,
-		testID, scope.All, opt.String(scope.UserID)).Scan(&lastPublished)
-	if errors.Is(err, pgx.ErrNoRows) {
+	reached, err := reachTest(ctx, tx, scope, testID, domain.ActionEdit, testExclusive)
+	if errors.Is(err, domain.ErrNotFound) {
 		return 0, domain.ErrDraftNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("publish: lock test: %w", err)
+		return 0, err
 	}
-	return lastPublished, nil
+	return reached.lastPublished, nil
 }
 
 func insertVersion(ctx context.Context, tx pgx.Tx, req domain.PublishRequest, version int, total string, now time.Time) (string, error) {

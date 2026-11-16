@@ -1,6 +1,7 @@
 package application
 
 import (
+	"log/slog"
 	"quizzivy/internal/modules/tests/application/command"
 	"quizzivy/internal/modules/tests/application/internal/support"
 	"quizzivy/internal/modules/tests/application/ports"
@@ -94,5 +95,13 @@ func New(repo domain.Repository) *Application {
 func (a *Application) WithGroups(repo domain.GroupRepository, media ports.GroupMediaKinds) *Application {
 	a.groups.Repo = repo
 	a.groups.Media = media
+	return a
+}
+
+// WithNotifier gives the publisher the notifications module's Notify, through
+// which an owner hears that a co-editor published their test, and returns the
+// application. Without it nobody is told.
+func (a *Application) WithNotifier(notifier ports.Notifier, logger *slog.Logger) *Application {
+	a.publisher.Notifier, a.publisher.Logger = notifier, logger
 	return a
 }

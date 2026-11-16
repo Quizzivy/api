@@ -20,7 +20,8 @@ func (s *Postgres) SetCurrentVersion(ctx context.Context, req domain.VersionRequ
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope); err != nil {
+	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope, domain.ActionEdit)
+	if err != nil {
 		return domain.Test{}, err
 	}
 	if err := requireActiveTest(ctx, tx, req.ID); err != nil {
@@ -32,7 +33,7 @@ func (s *Postgres) SetCurrentVersion(ctx context.Context, req domain.VersionRequ
 	if _, err := tx.Exec(ctx, `UPDATE app.tests SET current_version = $2 WHERE id = $1`, req.ID, req.Version); err != nil {
 		return domain.Test{}, err
 	}
-	return s.finishVersionChange(ctx, tx, req, now, "test.current_version_changed")
+	return s.finishVersionChange(ctx, tx, req, now, "test.current_version_changed", reached.access)
 }
 
 // CreateDraftFromVersion restores editable copies of the snapshot into the draft.
@@ -42,10 +43,11 @@ func (s *Postgres) CreateDraftFromVersion(ctx context.Context, req domain.Versio
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	owner, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope)
+	reached, err := checkVersion(ctx, tx, req.ID, req.ExpectedUpdatedAt, req.Scope, domain.ActionEdit)
 	if err != nil {
 		return domain.Test{}, err
 	}
+	owner := reached.owner
 	if err := requireActiveTest(ctx, tx, req.ID); err != nil {
 		return domain.Test{}, err
 	}
@@ -82,7 +84,7 @@ func (s *Postgres) CreateDraftFromVersion(ctx context.Context, req domain.Versio
 	if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at = now() WHERE id = $1`, req.ID); err != nil {
 		return domain.Test{}, err
 	}
-	return s.finishVersionChange(ctx, tx, req, now, "test.draft_restored")
+	return s.finishVersionChange(ctx, tx, req, now, "test.draft_restored", reached.access)
 }
 
 func requireActiveTest(ctx context.Context, tx pgx.Tx, testID string) error {
@@ -105,7 +107,7 @@ func lockVersion(ctx context.Context, tx pgx.Tx, req domain.VersionRequest) (str
 	return id, err
 }
 
-func (s *Postgres) finishVersionChange(ctx context.Context, tx pgx.Tx, req domain.VersionRequest, now time.Time, action string) (domain.Test, error) {
+func (s *Postgres) finishVersionChange(ctx context.Context, tx pgx.Tx, req domain.VersionRequest, now time.Time, action string, level domain.Access) (domain.Test, error) {
 	if err := auditVersionChange(ctx, tx, req, now, action); err != nil {
 		return domain.Test{}, err
 	}
@@ -113,6 +115,7 @@ func (s *Postgres) finishVersionChange(ctx context.Context, tx pgx.Tx, req domai
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&saved, level)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, err
 	}

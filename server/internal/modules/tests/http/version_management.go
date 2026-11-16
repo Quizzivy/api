@@ -27,6 +27,9 @@ func (h Tests) DeleteTestVersion(ctx context.Context, request openapi.DeleteTest
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.DeleteTestVersion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
 	}
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	if response, ok := versionConflict(ctx, err); ok {
 		return openapi.DeleteTestVersion409JSONResponse(response), nil
 	}
@@ -64,6 +67,9 @@ type versionChangeResponse struct {
 }
 
 func versionReply(ctx context.Context, result domain.Test, err error) (*versionChangeResponse, error) {
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return &versionChangeResponse{status: nethttp.StatusForbidden, problem: &refused.body}, nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		problem := httpapi.NotFound(ctx, msgTestNotFound(ctx))
 		return &versionChangeResponse{status: nethttp.StatusNotFound, problem: &problem}, nil

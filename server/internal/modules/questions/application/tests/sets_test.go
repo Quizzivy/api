@@ -20,6 +20,8 @@ import (
 	"quizzivy/internal/modules/questions/application/query"
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/modules/questions/repositories"
+	testsapp "quizzivy/internal/modules/tests/application"
+	testsrepo "quizzivy/internal/modules/tests/repositories"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
 )
@@ -29,7 +31,8 @@ func newSetWorld(t *testing.T) *bankWorld {
 	w := newBankWorld(t)
 	repo := repositories.NewPostgres(db.NewContext(w.tx))
 	kinds := adapters.MediaKinds{Media: mediaapp.New(mediarepo.NewPostgres(db.NewContext(w.tx)), nil, nil)}
-	w.svc = application.New(repo, kinds).WithSets(repo, repo)
+	tests := testsapp.New(testsrepo.NewPostgres(db.NewContext(w.tx), adapters.GroupQuestions{}, mediarepo.NewPostgres(db.NewContext(w.tx))))
+	w.svc = application.New(repo, kinds).WithSets(repo, repo).WithTests(adapters.EditableTests{Tests: tests.Queries.Ownership})
 	return w
 }
 

@@ -70,7 +70,7 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 	if err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
-	if err := lockMovedGroups(ctx, tx, in, plan); err != nil {
+	if err := lockMovedGroups(ctx, tx, owner, plan); err != nil {
 		return domain.MoveQuestionResult{}, err
 	}
 	order, err := lockMovedMembers(ctx, tx, plan)
@@ -85,10 +85,11 @@ func (s *GroupsPostgres) moveQuestion(ctx context.Context, in domain.MoveQuestio
 }
 
 func lockMovedTest(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput) (string, error) {
-	owner, err := checkVersion(ctx, tx, in.TestID, in.ExpectedTestUpdatedAt, in.Scope)
+	reached, err := checkVersion(ctx, tx, in.TestID, in.ExpectedTestUpdatedAt, in.Scope, domain.ActionEdit)
 	if err != nil {
 		return "", err
 	}
+	owner := reached.owner
 	var archived bool
 	if err := tx.QueryRow(ctx, `SELECT status='archived' FROM app.tests WHERE id=$1`, in.TestID).Scan(&archived); err != nil {
 		return "", err
@@ -99,13 +100,16 @@ func lockMovedTest(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput) 
 	return owner, domain.RequireGroupWrite(in.Grants, false)
 }
 
-func lockMovedGroups(ctx context.Context, tx pgx.Tx, in domain.MoveQuestionInput, plan movePlan) error {
+// lockMovedGroups locks the groups a move touches, every one a group of the
+// moved test's draft, which the caller may edit; each must belong to the
+// test's owner.
+func lockMovedGroups(ctx context.Context, tx pgx.Tx, owner string, plan movePlan) error {
 	for _, id := range plan.lockOrder() {
 		stored, err := readLockedGroup(ctx, tx, id, groupExclusive)
 		if err != nil {
 			return err
 		}
-		if !inScope(in.Scope, stored.OwnerID) {
+		if stored.OwnerID != owner {
 			return domain.ErrNotFound
 		}
 		if stored.Revision != plan.expected[id] {

@@ -29,8 +29,21 @@ var (
 	// ErrSetOwnerOnly is an owner's action by a caller who holds a grant.
 	ErrSetOwnerOnly = errors.New("questions: only the set's owner may do this")
 	// ErrTestNotFound is a write made for a test (forTestId) the caller cannot
-	// edit, answered as a missing test.
+	// read, answered as a missing test.
 	ErrTestNotFound = errors.New("questions: test not found for the write")
+	// ErrTestReadOnly is a write made for a test (forTestId) the caller reads
+	// through a Can use grant: SHARE_READ_ONLY.
+	ErrTestReadOnly = errors.New("questions: the test can be read but not changed")
+	// ErrReadOnly is a change to a question the caller reads, through a test or
+	// a set shared with them, but may not edit: SHARE_READ_ONLY.
+	ErrReadOnly = errors.New("questions: the question can be read but not changed")
+	// ErrOwnerOnly is an owner's action on a question (delete, duplicate) by a
+	// caller who reads it through a share: SHARE_OWNER_ONLY.
+	ErrOwnerOnly = errors.New("questions: only the question's owner may do this")
+	// ErrEditContextRequired is an edit, by a caller who is not the question's
+	// owner but may edit a test or a set that holds it, made outside that
+	// context: EDIT_CONTEXT_REQUIRED.
+	ErrEditContextRequired = errors.New("questions: a shared question is edited in the context of its test or set")
 	// ErrSetFull is an add that would leave a set holding more than
 	// MaxSetQuestions.
 	ErrSetFull = errors.New("questions: the set would hold too many questions")
@@ -45,6 +58,19 @@ const (
 	AccessEdit  Access = "edit"
 	AccessUse   Access = "use"
 )
+
+// Owner reports whether a is the owner's standing.
+func (a Access) Owner() bool { return a == AccessOwner }
+
+// WriterAccess is what the writer of req may do with the question it wrote:
+// Owner for a question of their own bank and under scope.all, Edit for one
+// made for a test of another owner's that they may edit (forTestId).
+func WriterAccess(req WriteRequest) Access {
+	if req.All || req.OwnerID == "" || req.OwnerID == req.ActorID {
+		return AccessOwner
+	}
+	return AccessEdit
+}
 
 // SetAction is something done to a question set, which Access allows or not.
 type SetAction int
@@ -213,12 +239,10 @@ type SetRepository interface {
 	RemoveFromSet(ctx context.Context, w SetWrite, questionIDs []string) (QuestionSet, error)
 }
 
-// WriteContexts resolves the test or set a bank write is made in the context
-// of (forTestId, setId).
+// WriteContexts resolves the set a bank write is made in the context of
+// (setId). The test a write is made for (forTestId) is the tests module's,
+// reached through ports.EditableTests.
 type WriteContexts interface {
-	// TestOwner returns the owner of a live test the scope can edit, who owns
-	// a question made for it, or ErrTestNotFound.
-	TestOwner(ctx context.Context, scope access.Scope, testID string) (string, error)
 	// SetHolds is nil when the scope can edit the live set setID and it holds
 	// questionID; ErrSetNotFound, or the refusal of Access.Allows, otherwise.
 	SetHolds(ctx context.Context, scope access.Scope, setID, questionID string) error

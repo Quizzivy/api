@@ -19,8 +19,6 @@ const entityTest = "test"
 
 const liveTests = `t.deleted_at IS NULL`
 
-const scopedTest = `($2::boolean OR owner_id = $3::uuid)`
-
 // QuestionLocks and MediaLocks are the row locks other modules take on this
 // module's behalf inside its transactions, so a draft cannot outlive what it
 // names, and the checks that run under them. NotOwnedBy reads, without
@@ -75,14 +73,15 @@ const testFrom = `
 	      FROM (` + draftQuestionRows + `) q
 	  ) outline` + testUsage
 
-func scanTest(row pgx.Row) (domain.Test, error) {
+func scanTest(row pgx.Row, extra ...any) (domain.Test, error) {
 	var t domain.Test
 	var status string
 	var lastPublished int
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &status, &t.CurrentVersion, &lastPublished,
+	fields := []any{&t.ID, &t.Title, &t.Description, &status, &t.CurrentVersion, &lastPublished,
 		&t.TotalPoints, &t.QuestionCount, &t.AudioCount, &t.Skills,
 		&t.Assignments.Live, &t.Assignments.Scheduled, &t.Assignments.Closed,
-		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt, &t.OwnerID, &t.OwnerName, &t.SharedWith)
+		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt, &t.OwnerID, &t.OwnerName, &t.SharedWith}
+	err := row.Scan(append(fields, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Test{}, domain.ErrNotFound
 	}
@@ -94,20 +93,15 @@ func scanTest(row pgx.Row) (domain.Test, error) {
 	return t, nil
 }
 
-// Get returns one live test with its draft outline; a test outside scope is
-// domain.ErrNotFound.
+// Get returns one live test the scope can read, with its draft outline and
+// the reader's access; any other test is domain.ErrNotFound.
 func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (domain.Test, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var locked string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM app.tests WHERE id=$1 AND deleted_at IS NULL AND `+scopedTest+` FOR SHARE`,
-		id, scope.All, opt.String(scope.UserID)).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Test{}, domain.ErrNotFound
-	}
+	reached, err := reachTest(ctx, tx, scope, id, domain.ActionRead, testShared)
 	if err != nil {
 		return domain.Test{}, err
 	}
@@ -115,6 +109,7 @@ func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (doma
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&result, reached.access)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, err
 	}
@@ -212,6 +207,7 @@ func (s *Postgres) Create(ctx context.Context, in domain.CreateInput) (domain.Te
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&created, domain.AccessOwner)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: commit create: %w", err)
 	}

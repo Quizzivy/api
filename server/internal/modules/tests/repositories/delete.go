@@ -2,31 +2,24 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"quizzivy/internal/modules/tests/domain"
-	"quizzivy/internal/shared/opt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
-// Delete permanently removes an archived test only when no assignment or attempt references it.
+// Delete permanently removes an archived test only when no assignment or
+// attempt references it. It is the owner's (D4): a reader through a grant gets
+// domain.ErrOwnerOnly.
 func (s *Postgres) Delete(ctx context.Context, req domain.Request, now time.Time) error {
 	tx, err := s.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var status string
-	err = tx.QueryRow(ctx, `SELECT status::text FROM app.tests WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest+` FOR UPDATE`,
-		req.ID, req.Scope.All, opt.String(req.Scope.UserID)).Scan(&status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
-	}
+	reached, err := reachTest(ctx, tx, req.Scope, req.ID, domain.ActionOwn, testExclusive)
 	if err != nil {
 		return err
 	}
-	if status != string(domain.Archived) {
+	if reached.status != domain.Archived {
 		return domain.ErrNotArchived
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM app.test_versions WHERE test_id = $1`, req.ID); err != nil {
@@ -44,23 +37,21 @@ func (s *Postgres) Delete(ctx context.Context, req domain.Request, now time.Time
 	return tx.Commit(ctx)
 }
 
-// DeleteVersion removes an unused snapshot while preserving the current default and assigned history.
+// DeleteVersion removes an unused snapshot while preserving the current
+// default and assigned history. It is the owner's: a Can edit recipient may
+// restore a version as the draft and make it the default, but not delete it
+// (web#79).
 func (s *Postgres) DeleteVersion(ctx context.Context, req domain.VersionRequest, now time.Time) error {
 	tx, err := s.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var current int
-	err = tx.QueryRow(ctx, `SELECT current_version FROM app.tests WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest+` FOR UPDATE`,
-		req.ID, req.Scope.All, opt.String(req.Scope.UserID)).Scan(&current)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
-	}
+	reached, err := reachTest(ctx, tx, req.Scope, req.ID, domain.ActionOwn, testExclusive)
 	if err != nil {
 		return err
 	}
-	if current == req.Version {
+	if reached.current == req.Version {
 		return domain.ErrCurrentVersion
 	}
 	versionID, err := lockVersion(ctx, tx, req)

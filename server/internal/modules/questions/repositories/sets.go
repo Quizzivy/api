@@ -16,16 +16,6 @@ import (
 
 const personName = `coalesce(nullif(u.display_name, ''), u.full_name)`
 
-// SetAccess is the SQL expression for what the caller may do with the set s:
-// 'owner' for its owner and for scope.all, the access of the caller's grant
-// in app.content_shares ('edit' or 'use'), and NULL for anyone who cannot
-// read it. all and user are the placeholders of the caller's scope.all and
-// user id. Every read and write of a set decides access here and nowhere else.
-func SetAccess(all, user int) string {
-	return fmt.Sprintf(`CASE WHEN $%[1]d::boolean OR s.owner_id = $%[2]d::uuid THEN 'owner'
-	  ELSE (SELECT g.access FROM app.content_shares g WHERE g.question_set_id = s.id AND g.grantee_id = $%[2]d::uuid) END`, all, user)
-}
-
 func setColumns(all, user int) string {
 	return `s.id::text, s.owner_id::text, ` + personName + `, s.name, s.description, ` + SetAccess(all, user) + `,
 	       (SELECT count(*) FROM app.question_set_items i JOIN app.questions q ON q.id = i.question_id AND q.deleted_at IS NULL
@@ -375,21 +365,4 @@ func (s *Postgres) SetHolds(ctx context.Context, scope access.Scope, setID, ques
 		return fmt.Errorf("questions: set context: %w", err)
 	}
 	return domain.Access(*granted).Allows(domain.SetChange)
-}
-
-// TestOwner returns the owner of the live test testID when the scope can edit
-// it, the owner a question made for it (forTestId) belongs to;
-// ErrTestNotFound otherwise. R2's owner rule decides until T-R7.4's share-aware predicate.
-func (s *Postgres) TestOwner(ctx context.Context, scope access.Scope, testID string) (string, error) {
-	var owner string
-	err := s.QueryRow(ctx, `SELECT t.owner_id::text FROM app.tests t
-		 WHERE t.id = $1::uuid AND t.deleted_at IS NULL AND ($2::boolean OR t.owner_id = $3::uuid)`,
-		testID, scope.All, opt.String(scope.UserID)).Scan(&owner)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", domain.ErrTestNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("questions: test context: %w", err)
-	}
-	return owner, nil
 }

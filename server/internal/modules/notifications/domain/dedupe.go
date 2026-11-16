@@ -105,3 +105,9 @@ func TeacherChangedKey(classID string) string {
 func SharedKey(kind, resourceID string) string {
 	return "shared:" + kind + ":" + resourceID
 }
+
+// CollaboratorPublishedKey is the dedupe key of an owner being told that a
+// co-editor published version of their test: each version is told once.
+func CollaboratorPublishedKey(testID string, version int) string {
+	return "collaborator_published:" + testID + ":" + strconv.Itoa(version)
+}

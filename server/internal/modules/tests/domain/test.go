@@ -26,10 +26,12 @@ type Test struct {
 	UnpublishedChanges *int
 	Sections           []Section
 	// OwnerID and OwnerName are the test's owner; SharedWith counts the
-	// grants to it.
+	// grants to it, and is 0 for a reader who is not its owner. Access is
+	// what the reader may do with it.
 	OwnerID    string
 	OwnerName  string
 	SharedWith int
+	Access     Access
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	DeletedAt  *time.Time

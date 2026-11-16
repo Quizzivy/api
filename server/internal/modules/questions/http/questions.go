@@ -123,8 +123,13 @@ func (h Questions) listItems(ctx context.Context, found []domain.Question, set *
 		if err != nil {
 			return nil, err
 		}
-		if set != nil && q.Owner != nil {
-			access := rowAccess(*set, q, httpapi.ScopeFromContext(ctx))
+		if q.Owner != nil {
+			// The bank lists the caller's own questions; a set lists its
+			// questions at the reader's access to the set.
+			access := openapi.ContentAccess(domain.AccessOwner)
+			if set != nil {
+				access = rowAccess(*set, q, httpapi.ScopeFromContext(ctx))
+			}
 			item.Access = &access
 			item.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
 		}
@@ -165,6 +170,9 @@ func (h Questions) CreateQuestion(ctx context.Context, request openapi.CreateQue
 	if errors.Is(err, domain.ErrTestNotFound) {
 		return openapi.CreateQuestion404JSONResponse(httpapi.NotFound(ctx, msgTestNotFound(ctx))), nil
 	}
+	if errors.Is(err, domain.ErrTestReadOnly) {
+		return openapi.CreateQuestion403JSONResponse(testReadOnly(ctx)), nil
+	}
 	if resp, handled := questionWriteError(ctx, err); handled {
 		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
@@ -188,6 +196,9 @@ func (h Questions) DuplicateQuestion(ctx context.Context, request openapi.Duplic
 	}
 
 	q, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
+	if refused, ok := questionRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	if errors.Is(err, domain.ErrTestNotFound) {
 		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
@@ -225,6 +236,14 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 	if errors.Is(err, domain.ErrSetReadOnly) {
 		return openapi.UpdateQuestion403JSONResponse(setReadOnly(ctx)), nil
 	}
+	if errors.Is(err, domain.ErrReadOnly) {
+		return openapi.UpdateQuestion403JSONResponse(questionReadOnly(ctx)), nil
+	}
+	if errors.Is(err, domain.ErrEditContextRequired) {
+		return openapi.UpdateQuestion422JSONResponse(httpapi.Error(ctx, openapi.EDITCONTEXTREQUIRED,
+			httpx.Text(ctx, "Câu hỏi này thuộc ngân hàng của người khác. Hãy sửa nó trong đề hoặc bộ câu hỏi được chia sẻ với bạn.",
+				"This question belongs to someone else's bank. Edit it in the test or question set shared with you."))), nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
@@ -252,6 +271,9 @@ func (h Questions) DeleteQuestion(ctx context.Context, request openapi.DeleteQue
 	}
 
 	_, err := h.app.Commands.Delete.Handle(ctx, command.Delete{Request: req})
+	if refused, ok := questionRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	switch {
 	case err == nil:
 		return openapi.DeleteQuestion204Response{}, nil
@@ -391,6 +413,11 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		UpdatedAt:          q.UpdatedAt,
 	}
 	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == domain.Essay, q.MaxWords)
+	if q.Owner != nil && q.Access != "" {
+		access := openapi.ContentAccess(q.Access)
+		out.Access = &access
+		out.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
+	}
 	if out.Tags == nil {
 		out.Tags = []string{}
 	}

@@ -131,7 +131,8 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	}
 	importsTransport = importsTransport.WithAI(completer != nil)
 	questionsApp, questionsRepo := questions(dbx, mediaApp)
-	testsApp := tests(dbx, questionsRepo, mediaRepo, mediaApp)
+	testsApp := tests(dbx, questionsRepo, mediaRepo, mediaApp).WithNotifier(notificationsApp.Commands.Notify, logger)
+	questionsApp.WithTests(adapters.EditableTests{Tests: testsApp.Queries.Ownership})
 	attemptsApp := attempts(dbx, notificationsApp.Commands.Notify, logger).WithGroupContexts(testsApp.Queries.GroupContexts).WithZones(adapters.ProfileZone{Query: identityApp.Queries.EffectiveZone})
 	availabilityApp, availabilityTransport := availability(dbx, logger, cfg.AIEnabled())
 	aiApp, aiTransport, err := aiAssistant(cfg, dbx, notificationsApp.Commands.Notify, logger, completer, aiModules{

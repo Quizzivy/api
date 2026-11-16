@@ -94,7 +94,7 @@ func lockGroupOwner(ctx context.Context, tx pgx.Tx, in domain.CreateGroupInput) 
 	if err != nil {
 		return "", err
 	}
-	if _, err := checkVersion(ctx, tx, testID, in.ExpectedTestUpdatedAt, in.Scope); err != nil {
+	if _, err := checkVersion(ctx, tx, testID, in.ExpectedTestUpdatedAt, in.Scope, domain.ActionEdit); err != nil {
 		return "", err
 	}
 	var archived bool

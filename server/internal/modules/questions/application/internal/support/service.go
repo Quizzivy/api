@@ -12,9 +12,11 @@ import (
 type Service struct {
 	Repo  domain.Repository
 	Media ports.MediaKinds
-	// Sets and Contexts are nil until the application is given them (WithSets).
+	// Sets and Contexts are nil until the application is given them (WithSets),
+	// and Tests until it is given the tests module's edit rule (WithTests).
 	Sets     domain.SetRepository
 	Contexts domain.WriteContexts
+	Tests    ports.EditableTests
 	Now      func() time.Time
 }
 
@@ -56,8 +58,14 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 		IP:             req.IP,
 		UserAgent:      req.UserAgent,
 	}
+	write := s.Repo.Create
 	if update {
-		return s.Repo.Update(ctx, in)
+		write = s.Repo.Update
 	}
-	return s.Repo.Create(ctx, in)
+	written, err := write(ctx, in)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	written.Access = domain.WriterAccess(req)
+	return written, nil
 }

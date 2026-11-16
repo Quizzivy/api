@@ -20,6 +20,11 @@ type pauseRepository struct {
 	stored  *bool
 }
 
+// Access answers that the caller owns the question being saved.
+func (r *pauseRepository) Access(context.Context, access.Scope, string) (questions.Access, error) {
+	return questions.AccessOwner, nil
+}
+
 func (r *pauseRepository) Create(_ context.Context, in questions.WriteInput) (questions.Question, error) {
 	r.written = append(r.written, in)
 	policy := *in.Input.Audio

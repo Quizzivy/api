@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/shared/access"
@@ -22,10 +21,11 @@ func (s *Postgres) Update(ctx context.Context, in domain.UpdateRequest) (domain.
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	owner, err := checkVersion(ctx, tx, in.ID, in.Input.ExpectedUpdatedAt, in.Scope)
+	reached, err := lockForAutosave(ctx, tx, in)
 	if err != nil {
 		return domain.Test{}, err
 	}
+	owner := reached.owner
 
 	if in.Input.SetSections {
 		if err := prepareOutline(ctx, tx, in.ID, in.Input); err != nil {
@@ -61,10 +61,26 @@ func (s *Postgres) Update(ctx context.Context, in domain.UpdateRequest) (domain.
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&saved, reached.access)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: commit update: %w", err)
 	}
 	return saved, nil
+}
+
+// lockForAutosave locks the test an autosave writes: an edit of the draft
+// needs edit access, and a change of status, archiving the test or restoring
+// it, is the owner's (D4). Access is decided before the revision, so a reader
+// who may not make the change is refused whatever revision it read.
+func lockForAutosave(ctx context.Context, tx pgx.Tx, in domain.UpdateRequest) (reachedTest, error) {
+	reached, err := reachTest(ctx, tx, in.Scope, in.ID, domain.ActionEdit, testExclusive)
+	if err == nil && in.Input.Status != nil && *in.Input.Status != reached.status {
+		err = reached.access.Allows(domain.ActionOwn)
+	}
+	if err != nil {
+		return reachedTest{}, err
+	}
+	return reached, fresh(reached, in.Input.ExpectedUpdatedAt)
 }
 
 func prepareOutline(ctx context.Context, tx pgx.Tx, id string, in domain.UpdateInput) error {
@@ -96,22 +112,24 @@ func requireLegacyOutline(ctx context.Context, tx pgx.Tx, testID string) error {
 	return nil
 }
 
-func checkVersion(ctx context.Context, tx pgx.Tx, id string, expected time.Time, scope access.Scope) (string, error) {
-	var current time.Time
-	var owner string
-	err := tx.QueryRow(ctx,
-		`SELECT updated_at, owner_id::text FROM app.tests WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest+` FOR UPDATE`,
-		id, scope.All, opt.String(scope.UserID)).Scan(&current, &owner)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", domain.ErrNotFound
-	}
+// checkVersion locks the live test id for an action of scope's and refuses a
+// write based on a revision other than expected (domain.ErrStaleWrite). A test
+// the scope cannot read is domain.ErrNotFound, and a reader without the
+// action's right gets the refusal of Access.Allows, both before the revision
+// is compared.
+func checkVersion(ctx context.Context, tx pgx.Tx, id string, expected time.Time, scope access.Scope, action domain.Action) (reachedTest, error) {
+	reached, err := reachTest(ctx, tx, scope, id, action, testExclusive)
 	if err != nil {
-		return "", fmt.Errorf("tests: lock for update: %w", err)
+		return reachedTest{}, err
 	}
-	if !current.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {
-		return "", domain.ErrStaleWrite
+	return reached, fresh(reached, expected)
+}
+
+func fresh(reached reachedTest, expected time.Time) error {
+	if !reached.updatedAt.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {
+		return domain.ErrStaleWrite
 	}
-	return owner, nil
+	return nil
 }
 
 func applyMetadata(ctx context.Context, tx pgx.Tx, in domain.UpdateRequest) error {

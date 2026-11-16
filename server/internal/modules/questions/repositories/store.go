@@ -68,9 +68,10 @@ func scanQuestion(row pgx.Row, extra ...any) (domain.Question, error) {
 	return q, nil
 }
 
-// Get returns one live bank question the scope reaches, with its children and
-// the tests the scope can read that use it. Another owner's question answers
-// ErrNotFound, exactly as a missing one does.
+// Get returns one live bank question the scope can read (questionAccess),
+// with its children, its owner, the reader's access and the tests the scope
+// can read that use it. A question the scope cannot read answers ErrNotFound,
+// exactly as a missing one does.
 func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (domain.Question, error) {
 	question, err := s.get(ctx, s.Conn(), scope, id, false, nil)
 	if err != nil {
@@ -91,12 +92,17 @@ func (s *Postgres) get(ctx context.Context, q db.Querier, scope access.Scope, id
 	if includeDeleted {
 		filter = ``
 	}
+	var owner domain.Owner
+	var level string
 	question, err := scanQuestion(q.QueryRow(ctx,
-		`SELECT`+questionColumns+` FROM app.questions q WHERE q.id = $1 AND q.context_group_id IS NOT DISTINCT FROM $2::uuid
-		   AND ($3::boolean OR q.owner_id = $4::uuid)`+filter, id, groupID, scope.All, opt.String(scope.UserID)))
+		`SELECT`+questionColumns+`, q.owner_id::text, (SELECT `+personName+` FROM app.users u WHERE u.id = q.owner_id), `+questionAccess(3, 4)+`
+		   FROM app.questions q WHERE q.id = $1 AND q.context_group_id IS NOT DISTINCT FROM $2::uuid
+		   AND `+questionAccess(3, 4)+` IS NOT NULL`+filter, id, groupID, scope.All, opt.String(scope.UserID)),
+		&owner.ID, &owner.Name, &level)
 	if err != nil {
 		return domain.Question{}, err
 	}
+	question.Owner, question.Access = &owner, domain.Access(level)
 	questions := []domain.Question{question}
 	if err := s.loadChildren(ctx, q, questions); err != nil {
 		return domain.Question{}, err

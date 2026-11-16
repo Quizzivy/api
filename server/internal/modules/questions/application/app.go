@@ -68,6 +68,13 @@ func New(repo domain.Repository, media ports.MediaKinds) *Application {
 	}
 }
 
+// WithTests gives the application the tests module's edit rule, which a bank
+// write made for a test (forTestId) is decided by, and returns it.
+func (a *Application) WithTests(tests ports.EditableTests) *Application {
+	a.service.Tests = tests
+	return a
+}
+
 // WithSets gives the application its question sets and the write contexts a
 // bank write may name (forTestId, setId), and returns it.
 func (a *Application) WithSets(sets domain.SetRepository, contexts domain.WriteContexts) *Application {

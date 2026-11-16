@@ -81,8 +81,8 @@ func allFilters() filterOpts {
 }
 
 // List returns one page of live bank questions, newest first, or a set's in
-// set order with each question's owner, with the paging beside it (O-20:
-// OFFSET, so the client can draw numbered pages).
+// set order, each with its owner, with the paging beside it (O-20: OFFSET, so
+// the client can draw numbered pages).
 func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Question, paging.Page, error) {
 	number, limit, offset := paging.Clamp(in.Page, in.Limit, DefaultLimit, MaxLimit)
 
@@ -96,9 +96,8 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Ques
 		return nil, paging.Page{}, fmt.Errorf("questions: count: %w", err)
 	}
 
-	columns, order := questionColumns, `q.id DESC`
+	columns, order := questionColumns+`, q.owner_id::text, (SELECT `+personName+` FROM app.users u WHERE u.id = q.owner_id)`, `q.id DESC`
 	if in.SetID != "" {
-		columns += `, q.owner_id::text, (SELECT ` + personName + ` FROM app.users u WHERE u.id = q.owner_id)`
 		order = `(SELECT i.ordinal FROM app.question_set_items i WHERE i.set_id = $1::uuid AND i.question_id = q.id), q.id`
 	}
 	args = append(args, limit, offset)
@@ -112,18 +111,12 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Ques
 
 	questions := make([]domain.Question, 0, limit)
 	for rows.Next() {
-		var extra []any
 		var owner domain.Owner
-		if in.SetID != "" {
-			extra = []any{&owner.ID, &owner.Name}
-		}
-		question, err := scanQuestion(rows, extra...)
-		if in.SetID != "" {
-			question.Owner = &owner
-		}
+		question, err := scanQuestion(rows, &owner.ID, &owner.Name)
 		if err != nil {
 			return nil, paging.Page{}, err
 		}
+		question.Owner = &owner
 		questions = append(questions, question)
 	}
 	if err := rows.Err(); err != nil {

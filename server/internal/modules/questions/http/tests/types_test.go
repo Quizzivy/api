@@ -22,6 +22,11 @@ type typesRepository struct {
 	written []questions.WriteInput
 }
 
+// Access answers that the caller owns the question being saved.
+func (r *typesRepository) Access(context.Context, access.Scope, string) (questions.Access, error) {
+	return questions.AccessOwner, nil
+}
+
 func (r *typesRepository) Create(_ context.Context, in questions.WriteInput) (questions.Question, error) {
 	r.written = append(r.written, in)
 	q := questions.Question{ID: uuid.NewString(), Type: in.Input.Type, Prompt: in.Input.Prompt, Points: in.Input.Points,

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/platform/db"
-	"quizzivy/internal/shared/opt"
 	"slices"
 	"time"
 
@@ -62,14 +61,8 @@ func (s *Postgres) DiffPapers(ctx context.Context, req domain.DiffRequest) (doma
 }
 
 func readDiffVersions(ctx context.Context, tx pgx.Tx, req domain.DiffRequest) ([]versionRow, error) {
-	var visible string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM app.tests WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest,
-		req.TestID, req.Scope.All, opt.String(req.Scope.UserID)).Scan(&visible)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("diff: read test: %w", err)
+	if err := requireVisibleTest(ctx, tx, req.Scope, req.TestID); err != nil {
+		return nil, err
 	}
 	versions, err := db.QueryMany(ctx, tx, `SELECT id::text, version, published_at FROM app.test_versions
 		WHERE test_id = $1 ORDER BY version`, []any{req.TestID},
