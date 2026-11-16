@@ -22,6 +22,7 @@ import (
 	"quizzivy/internal/modules/tests/repositories"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/provenance"
 )
 
@@ -175,7 +176,7 @@ func TestTwoSessionsAutosavingOneTestTellTheSecondWhoSavedFirst(t *testing.T) {
 	expectStaleNaming(t, "A's save on the revision B replaced", err, w.b, "Thầy B", savedB.UpdatedAt)
 }
 
-// TestARowLastWrittenByNoOneNamesNoOne: a test the R6 binary last wrote, or
+// TestARowLastWrittenByNoOneNamesNoOne: a test no R7 write has touched, or
 // whose last writer's account is gone, has no updated_by, and a stale write
 // on it names no one but still says when it changed.
 func TestARowLastWrittenByNoOneNamesNoOne(t *testing.T) {
@@ -239,8 +240,11 @@ func TestAGranteesQuestionMadeForTheTestPassesTheDraftsOwnerCheck(t *testing.T) 
 }
 
 // TestEveryTestsWriteRecordsItsWriter walks the writes of a test's draft by
-// its owner and by an edit grantee, each of which records its actor as the
-// test's last writer, and a refused stale group mutation names that writer.
+// its owner and by an edit grantee, each made by the one who did not write
+// last, so that each records its actor as the test's last writer (and, for a
+// move or a restore, as the last writer of the questions it writes); a
+// refused stale group mutation names that writer, and an ownership transfer
+// names no one.
 func TestEveryTestsWriteRecordsItsWriter(t *testing.T) {
 	ctx := context.Background()
 	w := newShareWorld(t, levelEdit)
@@ -296,7 +300,97 @@ func TestEveryTestsWriteRecordsItsWriter(t *testing.T) {
 		ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys}, true)
 	expectStaleNaming(t, "A's archive of a bank group on an old revision", err, "", "", w.bankGroupA.UpdatedAt)
 
-	// Version management by the grantee, and a publish.
+	// Moves, each by the editor who did not write last: the test, the moved
+	// question and every sibling a move renumbers record the mover.
+	groupRevision := func(id string) int64 {
+		t.Helper()
+		var revision int64
+		if err := w.tx.QueryRow(ctx, `SELECT revision FROM app.question_groups WHERE id = $1`, id).Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		return revision
+	}
+	questionWriter := func(id string) string {
+		t.Helper()
+		var by *string
+		if err := w.tx.QueryRow(ctx, `SELECT updated_by::text FROM app.questions WHERE id = $1`, id).Scan(&by); err != nil {
+			t.Fatal(err)
+		}
+		if by == nil {
+			return ""
+		}
+		return *by
+	}
+	expectMembersWritten := func(name, groupID, want string) {
+		t.Helper()
+		rows, err := w.tx.Query(ctx, `SELECT id::text, coalesce(updated_by::text, '') FROM app.questions WHERE context_group_id = $1`, groupID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, by string
+			if err := rows.Scan(&id, &by); err != nil {
+				t.Fatal(err)
+			}
+			if by != want {
+				t.Errorf("%s: member %s is recorded as %q's, want %q's", name, id, by, want)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	move := func(scope access.Scope, actorID, question, from string, to *string, index int) domain.MoveQuestionResult {
+		t.Helper()
+		expected := []domain.GroupRevision{}
+		for _, id := range []string{from, opt.Deref(to)} {
+			if id != "" {
+				expected = append(expected, domain.GroupRevision{GroupID: id, Revision: groupRevision(id)})
+			}
+		}
+		moved, err := w.groups.MoveQuestion(ctx, domain.MoveQuestionInput{TestID: w.testA, QuestionID: question, ExpectedTestUpdatedAt: revision(),
+			To: domain.MoveTarget{SectionID: w.sectionA, GroupID: to, Index: index}, ExpectedGroups: expected,
+			ActorID: actorID, Now: time.Now(), Scope: scope, Grants: bothKeys})
+		if err != nil {
+			t.Fatalf("a move by %s: %v", actorID, err)
+		}
+		return moved
+	}
+	ownGroup, sectionGroup := group.Bundle.Group.ID, w.sectionGroupA.Bundle.Group.ID
+	into := move(w.scopeA, w.a, w.questionA, "", &ownGroup, 0)
+	expectWriter("A's move of a standalone question into B's group", w.a, nil)
+	if !into.Copied {
+		t.Fatalf("the move into a group copied nothing: %+v", into)
+	}
+	expectMembersWritten("A's move into B's group", ownGroup, w.a)
+	between := move(w.scopeB, w.b, into.QuestionID, ownGroup, &sectionGroup, 0)
+	expectWriter("B's move between groups", w.b, nil)
+	expectMembersWritten("B's move, the group it left", ownGroup, w.b)
+	expectMembersWritten("B's move, the group it joined", sectionGroup, w.b)
+	if _, err := w.tx.Exec(ctx, `UPDATE app.questions SET prompt = prompt || ' (sửa)' WHERE id = $1`, between.QuestionID); err != nil {
+		t.Fatal(err)
+	}
+	out := move(w.scopeA, w.a, between.QuestionID, sectionGroup, nil, 0)
+	expectWriter("A's move of an edited copy out of a group", w.a, nil)
+	if !out.EditedCopy || out.QuestionID != between.QuestionID {
+		t.Fatalf("the edited copy's move out: %+v", out)
+	}
+	if got := questionWriter(out.QuestionID); got != w.a {
+		t.Errorf("the question A moved out is recorded as %q's", got)
+	}
+	expectMembersWritten("A's move out, the group it left", sectionGroup, w.a)
+
+	// Successful group mutations by the editor who did not write last.
+	err = w.groups.RemoveFromSection(ctx, domain.GroupMutation{ID: sectionGroup, ExpectedRevision: groupRevision(sectionGroup),
+		ExpectedTestUpdatedAt: revision(), ActorID: w.b, Now: time.Now(), Scope: w.scopeB, Grants: bothKeys})
+	expectWriter("B's removal of a group from the section", w.b, err)
+	_, err = w.groups.Copy(ctx, domain.CopyGroupInput{SourceID: w.bankGroupA.Bundle.Group.ID, ExpectedSourceRevision: w.bankGroupA.Revision, OwnerSectionID: &w.sectionA,
+		ExpectedTestUpdatedAt: revision(), ActorID: w.a, Now: time.Now(), Scope: w.scopeA, Grants: bothKeys})
+	expectWriter("A's copy of a bank group into the test", w.a, err)
+
+	// Version management by the grantee, and a publish, each after the other
+	// editor's write.
 	_, err = w.tests.SetCurrentVersion(ctx, domain.VersionRequest{Request: w.request(w.scopeB, w.b), Version: 1, ExpectedUpdatedAt: revision()}, time.Now())
 	expectWriter("B making version 1 the default", w.b, err)
 	_, err = w.tests.Update(ctx, domain.UpdateRequest{ID: w.testA, ActorID: w.a, Now: time.Now(), Scope: w.scopeA,
@@ -308,6 +402,17 @@ func TestEveryTestsWriteRecordsItsWriter(t *testing.T) {
 	expectWriter("A making version 1 the default again", w.a, err)
 	_, err = w.tests.CreateDraftFromVersion(ctx, domain.VersionRequest{Request: w.request(w.scopeB, w.b), Version: 1, ExpectedUpdatedAt: revision()}, time.Now())
 	expectWriter("B restoring version 1 as the draft", w.b, err)
+	restored := w.current(t, w.testA)
+	if len(restored.Sections) == 0 || len(restored.Sections[0].QuestionIDs) == 0 {
+		t.Fatalf("the restored draft holds no question: %+v", restored.Sections)
+	}
+	for _, section := range restored.Sections {
+		for _, id := range section.QuestionIDs {
+			if got := questionWriter(id); got != w.b {
+				t.Errorf("restored question %s is recorded as %q's, want B's", id, got)
+			}
+		}
+	}
 	expectWriter("A deleting version 2", w.a, w.tests.DeleteVersion(ctx, domain.VersionRequest{Request: w.request(w.scopeA, w.a), Version: 2}, time.Now()))
 
 	copied, err := w.tests.Duplicate(ctx, domain.DuplicateInput{ID: w.testA, ActorID: w.a, Now: time.Now(), Scope: w.scopeA})
@@ -317,6 +422,33 @@ func TestEveryTestsWriteRecordsItsWriter(t *testing.T) {
 	var copyWriter string
 	if err := w.tx.QueryRow(ctx, `SELECT updated_by::text FROM app.tests WHERE id = $1`, copied.ID).Scan(&copyWriter); err != nil || copyWriter != w.a {
 		t.Errorf("A's duplicate is recorded as %q's (%v)", copyWriter, err)
+	}
+
+	// An ownership transfer is no one's edit: the tests and the questions it
+	// moves name no one.
+	var owned []string
+	var written int
+	if err := w.tx.QueryRow(ctx, `SELECT coalesce(array_agg(id::text), '{}'), count(*) FILTER (WHERE updated_by IS NOT NULL)::int FROM app.questions WHERE owner_id = $1`, w.a).Scan(&owned, &written); err != nil {
+		t.Fatal(err)
+	}
+	if written == 0 {
+		t.Fatal("no question of A's names a writer before the transfer")
+	}
+	if _, err := w.tests.TransferOwnership(ctx, w.a, w.b); err != nil {
+		t.Fatal(err)
+	}
+	if got := writer(); got != "" {
+		t.Errorf("the transferred test is recorded as %q's, want no one's", got)
+	}
+	if _, err := questionsrepo.NewPostgres(db.NewContext(w.tx)).TransferOwnership(ctx, w.a, w.b); err != nil {
+		t.Fatal(err)
+	}
+	var named int
+	if err := w.tx.QueryRow(ctx, `SELECT count(*)::int FROM app.questions WHERE id = ANY($1::uuid[]) AND updated_by IS NOT NULL`, owned).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != 0 {
+		t.Errorf("%d transferred questions still name a writer", named)
 	}
 }
 
