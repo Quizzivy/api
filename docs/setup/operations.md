@@ -243,9 +243,14 @@ name, and disabled), so the role can set neither an email nor a password hash no
 account again, alone or together; and it holds no `INSERT` on `user_identities` or
 `set_password_tokens`, so it cannot reopen an anonymised row either. A second trigger, on
 `app.email_outbox` (migration `00173`), refuses every row the role inserts that is not a credit
-decision email, without a sealed secret, to an account at that account's own address; what the
-email says is read again when it is sent, so the role cannot mail an address Quizzivy does not hold
-or say anything a real decision did not. The database refuses to
+decision email, without a sealed secret, to an account at that account's own address, holding the
+request's id alone under the key the console writes, about a decided request of that account's.
+The outbox's unique key then allows one such row per decided request, so the role can neither take
+another email's key (which would keep that email from being queued) nor spend the email budget, and
+since the same migration narrows its `UPDATE` on `ai_credit_requests` to the decision's three
+columns, it cannot make new requests out of old ones. What the email says is read again when it is
+sent, so the role cannot mail an address Quizzivy does not hold or say anything a real decision did
+not. The database refuses to
 anonymise only the last active Admin; skipping an owner of classes or content, or an account with
 an attempt in progress, is the sweep's and `anonymize-user`'s rule, which direct SQL with the
 credential does not follow. It also cannot change a `role_id`, update or delete the

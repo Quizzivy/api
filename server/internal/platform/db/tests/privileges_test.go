@@ -259,7 +259,7 @@ const maintenanceRole = "quizzivy_maintenance"
 
 var maintenanceGrants = map[string]map[string]string{
 	"ai_credit_periods":            {"SELECT": "*", "INSERT": "*", "UPDATE": "*"},
-	"ai_credit_requests":           {"SELECT": "*", "UPDATE": "*"},
+	"ai_credit_requests":           {"SELECT": "*", "UPDATE": "decided_at,decided_by,status"},
 	"ai_reservations":              {"SELECT": "*", "DELETE": "*"},
 	"ai_settings":                  {"SELECT": "*", "UPDATE": "*"},
 	"ai_teacher_credits":           {"SELECT": "*", "INSERT": "*", "UPDATE": "*"},

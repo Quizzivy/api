@@ -160,16 +160,46 @@ func TestTheConsoleEmailsNoDecisionThatNotifyEmailEventsTurnsOff(t *testing.T) {
 	}
 }
 
+// decided files a request of teacher's and declines it through the owner's
+// connection, which queues no email, so the role's own insert is the only one.
+func (w *aiWorld) decided(teacher string) string {
+	w.t.Helper()
+	request := w.request(teacher, w.month)
+	if _, err := w.tx.Exec(w.ctx, `UPDATE app.ai_credit_requests SET status = 'declined', decided_at = now() WHERE id = $1::uuid`, request); err != nil {
+		w.t.Fatal(err)
+	}
+	return request
+}
+
+// queued is a row of the outbox as the role inserts it by hand.
+type queued struct {
+	user, address, template, params, dedupe string
+	secret                                  []byte
+}
+
+// decisionRow is the row the console queues for teacher about request.
+func decisionRow(teacher, address, request string) queued {
+	return queued{teacher, address, string(email.AICreditRequestDecided), `{"requestId": "` + request + `"}`, "email:ai_decision:" + request + ":" + teacher, nil}
+}
+
 // TestTheMaintenanceRoleQueuesNoOtherEmail is 00173's guard and its column
-// grants at work: the role may queue a credit decision email to an account's
-// own address and nothing else, may not read what a queued row says, and may
-// neither change nor delete one.
+// grants at work: the role may queue the console's decision email for a
+// decided request, once, to the teacher who asked at their own address, and
+// nothing else. It may not take another email's dedupe key, queue a second
+// row for the same request, write anything beyond the request's id, mail
+// about a request still pending or another teacher's, rewrite a request into
+// a new one, read what a queued row says, or change or delete one.
 func TestTheMaintenanceRoleQueuesNoOtherEmail(t *testing.T) {
 	iso := newIsolated(t)
 	w := &aiWorld{t: t, ctx: iso.ctx, tx: iso.owner, conn: iso.role, month: aiMonth(t)}
 	teacher, address := w.teacherFor("")
-	insert := `INSERT INTO app.email_outbox (to_user_id, to_address, template, locale, params, secret_ciphertext, dedupe_key)
-		VALUES (nullif($1, '')::uuid, $2, $3, 'vi', '{"requestId": "00000000-0000-0000-0000-000000000001"}', $4, gen_random_uuid()::text)`
+	other, _ := w.teacherFor("")
+	request, pending, theirs := w.decided(teacher), w.request(teacher, w.month), w.decided(other)
+	insert := func(r queued) error {
+		_, err := iso.role.Exec(iso.ctx, `INSERT INTO app.email_outbox (to_user_id, to_address, template, locale, params, secret_ciphertext, dedupe_key)
+			VALUES (nullif($1, '')::uuid, $2, $3, 'vi', $4::jsonb, $5, $6)`, r.user, r.address, r.template, r.params, r.secret, r.dedupe)
+		return err
+	}
 	refused := func(what string, err error) {
 		t.Helper()
 		var pg *pgconn.PgError
@@ -177,33 +207,47 @@ func TestTheMaintenanceRoleQueuesNoOtherEmail(t *testing.T) {
 			t.Errorf("%s: err = %v, want 42501", what, err)
 		}
 	}
-	decided := string(email.AICreditRequestDecided)
-	for _, c := range []struct {
-		what, user, address, template string
-		secret                        []byte
-	}{
-		{"another template", teacher, address, string(email.AccountInvite), nil},
-		{"another address", teacher, "taken-over@example.test", decided, nil},
-		{"no account", "", address, decided, nil},
-		{"a sealed secret", teacher, address, decided, []byte{1, 2, 3}},
-	} {
-		_, err := iso.role.Exec(iso.ctx, insert, c.user, c.address, c.template, c.secret)
-		refused("queuing "+c.what, err)
+	right := decisionRow(teacher, address, request)
+	with := func(change func(*queued)) queued {
+		r := right
+		change(&r)
+		return r
 	}
-	if _, err := iso.role.Exec(iso.ctx, insert, teacher, address, decided, nil); err != nil {
-		t.Fatalf("queuing a decision email to the teacher's own address: %v", err)
+	for what, r := range map[string]queued{
+		"another template":                  with(func(r *queued) { r.template = string(email.AccountInvite) }),
+		"another address":                   with(func(r *queued) { r.address = "taken-over@example.test" }),
+		"no account":                        with(func(r *queued) { r.user, r.dedupe = "", "email:ai_decision:"+request+":" }),
+		"a sealed secret":                   with(func(r *queued) { r.secret = []byte{1, 2, 3} }),
+		"another email's dedupe key":        with(func(r *queued) { r.dedupe = "email:ready:" + request }),
+		"a second key for the same request": with(func(r *queued) { r.dedupe += ":again" }),
+		"more params than the request's id": with(func(r *queued) { r.params = `{"requestId": "` + request + `", "credits": 100000}` }),
+		"a request id that is no uuid":      decisionRow(teacher, address, "nope"),
+		"a request still pending":           decisionRow(teacher, address, pending),
+		"another teacher's request":         decisionRow(teacher, address, theirs),
+		"a request that does not exist":     decisionRow(teacher, address, "00000000-0000-0000-0000-000000000001"),
+	} {
+		refused("queuing "+what, insert(r))
+	}
+	if err := insert(right); err != nil {
+		t.Fatalf("queuing the decision email of a decided request to its teacher: %v", err)
+	}
+	var pg *pgconn.PgError
+	if err := insert(right); !errors.As(err, &pg) || pg.Code != "23505" {
+		t.Errorf("queuing the same decision twice: err = %v, want the dedupe key's 23505", err)
 	}
 	for what, sql := range map[string]string{
-		"reading a queued row's address": `SELECT to_address FROM app.email_outbox LIMIT 1`,
-		"reading a queued row's params":  `SELECT params FROM app.email_outbox LIMIT 1`,
-		"holding a queued row back":      `UPDATE app.email_outbox SET deliver_after = now() + interval '1 day'`,
-		"deleting a queued row":          `DELETE FROM app.email_outbox`,
-		"reading the suppression list":   `SELECT address FROM app.email_suppressions LIMIT 1`,
+		"reading a queued row's address":   `SELECT to_address FROM app.email_outbox LIMIT 1`,
+		"reading a queued row's params":    `SELECT params FROM app.email_outbox LIMIT 1`,
+		"holding a queued row back":        `UPDATE app.email_outbox SET deliver_after = now() + interval '1 day'`,
+		"deleting a queued row":            `DELETE FROM app.email_outbox`,
+		"reading the suppression list":     `SELECT address FROM app.email_suppressions LIMIT 1`,
+		"renaming a request":               `UPDATE app.ai_credit_requests SET id = gen_random_uuid() WHERE false`,
+		"giving a request another teacher": `UPDATE app.ai_credit_requests SET user_id = user_id WHERE false`,
 	} {
 		_, err := iso.role.Exec(iso.ctx, sql)
 		refused(what, err)
 	}
-	if n := w.count(`SELECT count(*) FROM app.email_outbox WHERE to_user_id = $1::uuid AND deliver_after <= now() + interval '1 minute'`, teacher); n != 1 {
-		t.Errorf("the teacher has %d emails queued, want the one the role was let write", n)
+	if n := w.count(`SELECT count(*) FROM app.email_outbox WHERE to_user_id = ANY (ARRAY[$1, $2]::uuid[])`, teacher, other); n != 1 {
+		t.Errorf("the two teachers have %d emails queued, want the one the role was let write", n)
 	}
 }
