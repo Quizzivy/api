@@ -212,8 +212,8 @@ audit log, cannot touch `ai_usage_ledger`, and owns nothing.
 more adds the grant in its own migration.
 
 **Never set `MAINTENANCE_DATABASE_URL` on the API.** Against a managed database the
-credential lives in two places: the GitHub environment `production-maintenance` (as the secret
-`MAINTENANCE_DATABASE_URL`, read by the retention workflow) and the operator's own machine. On
+credential lives on the operator's own machine; no GitHub environment holds it (the
+`production-maintenance` environment and the retention workflow that read it are gone). On
 the server that production runs on since 2026-11-12 it lives in one: the role's password is in
 the database's own secret file there, and `Quizzivy/infra`'s `vps/scripts/maintenance` gives the
 connection string to the one-off container that runs the command and to nothing else ("Where
@@ -237,20 +237,16 @@ credential does not follow. It also cannot change a `role_id`, update or delete 
 audit log or the AI ledger, or create or own a table, schema or function. It can change its own
 password and create large objects, because PostgreSQL gives every role both.
 
-The credential lives only in the environment secret and on the operator's machine. The repository's
-deploy credential reaches the application's own database URL, so it is a larger secret than this
-one and is the owner's too; a second, retention-only role for the workflow would shrink what is
-left here, and is open item O-R5.9 (`docs/plan/40-open-items.md`), to be done if the workflow ever
-runs another command or a second consumer holds the connection string. To revoke the credential,
-run `ALTER ROLE quizzivy_maintenance NOLOGIN` as the owner. To rotate it, run
-`ALTER ROLE quizzivy_maintenance PASSWORD '<new random password>'` as the owner (step 1 below does
-the same), then replace the secret `MAINTENANCE_DATABASE_URL` with the new connection string.
+To revoke the credential, run `ALTER ROLE quizzivy_maintenance NOLOGIN` as the owner. To rotate
+it, run `ALTER ROLE quizzivy_maintenance PASSWORD '<new random password>'` as the owner (step 1
+below does the same), then replace the connection string wherever the operator keeps it.
 
 ### Where the sweep runs
 
 Since 2026-11-12 production's database is on the server's private network, and nothing outside
-the server can connect to it: not a GitHub runner, not the operator's machine. The workflow
-below cannot reach it and is disabled in the Actions tab. The sweep runs on the server instead:
+the server can connect to it: not a GitHub runner, not the operator's machine. The sweep runs on
+the server (the GitHub Actions workflow that once ran it was disabled on 2026-11-14 and removed
+on 2026-11-17):
 
 - The image carries the command as `/app/maintenance`, beside `/app/api`, `/app/import-worker`
   and `/app/migrate`. Nothing in the image starts it.
@@ -260,24 +256,12 @@ below cannot reach it and is disabled in the Actions tab. The sweep runs on the 
   which is `maintenance retention-sweep -budget 5m`, and a failed run mails the operator.
 - The switch moved with it. The nightly run applies only while the server's
   `/opt/quizzivy/compose.env` holds `RETENTION_SWEEP_ENABLED=true`; otherwise it is a dry run.
-  The repository variable of the same name is read by the workflow alone.
 - The report is the same JSON ("Reading the report" below), in the unit's journal.
 
-The order of the first time is the workflow's, steps 3 and 4 below: read a dry run, then set the
-switch. The runbook is `docs/vps.md` in `Quizzivy/infra`, "Maintenance commands and the
-retention sweep". What follows describes the workflow, which is still the way against a
-database a GitHub runner can reach.
+The runbook is `docs/vps.md` in `Quizzivy/infra`, "Maintenance commands and the retention
+sweep".
 
-### The nightly workflow
-
-`.github/workflows/retention-sweep.yml` runs at `0 20 * * *` UTC (03:00 in Ho Chi Minh City)
-and on `workflow_dispatch` with an `apply` input. It runs in the environment
-`production-maintenance`, builds `cmd/maintenance`, runs `maintenance retention-sweep -budget 5m`
-(`timeout-minutes: 15`, one run at a time) and prints the report into the job summary. A
-schedule applies only when the repository variable `RETENTION_SWEEP_ENABLED` is `true`; otherwise
-it is a dry run, as is a manual run whose `apply` box is off. GitHub runs a schedule, and lists
-a manual workflow, only from the default branch, so the workflow starts to run when the release
-that carries it reaches `main`.
+### Setting up the sweep
 
 The owner sets this up once, in this order:
 
@@ -307,29 +291,14 @@ The owner sets this up once, in this order:
    already provisioned. Its last lines name the roles whose password it set: read them, and only
    `quizzivy_maintenance` should be listed. `scripts/ci/tests/provision-db.test.mjs` pins all of
    this. To rotate the maintenance password later, run it again with the new value and replace the
-   secret; rotate the other two roles' passwords in the provider's console. On a new managed
+   connection string the operator keeps; rotate the other two roles' passwords in the provider's console. On a new managed
    database, set all three variables to new random values.
-2. Create the GitHub environment `production-maintenance`. Restrict its deployment branches to
-   the default branch **before** adding the secret, and check the restriction in Settings,
-   Environments before the secret goes in: a manual run can be started on any branch, and only
-   that restriction keeps a pushed branch from running its own code with the credential. Do not
-   add required reviewers. A reviewer rule holds the scheduled run as well as the manual one, so
-   the nightly sweep would wait for a person every night; the branch restriction is the control,
-   and it can be verified. Then add the secret `MAINTENANCE_DATABASE_URL` for
-   `quizzivy_maintenance`: the direct connection string, not the pooled one, with
-   `sslmode=require` kept, because the credential crosses the internet from a GitHub runner. The
-   workflow runs only GitHub's own `actions/checkout` and `actions/setup-go`, each pinned to a
-   commit SHA with its tag in a trailing comment (stricter than `docs/setup/ci.md` asks of the
-   other workflows), because this job holds a database credential. The checkout leaves no
-   repository token in `.git/config` (`persist-credentials: false`) and `setup-go` restores no cache
-   (`cache: false`). Any action added to it is pinned the same way, and
-   `scripts/ci/tests/retention-sweep.test.mjs` fails otherwise.
-3. Run the workflow by hand with `apply` off and read the report (below).
-4. When the dry run counts what you expect, set the repository variable
-   `RETENTION_SWEEP_ENABLED` to `true`.
+2. Run a dry run on the server, `vps/scripts/maintenance retention-sweep -budget 5m` with no
+   `-apply`, and read the report (below).
+3. When the dry run counts what you expect, set `RETENTION_SWEEP_ENABLED=true` in the server's
+   `/opt/quizzivy/compose.env`.
 
-To pause the sweep, unset the variable or set it to anything but `true`: the next night is a dry
-run. Disabling the workflow in the Actions tab also stops it.
+To pause the sweep, set the switch there to anything but `true`: the next night is a dry run.
 
 ### Reading the report
 
@@ -682,8 +651,7 @@ The rekey runs from the operator's machine, never from a scheduled workflow, and
 `quizzivy_maintenance`: the operator supplies `MAINTENANCE_DATABASE_URL` for that role and
 `JOIN_CODE_KEY` and `JOIN_CODE_KEY_PREVIOUS` from the offline copies to `cmd/maintenance`.
 The role can read `class_join_codes` and write only `code_hash`, `code_ciphertext` and
-`key_id`. The GitHub environment `production-maintenance` holds the role's connection string
-for the retention workflow and no join-code key.
+`key_id`. No GitHub environment holds the role's connection string or a join-code key.
 
 1. In `app.secrets.env`, set `JOIN_CODE_KEY_PREVIOUS` to the old key and
    `JOIN_CODE_KEY` to the new one in **one** edit, before anything restarts.
