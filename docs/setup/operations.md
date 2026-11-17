@@ -163,8 +163,8 @@ log is never swept. Retention uses UTC calendar arithmetic and a strict `<` agai
 | `keep_focus_events_months` | 6, 12, 13, 24 | 13 | Deletes `attempt_events` whose `received_at` is before the cutoff and whose assignment has closed for that attempt's student before it, with the same close as the answers rule: a later close a teacher gave that student holds their events back until it passes the cutoff too. The command it replaces read the assignment's own close alone, which predates the per-student close. One `integrity.retained` entry per batch. |
 | `anonymise_disabled_after_months` | 12, 24, or never | never | Anonymises accounts disabled before the cutoff, of any role. One `user.anonymized` entry per account. |
 
-An account that owns classes or content (a class it teaches, or a test, question, group, media file or
-assignment it owns) is skipped and counted (`skippedOwners`): transfer the content, then it is picked up on a
+An account that owns classes or content (a class it teaches, or a test, question, group, question set,
+media file or assignment it owns) is skipped and counted (`skippedOwners`): transfer the content, then it is picked up on a
 later run. Having created an account is not ownership: an Admin reaches it through the Users directory.
 An account with an attempt in progress is skipped for now (`skippedInProgress`). The last active Admin can never be anonymized. The three counts split the accounts that are due: `anonymise`, `skippedOwners` and `skippedInProgress` add up to them, an owner who also has an attempt in progress is counted once, as an owner, and a dry run's `anonymise` is what the apply anonymises. If a batch fails, its accounts are tried one by one, the others are anonymised, `failedAccounts` counts the ones that could not be, and the step ends with an error, so the job fails every night until someone looks at that account. Before the name is
 overwritten, in-app notifications that carry the account's full or display name are deleted
@@ -177,7 +177,13 @@ the maintenance role holds no storage credential. The daily housekeeping of the 
 under that prefix at its next run (where media storage is configured), so until then the object stays in
 storage with nothing pointing at it. A
 revoked link holds a hash of a random token, its purpose, its dates and the account's id, which is no
-personal data, and is as unusable as a deleted one; the daily housekeeping removes the row 30 days later.
+personal data, and is as unusable as a deleted one; the daily housekeeping removes the row 30 days later. In the
+same transaction the account's direct message threads are deleted (D17): their messages, read pointers,
+the rows of the files those messages carried, and the in-app message items both participants hold for
+them. Its rows in `messaging_ties` go too, so no teacher finds it as a former student. Its posts in class
+channels stay, under the placeholder name. The files' objects under `messages/` stay until the API's
+daily housekeeping, which removes objects that no file row names once they are a day old, for the same
+reason as the photo.
 Attempts, memberships and the audit trail stay, which is why this is **structured-identity
 anonymization**, not a guarantee that all personal information disappears: teacher notes, free
 text in answers kept under the settings, existing audit diffs, IPs and backups may retain
@@ -205,7 +211,9 @@ superuser, no `CREATE` anywhere) with the password in `QUIZZIVY_MAINTENANCE_PASS
 only this role (step 1 below). Migration `00139_grant_maintenance_role.sql` gives it
 exactly what the commands use, column by column, and fails when the role does not exist. It can
 read what the commands' predicates read, delete from `attempt_events`, `user_identities`,
-`refresh_tokens`, `notifications` and `ai_reservations`, write `payload` on `attempt_answers`,
+`refresh_tokens`, `notifications`, `ai_reservations` and the messaging tables (`messages`,
+`message_attachments`, `conversation_reads`, `conversations`, `messaging_ties`, granted with them and
+never their bodies, file names or storage keys), write `payload` on `attempt_answers`,
 the identity columns on `users` (only to anonymise them, below), and insert into `audit_log`. It cannot `UPDATE` or `DELETE` the
 audit log, cannot touch `ai_usage_ledger`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
@@ -361,8 +369,8 @@ maintenance anonymize-user -user USER_UUID -apply
 
 `-batch` (default 500, 1 to 10000) is the rows in one batch. `retain-integrity` is the focus-events step alone, with the configured months and one batch per
 run; repeat until it reports zero rows. `anonymize-user` handles one account of any role on an
-explicit request (`anonymize-student -student UUID` is still accepted): it refuses an account
-that owns classes or content, an account with an attempt in progress and the last active Admin,
+explicit request (`anonymize-student -student UUID` is still accepted), with its direct threads as
+above: it refuses an account that owns classes or content, an account with an attempt in progress and the last active Admin,
 and is idempotent. Every command takes `-timeout <duration>` (default `1m`; `retention-sweep`
 takes `-budget` instead, which is also its timeout), and writes are dry runs until `-apply`. An
 unknown command or flag prints the usage line and changes nothing. The older order, flags before

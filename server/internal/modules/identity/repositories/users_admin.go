@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/limits"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/ties"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -107,10 +108,8 @@ func (a *AdminUsers) Create(ctx context.Context, req domain.WriteRequest, in dom
 		return domain.AdminUser{}, err
 	}
 	if in.ClassID != "" {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO app.class_members (class_id, user_id, joined_via, added_by)
-			VALUES ($1::uuid, $2::uuid, 'admin', $3::uuid)`, in.ClassID, id, req.ActorID); err != nil {
-			return domain.AdminUser{}, fmt.Errorf("users: enrol: %w", err)
+		if err := enrolCreated(ctx, tx, in.ClassID, id, req.ActorID); err != nil {
+			return domain.AdminUser{}, err
 		}
 	}
 	afterCommit, err := a.invite(ctx, tx, id, issue)
@@ -134,6 +133,17 @@ func (a *AdminUsers) Create(ctx context.Context, req domain.WriteRequest, in dom
 	}
 	afterCommit()
 	return scanAdminUser(a.QueryRow(ctx, adminUserSelect+` WHERE u.id = $1::uuid`, id))
+}
+
+// enrolCreated puts a new account in the class an Admin named, and records
+// that the class's teacher teaches it (T-R7.9).
+func enrolCreated(ctx context.Context, tx pgx.Tx, classID, userID, actorID string) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO app.class_members (class_id, user_id, joined_via, added_by)
+		VALUES ($1::uuid, $2::uuid, 'admin', $3::uuid)`, classID, userID, actorID); err != nil {
+		return fmt.Errorf("users: enrol: %w", err)
+	}
+	return ties.Enrolled(ctx, tx, classID, userID)
 }
 
 func (a *AdminUsers) invite(ctx context.Context, tx pgx.Tx, userID string, issue domain.LinkIssue) (func(), error) {

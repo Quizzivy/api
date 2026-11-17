@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -70,6 +71,7 @@ type isoCase struct {
 	query   map[string]string
 	body    func(x *iso, own *party, slot string) any
 	format  string
+	omit    []string
 	fresh   func(x *iso, own *party) *party
 	link    map[string][]string
 	as      map[string]string
@@ -209,7 +211,7 @@ func (x *iso) build(op scopedOp, c isoCase, own *party, slot string, value strin
 		case "path":
 			path = strings.ReplaceAll(path, "{"+s.Name+"}", values[s.In+" "+s.Name])
 		case "query":
-			if !bare || !op.optional[s.Name] {
+			if (!bare || !op.optional[s.Name]) && !slices.Contains(c.omit, s.Name) {
 				query.Set(s.Name, values[s.In+" "+s.Name])
 			}
 		}
@@ -280,6 +282,9 @@ func success(s sent) bool { return s.status >= 200 && s.status < 300 }
 func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
 	x.t.Helper()
 	own := x.b
+	if c.student {
+		own = x.b.student
+	}
 	method, path, body := x.request(op, c, own, "", "")
 	if got := own.c.send(method, path, body); got.status != http.StatusNotImplemented {
 		x.t.Errorf("%s is pending (%s) yet answers %s: give it its isolation case", op.id, c.pending, answer(got))

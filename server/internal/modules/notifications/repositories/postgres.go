@@ -98,6 +98,19 @@ func (p *Postgres) MarkRead(ctx context.Context, userID string, ids []string, au
 	return nil
 }
 
+// MarkKeyRead marks read the user's notification under key while it is
+// unread and was last written no later than writtenBy, through the user's
+// unique key.
+func (p *Postgres) MarkKeyRead(ctx context.Context, userID, key string, writtenBy time.Time) error {
+	if _, err := p.Exec(ctx, `
+		UPDATE app.notifications
+		   SET read_at = now()
+		 WHERE user_id = $1::uuid AND dedupe_key = $2 AND read_at IS NULL AND updated_at <= $3`, userID, key, writtenBy); err != nil {
+		return fmt.Errorf("notifications: mark key read: %w", err)
+	}
+	return nil
+}
+
 // MarkAllRead marks every unread notification the user has of audience's
 // kinds.
 func (p *Postgres) MarkAllRead(ctx context.Context, userID string, audience domain.Audience) error {
@@ -124,7 +137,8 @@ func (p *Postgres) Unread(ctx context.Context, userID string, audience domain.Au
 	return unread, nil
 }
 
-// DeleteBefore deletes the notifications first written before cutoff. It is
+// DeleteBefore deletes the notifications created before cutoff: first
+// written, or last renewed, since Renew resets created_at. It is
 // idempotent, so a second run or a second machine removes nothing.
 func (p *Postgres) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	tag, err := p.Exec(ctx, `DELETE FROM app.notifications WHERE created_at < $1`, cutoff)

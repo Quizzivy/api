@@ -21,6 +21,10 @@ type Repository interface {
 	// kinds. The empty Audience, here and in the two methods below, means
 	// every kind.
 	MarkRead(ctx context.Context, userID string, ids []string, audience Audience) error
+	// MarkKeyRead marks read the notification userID holds under key when it
+	// is unread and was last written no later than writtenBy, so that a
+	// notice written after that moment stays unread.
+	MarkKeyRead(ctx context.Context, userID, key string, writtenBy time.Time) error
 	// MarkAllRead marks every unread notification userID has of audience's
 	// kinds.
 	MarkAllRead(ctx context.Context, userID string, audience Audience) error
@@ -30,8 +34,8 @@ type Repository interface {
 	Preferences(ctx context.Context, userID string) ([]Preference, error)
 	// SavePreferences stores prefs for userID and returns them as stored.
 	SavePreferences(ctx context.Context, userID string, prefs []Preference) ([]Preference, error)
-	// DeleteBefore deletes every notification first written before cutoff,
-	// and returns how many went.
+	// DeleteBefore deletes every notification created before cutoff (first
+	// written, or last renewed under Renew), and returns how many went.
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	// Due reads the notices userID has earned by the passing of time alone, as
 	// of now: the moments from DueLookback before now up to now, judged

@@ -77,7 +77,7 @@ func TestTheSummaryAndTheListMaterialiseTheCallersDueItemsFirst(t *testing.T) {
 	s := &steps{}
 	transport := notificationshttp.NewNotifications(s.app())
 	before := time.Now()
-	if got := readSummary(t, transport); got != `{"unreadNotifications":3}`+"\n" {
+	if got := readSummary(t, transport); got != `{"unreadMessages":0,"unreadNotifications":3}`+"\n" {
 		t.Errorf("the summary is %s", got)
 	}
 	if code := readList(t, transport); code != http.StatusOK {
@@ -118,7 +118,7 @@ func TestAFailedMaterialisationIsLoggedAndTheReadStillAnswers(t *testing.T) {
 	s := &steps{failWith: errors.New("the database is away")}
 	var log bytes.Buffer
 	transport := notificationshttp.NewNotifications(s.app()).WithLogger(slog.New(slog.NewTextHandler(&log, nil)))
-	if got := readSummary(t, transport); got != `{"unreadNotifications":3}`+"\n" {
+	if got := readSummary(t, transport); got != `{"unreadMessages":0,"unreadNotifications":3}`+"\n" {
 		t.Errorf("the summary is %s after a failed materialisation", got)
 	}
 	if code := readList(t, transport); code != http.StatusOK {
@@ -135,7 +135,7 @@ func TestAnApplicationWithoutMaterialisingStillServesTheReads(t *testing.T) {
 			return domain.Summary{UnreadNotifications: 1}, nil
 		}),
 	}}
-	if got := readSummary(t, notificationshttp.NewNotifications(app)); got != `{"unreadNotifications":1}`+"\n" {
+	if got := readSummary(t, notificationshttp.NewNotifications(app)); got != `{"unreadMessages":0,"unreadNotifications":1}`+"\n" {
 		t.Errorf("the summary is %s", got)
 	}
 }

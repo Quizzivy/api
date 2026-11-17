@@ -30,7 +30,7 @@ func (x *iso) view(op scopedOp, c isoCase, viewer *party, bare bool) string {
 var signature = regexp.MustCompile(`[?&]X-Amz-[^"]*`)
 
 func walkedView(op scopedOp) bool {
-	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" ||
+	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" || op.id == "listStaffThreads" || op.id == "listStudentThreads" ||
 		strings.HasPrefix(op.id, "listMy") || strings.HasPrefix(op.path, "/me/"))
 }
 
@@ -234,6 +234,8 @@ func TestAnotherTeachersIdsAnswerAsMissingOnes(t *testing.T) {
 	}
 	x.adminListsOwnRows()
 	x.adminsOwnAssignmentNamesEveryTarget()
+	x.directThreadsStayWithTheirParticipants()
+	x.studentThreadsStayWithTheirParticipants()
 }
 
 func (x *iso) adminListsOwnRows() {
@@ -297,7 +299,7 @@ func (x *iso) adminsOwnAssignmentNamesEveryTarget() {
 }
 
 func switchesAllOff() []map[string]any {
-	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready"}
+	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received"}
 	out := make([]map[string]any, len(events))
 	for i, event := range events {
 		out[i] = map[string]any{"event": event, "inApp": false, "email": true}

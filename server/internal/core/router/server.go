@@ -18,6 +18,7 @@ import (
 	importshttp "quizzivy/internal/modules/imports/http"
 	leadshttp "quizzivy/internal/modules/leads/http"
 	mediahttp "quizzivy/internal/modules/media/http"
+	messaginghttp "quizzivy/internal/modules/messaging/http"
 	notificationshttp "quizzivy/internal/modules/notifications/http"
 	organizationhttp "quizzivy/internal/modules/organization/http"
 	questionshttp "quizzivy/internal/modules/questions/http"
@@ -46,6 +47,8 @@ type Server struct {
 	exportshttp.Exports
 	leadshttp.Leads
 	sharinghttp.Sharing
+	messaginghttp.Staff
+	messaginghttp.Student
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

@@ -40,6 +40,10 @@ GET /app/attempts/{id} learning.take_tests
 GET /app/attempts/{id}/result learning.take_tests
 GET /app/classes learning.take_tests
 GET /app/media/{assetId}/url learning.take_tests
+GET /app/messages/attachments/{id} learning.take_tests
+GET /app/messages/classes/{classId} learning.take_tests
+GET /app/messages/teachers/{teacherId} learning.take_tests
+GET /app/messages/threads learning.take_tests
 GET /auth/me self
 GET /auth/sessions self
 GET /me/notification-preferences self
@@ -71,6 +75,10 @@ GET /teacher/imports/{id}/review content.tests.write
 GET /teacher/imports/{id}/source content.tests.write
 GET /teacher/imports/{id}/sources/{sourceId}/download content.tests.write
 GET /teacher/media workspace.teacher
+GET /teacher/messages/attachments/{id} workspace.teacher
+GET /teacher/messages/classes/{classId} workspace.teacher
+GET /teacher/messages/students/{studentId} workspace.teacher
+GET /teacher/messages/threads workspace.teacher
 GET /teacher/question-groups workspace.teacher
 GET /teacher/question-groups/{id} workspace.teacher
 GET /teacher/question-sets content.questions.write
@@ -131,6 +139,9 @@ POST /app/attempts/{id}/audio-play learning.take_tests
 POST /app/attempts/{id}/group-audio-play learning.take_tests
 POST /app/attempts/{id}/submit learning.take_tests
 POST /app/classes/join learning.take_tests
+POST /app/messages/classes/{classId}/read learning.take_tests
+POST /app/messages/teachers/{teacherId} learning.take_tests
+POST /app/messages/teachers/{teacherId}/read learning.take_tests
 POST /auth/change-password self
 POST /auth/google/link self
 POST /auth/sessions/revoke-others self
@@ -168,6 +179,11 @@ POST /teacher/imports/{id}/sources content.tests.write
 POST /teacher/imports/{id}/sources/text content.tests.write
 POST /teacher/media content.media.write
 POST /teacher/media/{id}/replace content.media.write
+POST /teacher/messages/attachments workspace.teacher
+POST /teacher/messages/classes/{classId} teaching.classes.write
+POST /teacher/messages/classes/{classId}/read workspace.teacher
+POST /teacher/messages/students/{studentId} workspace.teacher
+POST /teacher/messages/students/{studentId}/read workspace.teacher
 POST /teacher/question-groups content.questions.write | content.tests.write
 POST /teacher/question-groups/{id}/copy content.questions.write | content.tests.write
 POST /teacher/question-sets content.questions.write

@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/limits"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/ties"
 	"quizzivy/internal/shared/visibility"
 	"slices"
 	"time"
@@ -62,6 +63,9 @@ func (s *Students) Create(ctx context.Context, req domain.WriteRequest, in domai
 			ON CONFLICT (class_id, user_id) DO NOTHING`,
 			classID, id, req.ActorID); err != nil {
 			return domain.Student{}, fmt.Errorf("students: enrol: %w", err)
+		}
+		if err := ties.Enrolled(ctx, tx, classID, id); err != nil {
+			return domain.Student{}, err
 		}
 	}
 

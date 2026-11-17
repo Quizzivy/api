@@ -41,7 +41,12 @@ var everyKind = []struct {
 	{domain.Shared{SharerName: "Nguyễn Thị Lan", ContentKind: domain.ShareTest, Name: "Đề giữa kỳ", Access: domain.ShareEdit}, domain.ContentShared, []string{"access", "contentKind", "name", "sharerName"}},
 	{domain.Shared{SharerName: "Nguyễn Thị Lan", ContentKind: domain.ShareQuestionSet, Name: "Bộ ngữ pháp", Access: domain.ShareUse, Message: &sharerMessage}, domain.ContentShared, []string{"access", "contentKind", "message", "name", "sharerName"}},
 	{domain.PublishedByCollaborator{EditorName: "Trần Minh Khoa", Title: "Đề giữa kỳ", Version: 3}, domain.TestPublishedByCollaborator, []string{"editorName", "title", "version"}},
+	{domain.MessageNotice{SenderName: "Lê Hà My", Count: 2, Excerpt: "Em nộp bài muộn được không ạ?"}, domain.MessageReceived, []string{"count", "excerpt", "senderName"}},
+	{domain.TeacherMessageNotice{SenderName: "Cô Thương", Count: 1, Excerpt: "bai-tap.pdf"}, domain.MessageFromTeacher, []string{"count", "excerpt", "senderName"}},
+	{domain.TeacherMessageNotice{SenderName: "Cô Thương", Count: 3, Excerpt: "Lớp nghỉ thứ Sáu", ClassName: &announcedIn}, domain.MessageFromTeacher, []string{"className", "count", "excerpt", "senderName"}},
 }
+
+var announcedIn = "IELTS Foundation A"
 
 var sharerMessage = "Cô dùng bộ này cho lớp tối nhé."
 
@@ -203,7 +208,10 @@ func TestParamsOutsideTheContractsBoundsAreRefused(t *testing.T) {
 		}
 		return int(*property.MaxLength)
 	}
-	title, name := limit("title"), limit("studentName")
+	title, name, excerpt := limit("title"), limit("studentName"), limit("excerpt")
+	if limit("senderName") != name {
+		t.Fatal("the contract bounds a sender's name unlike the other names")
+	}
 	if limit("className") != name || int(*params.Properties["classNames"].Value.Items.Value.MaxLength) != name {
 		t.Fatal("the contract bounds its three name fields differently")
 	}
@@ -241,6 +249,11 @@ func TestParamsOutsideTheContractsBoundsAreRefused(t *testing.T) {
 		"a share message at the limit": {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse, Message: new(text(500))}, true},
 		"a share message over":         {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse, Message: new(text(501))}, false},
 		"version zero":                 {domain.PublishedByCollaborator{EditorName: "Khoa", Title: "Đề", Version: 0}, false},
+		"an excerpt at the limit":      {domain.MessageNotice{SenderName: text(name), Count: 1, Excerpt: text(excerpt)}, true},
+		"an excerpt over the limit":    {domain.MessageNotice{SenderName: "My", Count: 1, Excerpt: text(excerpt + 1)}, false},
+		"an empty excerpt":             {domain.TeacherMessageNotice{SenderName: "Thương", Count: 1}, false},
+		"a sender name over":           {domain.TeacherMessageNotice{SenderName: text(name + 1), Count: 1, Excerpt: "Chào"}, false},
+		"an empty announcement class":  {domain.TeacherMessageNotice{SenderName: "Thương", Count: 1, Excerpt: "Chào", ClassName: new("")}, false},
 	} {
 		raw, err := domain.Encode(c.params)
 		if c.ok && err != nil {

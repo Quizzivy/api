@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -102,6 +103,39 @@ func (c *Client) SignedURL(ctx context.Context, key string, ttl time.Duration) (
 		return "", fmt.Errorf("storage: sign %s: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// SignedAttachmentURL mints a GET URL valid for ttl that downloads the
+// object as an attachment named filename, which the disposition carries in
+// RFC 8187's UTF-8 form, with contentType as its type: a message's file is
+// saved, never shown inline (T-R7.11).
+func (c *Client) SignedAttachmentURL(ctx context.Context, key, filename, contentType string, ttl time.Duration) (string, error) {
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(key),
+		ResponseContentType:        aws.String(contentType),
+		ResponseContentDisposition: aws.String(AttachmentDisposition(filename)),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", fmt.Errorf("storage: sign attachment %s: %w", key, err)
+	}
+	return req.URL, nil
+}
+
+// AttachmentDisposition is `attachment; filename*=UTF-8”…`, the name
+// percent-encoded byte by byte outside RFC 8187's attr-char.
+func AttachmentDisposition(filename string) string {
+	const attrChar = "!#$&+-.^_`|~"
+	var b strings.Builder
+	b.WriteString("attachment; filename*=UTF-8''")
+	for _, c := range []byte(filename) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', strings.IndexByte(attrChar, c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 // SignedDownloadURL authorizes a private original as an attachment, never inline active content.

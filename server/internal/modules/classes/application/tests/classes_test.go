@@ -440,6 +440,9 @@ func TestAStudentListsTheirOwnClassesWithoutTheCode(t *testing.T) {
 	if mine[0].TeacherName == nil || *mine[0].TeacherName == "" {
 		t.Error("the card has no teacher to name")
 	}
+	if mine[0].TeacherID != teacherID {
+		t.Errorf("the card's teacher is %q, want the class's own, %s, whose thread it opens", mine[0].TeacherID, teacherID)
+	}
 
 	theirs, err := store.ListMine(ctx, outsider)
 	if err != nil {

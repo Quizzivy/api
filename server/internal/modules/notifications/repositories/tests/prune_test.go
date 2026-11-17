@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"quizzivy/internal/modules/notifications/application/command"
+	"quizzivy/internal/modules/notifications/domain"
 )
 
 func TestThePruneDeletesWhatWasFirstWrittenMoreThan180DaysAgo(t *testing.T) {
@@ -79,5 +82,35 @@ func TestThePruneDeletesWhatWasFirstWrittenMoreThan180DaysAgo(t *testing.T) {
 	}
 	if len(rowsOf(t, pool, userID)) != len(kept) {
 		t.Errorf("a second prune removed more rows (%d reported)", again)
+	}
+}
+
+// TestARenewedItemIsKeptFromItsLatestWrite fails when the prune counts a
+// Renew item's 180 days from its first write, or when a Replace or Add merge
+// extends an item's.
+func TestARenewedItemIsKeptFromItsLatestWrite(t *testing.T) {
+	pool := newPool(t)
+	app := over(pool)
+	userID := newUser(t, pool, "teacher")
+	old := time.Now().Add(-181 * 24 * time.Hour)
+	keys := map[domain.Merge]string{domain.Renew: domain.MessageKey(uuid.NewString()), domain.Replace: "joined:" + nonce(t), domain.Add: "graded:" + nonce(t)}
+	params := map[domain.Merge]domain.Params{
+		domain.Renew:   said("Lê Hoàng Nam", "Dạ em chào cô"),
+		domain.Replace: domain.Joined{StudentName: "Nguyễn Gia Bảo", ClassName: "Lớp 5A"},
+		domain.Add:     domain.Joined{StudentName: "Nguyễn Gia Bảo", ClassName: "Lớp 5B"},
+	}
+	for merge, key := range keys {
+		notify(t, app, userID, key, params[merge], merge)
+		if _, err := pool.Exec(context.Background(), `UPDATE app.notifications SET created_at = $3 WHERE user_id = $1::uuid AND dedupe_key = $2`, userID, key, old); err != nil {
+			t.Fatal(err)
+		}
+		notify(t, app, userID, key, params[merge], merge)
+	}
+	if _, err := app.Commands.Prune.Handle(context.Background(), command.Prune{}); err != nil {
+		t.Fatal(err)
+	}
+	left := rowsOf(t, pool, userID)
+	if len(left) != 1 || left[0].kind != string(domain.MessageReceived) {
+		t.Errorf("the prune left %+v, want the renewed message item alone", left)
 	}
 }

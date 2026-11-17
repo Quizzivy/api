@@ -90,7 +90,7 @@ func TestANoticeIsRefusedForItsFirstFault(t *testing.T) {
 		"no dedupe key":                       {func(n *domain.Notice) { n.DedupeKey = "" }, domain.ErrInvalidDedupeKey},
 		"a dedupe key too long":               {func(n *domain.Notice) { n.DedupeKey = strings.Repeat("k", domain.MaxDedupeKey+1) }, domain.ErrInvalidDedupeKey},
 		"no merge mode":                       {func(n *domain.Notice) { n.Merge = 0 }, domain.ErrUnknownMerge},
-		"a merge mode that does not exist":    {func(n *domain.Notice) { n.Merge = domain.Add + 1 }, domain.ErrUnknownMerge},
+		"a merge mode that does not exist":    {func(n *domain.Notice) { n.Merge = domain.Renew + 1 }, domain.ErrUnknownMerge},
 	} {
 		if err := aNotice(c.change).Validate(); !errors.Is(err, c.want) {
 			t.Errorf("%s: err = %v, want %v", label, err, c.want)
@@ -107,6 +107,8 @@ func TestEachKindIsGovernedByTheSwitchTheSettingsDraw(t *testing.T) {
 		domain.AssignmentDueSoon:  domain.EventAssignmentDueSoon,
 		domain.AssignmentExtended: domain.EventAssignmentDueSoon,
 		domain.ResultReady:        domain.EventResultReady,
+		domain.MessageReceived:    domain.EventMessageReceived,
+		domain.MessageFromTeacher: domain.EventMessageReceived,
 	} {
 		if got, governed := kind.Event(); !governed || got != want {
 			t.Errorf("%s is governed by %q (%v), want %s", kind, got, governed, want)
@@ -123,7 +125,8 @@ func TestTheContractsRoutesAreTheDomains(t *testing.T) {
 	routes := []string{
 		string(domain.RouteAssignment), string(domain.RouteAttempt), string(domain.RouteGrading),
 		string(domain.RouteClasses), string(domain.RouteResult), string(domain.RouteStudentAssignment),
-		string(domain.RouteSharedWithMe), string(domain.RouteTest),
+		string(domain.RouteSharedWithMe), string(domain.RouteTest), string(domain.RouteMessages),
+		string(domain.RouteStudentMessages),
 	}
 	slices.Sort(routes)
 	target := schema(t, "NotificationTarget")
@@ -131,9 +134,30 @@ func TestTheContractsRoutesAreTheDomains(t *testing.T) {
 		t.Errorf("the contract's routes are %v, the domain's %v", declared, routes)
 	}
 	for _, route := range routes {
-		full := domain.Target{Route: domain.Route(route), AssignmentID: someAssignment, AttemptID: someAttempt, TestID: someAssignment}
+		full := domain.Target{Route: domain.Route(route), AssignmentID: someAssignment, AttemptID: someAttempt, TestID: someAssignment,
+			StudentID: someAttempt, TeacherID: someAssignment}
 		if err := full.Validate(); err != nil {
-			t.Errorf("%s with both ids: %v", route, err)
+			t.Errorf("%s with every id but the class's: %v", route, err)
+		}
+	}
+}
+
+func TestAMessageTargetNamesItsThread(t *testing.T) {
+	for label, c := range map[string]struct {
+		target domain.Target
+		valid  bool
+	}{
+		"a teacher's thread with a student":  {domain.Target{Route: domain.RouteMessages, StudentID: someAttempt}, true},
+		"a teacher's thread with no student": {domain.Target{Route: domain.RouteMessages}, false},
+		"a student's thread with a teacher":  {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment}, true},
+		"a student's class channel":          {domain.Target{Route: domain.RouteStudentMessages, ClassID: someAssignment}, true},
+		"a student's thread with neither":    {domain.Target{Route: domain.RouteStudentMessages}, false},
+		"a student's thread with both":       {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment, ClassID: someAttempt}, false},
+		"a class id that is not a uuid":      {domain.Target{Route: domain.RouteStudentMessages, ClassID: "lop-1"}, false},
+		"a student id that is not a uuid":    {domain.Target{Route: domain.RouteMessages, StudentID: "hv-1"}, false},
+	} {
+		if err := c.target.Validate(); (err == nil) != c.valid {
+			t.Errorf("%s: err = %v, want valid %v", label, err, c.valid)
 		}
 	}
 }

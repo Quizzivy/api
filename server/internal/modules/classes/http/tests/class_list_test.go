@@ -161,11 +161,12 @@ func keysOf(t *testing.T, v any) []string {
 
 func TestAStudentsClassCarriesExactlyTheseFieldsAndNeverACountMemberOrAverage(t *testing.T) {
 	label, room, teacher, photo := "Thứ 2 · 18:00", "A1", "Cô Thương", "https://photos.example.test/t.png?X-Amz-Signature=x"
+	teacherID := uuid.NewString()
 	app := classeshttp.NewClasses(&application.Application{Queries: application.Queries{
 		ListMine: cqrs.HandlerFunc[query.ListMine, []domain.MyClass](func(context.Context, query.ListMine) ([]domain.MyClass, error) {
 			return []domain.MyClass{
-				{ID: uuid.NewString(), Name: "Lớp đầy đủ", TeacherName: &teacher, TeacherAvatarURL: &photo, ScheduleLabel: &label, Room: &room, JoinedAt: time.Now()},
-				{ID: uuid.NewString(), Name: "Lớp trống", JoinedAt: time.Now()},
+				{ID: uuid.NewString(), Name: "Lớp đầy đủ", TeacherID: teacherID, TeacherName: &teacher, TeacherAvatarURL: &photo, ScheduleLabel: &label, Room: &room, JoinedAt: time.Now()},
+				{ID: uuid.NewString(), Name: "Lớp trống", TeacherID: teacherID, JoinedAt: time.Now()},
 			}, nil
 		}),
 	}})
@@ -174,10 +175,13 @@ func TestAStudentsClassCarriesExactlyTheseFieldsAndNeverACountMemberOrAverage(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherName"}
+	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
 	for i, item := range response.(openapi.ListMyClasses200JSONResponse).Items {
 		if got := keysOf(t, item); !slices.Equal(got, want) {
 			t.Errorf("item %d carries %v, want exactly %v: a student's class holds no count, roster, code or average, and a missing value is null, not absent", i, got, want)
+		}
+		if item.TeacherId == nil || item.TeacherId.String() != teacherID {
+			t.Errorf("item %d names the teacher %v, want %s, whose thread the card opens", i, item.TeacherId, teacherID)
 		}
 	}
 	for _, banned := range []string{"studentCount", "openAssignmentCount", "members", "joinCode", "averageScore", "selfJoinEnabled", "archivedAt", "createdAt"} {
@@ -217,7 +221,7 @@ func TestTheListRowRepeatsEveryPropertyOfAClass(t *testing.T) {
 	if class, row := names("Class"), names("ClassListItem"); !slices.Equal(class, row) {
 		t.Errorf("Class has %v and ClassListItem %v: the row repeats the class so that no other response carries a readable code, and the two lists must stay the same", class, row)
 	}
-	if my := names("MyClass"); !slices.Equal(my, []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherName"}) {
+	if my := names("MyClass"); !slices.Equal(my, []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}) {
 		t.Errorf("MyClass declares %v", my)
 	}
 	class, row := spec.Components.Schemas["Class"].Value, spec.Components.Schemas["ClassListItem"].Value

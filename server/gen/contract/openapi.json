@@ -7,7 +7,7 @@
       "name": "Thuong",
       "url": "https://github.com/SekiroKenjii/Quizzivy"
     },
-    "description": "The contract both the React SPA and the Go backend implement.\n\n**This file supersedes spec §15**, which documented an assumed surface.\nWhere they differ, this file wins and the spec gets corrected (§18).\n\nEverything else is generated from here: `oapi-codegen` produces the Go\nserver interfaces, `openapi-typescript` produces the TS types, and MSW\nfixtures are validated against these schemas. CI regenerates and fails on\ndrift. Change the contract here first, then `make gen`.\n\n`info.version` is the app release this contract ships in. It is set only in\nthe release PR, and it is the version of the `@quizzivy/sdk` package\npublished from it (`sdk/README.md`). Releases only add to the contract, so\nSDK X works with any server at X or later.\n\nNon-upload request bodies are capped at 1 MiB before schema validation;\noversized bodies receive HTTP 413 with the standard validation-error envelope.\nA body the server could not finish reading receives HTTP 408 with\n`REQUEST_INCOMPLETE`.\nMultipart media uploads retain their separate upload limits.\n\n## Reading this file\n\n- Operations with `security: []` are **public**. Spec §6.5 requires every\n  one of them to be rate-limited; the server asserts this at startup by\n  cross-referencing this file, so adding a public operation without a\n  limiter fails the process rather than shipping.\n- Paths are split by audience: `/teacher/*` is the teaching workspace,\n  `/admin/*` the Admin console, `/app/*` the student app, and `/auth/*`\n  the caller's own session. `/public/*` and `/join/*` hold open operations\n  only, and `/me/*` holds the caller's own notifications and settings,\n  whatever their role. Each\n  tree accepts only the permissions that belong to it, and the server\n  refuses to start when an operation's `x-permission` does not fit its\n  tree.\n- Every operation that requires a bearer token declares the permission it\n  needs in `x-permission`, in one of three forms:\n  - a `PermissionKey`;\n  - a pseudo-key: `self` (any signed-in user), `workspace.teacher` (any\n    `content.*`, `teaching.*` or `people.students.*` key) or\n    `workspace.admin` (`people.users.manage`, `people.roles.manage`,\n    `system.audit.read`, `system.settings.write`, `ai.credits.manage` or\n    `scope.all`);\n  - a list, met by any one of its keys. A list is used only where one\n    operation serves two matrix rows, and the server narrows the check\n    when the body decides which row applies.\n\n  An operation that does not require the bearer token (the open\n  operations, `security: []`) declares none. The server refuses to start when an\n  operation breaks this, and a hidden key (`scope.all`,\n  `system.api_reference`, `system.data_export`, `system.leads`) may appear\n  only under `/admin/`.\n- Every uuid-typed path, query or body field under `/teacher/*`, `/app/*`\n  and `/me/*`, and every key of a body map whose `propertyNames` is\n  `Uuid`, is named in its operation's `x-resource` list as\n  `{in, name, kind}`. For a body field `name` is a JSON pointer, where `-`\n  stands for every item of an array, `*` for every value of a map and `+`\n  for every key of a map.\n  `kind` is the owned resource the id names: `test`, `test-version`,\n  `section`, `question`, `version-question`, `version-recording`,\n  `question-group`, `media`, `import`, `import-source`, `class`,\n  `assignment`, `attempt`, `student`, `notification`, `override`,\n  `question-set` or `share`. A `share` is a grant (`ShareGrant.id`), which\n  its content's owner and its recipient can name. The two `version-` kinds are a\n  question and a group recording of a published version, as grading and\n  the student's autosave, events and plays name them. A section unit's\n  `id` names a question or a group, as its `kind` says, and is declared\n  as a question; the suite checks the group branch separately.\n  `kind` is `none` for an id that names no owned resource: an option, a\n  gap, a session, an idempotency key, a fresh identity the caller\n  supplies, a cursor that only marks a position in the caller's own list\n  (`before` on `listNotifications`), or an id the operation resolves only\n  inside the resource its path names, such as a group's own members on\n  `updateQuestionGroup`.\n  An `override` is named by the id of the student it is on, beside the\n  assignment in the same path: `DELETE /teacher/assignments/{id}/student-overrides/{studentId}`.\n  Every `/teacher/*` list names the kind it lists in `x-resource-list`.\n  The two-teacher isolation suite reads both: another owner's id answers\n  exactly as a missing id does.\n- Student-facing schemas are deliberately separate components from teacher\n  ones. See `StudentQuestion` for why.\n- All timestamps are RFC 3339 UTC. Rendering in `Asia/Ho_Chi_Minh` is the\n  client's job (§13.2).\n- During a maintenance window every operation except `GET /livez`,\n  `GET /healthz` and `GET /public/status` answers `503 MAINTENANCE`\n  (`components/responses/Maintenance`). The operations the client branches\n  on declare it; every other one may answer it all the same.\n"
+    "description": "The contract both the React SPA and the Go backend implement.\n\n**This file supersedes spec §15**, which documented an assumed surface.\nWhere they differ, this file wins and the spec gets corrected (§18).\n\nEverything else is generated from here: `oapi-codegen` produces the Go\nserver interfaces, `openapi-typescript` produces the TS types, and MSW\nfixtures are validated against these schemas. CI regenerates and fails on\ndrift. Change the contract here first, then `make gen`.\n\n`info.version` is the app release this contract ships in. It is set only in\nthe release PR, and it is the version of the `@quizzivy/sdk` package\npublished from it (`sdk/README.md`). Releases only add to the contract, so\nSDK X works with any server at X or later.\n\nNon-upload request bodies are capped at 1 MiB before schema validation;\noversized bodies receive HTTP 413 with the standard validation-error envelope.\nA body the server could not finish reading receives HTTP 408 with\n`REQUEST_INCOMPLETE`.\nMultipart media uploads retain their separate upload limits.\n\n## Reading this file\n\n- Operations with `security: []` are **public**. Spec §6.5 requires every\n  one of them to be rate-limited; the server asserts this at startup by\n  cross-referencing this file, so adding a public operation without a\n  limiter fails the process rather than shipping.\n- Paths are split by audience: `/teacher/*` is the teaching workspace,\n  `/admin/*` the Admin console, `/app/*` the student app, and `/auth/*`\n  the caller's own session. `/public/*` and `/join/*` hold open operations\n  only, and `/me/*` holds the caller's own notifications and settings,\n  whatever their role. Each\n  tree accepts only the permissions that belong to it, and the server\n  refuses to start when an operation's `x-permission` does not fit its\n  tree.\n- Every operation that requires a bearer token declares the permission it\n  needs in `x-permission`, in one of three forms:\n  - a `PermissionKey`;\n  - a pseudo-key: `self` (any signed-in user), `workspace.teacher` (any\n    `content.*`, `teaching.*` or `people.students.*` key) or\n    `workspace.admin` (`people.users.manage`, `people.roles.manage`,\n    `system.audit.read`, `system.settings.write`, `ai.credits.manage` or\n    `scope.all`);\n  - a list, met by any one of its keys. A list is used only where one\n    operation serves two matrix rows, and the server narrows the check\n    when the body decides which row applies.\n\n  An operation that does not require the bearer token (the open\n  operations, `security: []`) declares none. The server refuses to start when an\n  operation breaks this, and a hidden key (`scope.all`,\n  `system.api_reference`, `system.data_export`, `system.leads`) may appear\n  only under `/admin/`.\n- Every uuid-typed path, query or body field under `/teacher/*`, `/app/*`\n  and `/me/*`, and every key of a body map whose `propertyNames` is\n  `Uuid`, is named in its operation's `x-resource` list as\n  `{in, name, kind}`. For a body field `name` is a JSON pointer, where `-`\n  stands for every item of an array, `*` for every value of a map and `+`\n  for every key of a map.\n  `kind` is the owned resource the id names: `test`, `test-version`,\n  `section`, `question`, `version-question`, `version-recording`,\n  `question-group`, `media`, `import`, `import-source`, `class`,\n  `assignment`, `attempt`, `student`, `notification`, `override`,\n  `question-set`, `share`, `messaging-peer` or `attachment`. A `share` is\n  a grant (`ShareGrant.id`), which its content's owner and its recipient\n  can name. A `messaging-peer` is a student a staff member may read a\n  direct thread with: one they have a thread with, have taught, now or\n  before, or created; it outlives the class, where `student` does not.\n  An `attachment` is a message's file, named by its uploader and the\n  participants of the thread that holds it. The two `version-` kinds are a\n  question and a group recording of a published version, as grading and\n  the student's autosave, events and plays name them. A section unit's\n  `id` names a question or a group, as its `kind` says, and is declared\n  as a question; the suite checks the group branch separately.\n  `kind` is `none` for an id that names no owned resource: an option, a\n  gap, a session, an idempotency key, a fresh identity the caller\n  supplies, a cursor that only marks a position in the caller's own list\n  (`before` on `listNotifications`), or an id the operation resolves only\n  inside the resource its path names, such as a group's own members on\n  `updateQuestionGroup`.\n  An `override` is named by the id of the student it is on, beside the\n  assignment in the same path: `DELETE /teacher/assignments/{id}/student-overrides/{studentId}`.\n  Every `/teacher/*` list names the kind it lists in `x-resource-list`.\n  The two-teacher isolation suite reads both: another owner's id answers\n  exactly as a missing id does.\n- Student-facing schemas are deliberately separate components from teacher\n  ones. See `StudentQuestion` for why.\n- All timestamps are RFC 3339 UTC. Rendering in `Asia/Ho_Chi_Minh` is the\n  client's job (§13.2).\n- During a maintenance window every operation except `GET /livez`,\n  `GET /healthz` and `GET /public/status` answers `503 MAINTENANCE`\n  (`components/responses/Maintenance`). The operations the client branches\n  on declare it; every other one may answer it all the same.\n"
   },
   "servers": [
     {
@@ -44,6 +44,10 @@
     {
       "name": "teacher-sharing",
       "description": "Sharing tests and question sets with other teachers (D4): the colleague\ndirectory, grants as Can use or Can edit, and Shared with me.\n"
+    },
+    {
+      "name": "teacher-messages",
+      "description": "Class announcement channels and direct messages with students (D17).\nA direct thread is readable by its two participants only, `scope.all`\nincluded. Messages are never edited or deleted, and posting is not\naudited: the messages are the record.\n"
     },
     {
       "name": "teacher-imports",
@@ -120,6 +124,10 @@
     {
       "name": "take-test",
       "description": "Taking a test, from starting or resuming an attempt to saving answers, submitting and the integrity beacon."
+    },
+    {
+      "name": "student-messages",
+      "description": "The student's Messages, with their teachers' direct threads and their classes' announcements, read-only."
     },
     {
       "name": "me",
@@ -1924,6 +1932,8 @@
           "SHARE_READ_ONLY",
           "EDIT_CONTEXT_REQUIRED",
           "MEDIA_IN_USE_ELSEWHERE",
+          "MESSAGING_NOT_ALLOWED",
+          "ATTACHMENT_HAS_MACROS",
           "IMPORT_CONFLICT",
           "IMPORT_QUOTA_EXCEEDED",
           "IMPORT_BUSY",
@@ -4697,12 +4707,13 @@
       },
       "ReferencedBy": {
         "type": "string",
-        "description": "What still references a row whose permanent delete answered\n`RESOURCE_REFERENCED`, carried as `details.referencedBy` by\n`deleteClass` and `deleteUser`. `other` is a reference the server does\nnot name. Later releases add values; a client treats an unknown one as\n`other`.\n",
+        "description": "What still references a row whose permanent delete answered\n`RESOURCE_REFERENCED`, carried as `details.referencedBy` by\n`deleteClass` and `deleteUser`. `messages` is a class channel with posts,\nor an account's messages, threads or files. `other` is a reference the\nserver does not name. Later releases add values; a client treats an\nunknown one as `other`.\n",
         "enum": [
           "assignments",
           "attempts",
           "audit",
           "members",
+          "messages",
           "owned_content",
           "other"
         ]
@@ -5245,10 +5256,15 @@
           "lastActiveAt",
           "accountStatus",
           "classes",
-          "stats"
+          "stats",
+          "canMessage"
         ],
         "additionalProperties": false,
         "properties": {
+          "canMessage": {
+            "type": "boolean",
+            "description": "The caller may open a direct thread with this student and post in\nit (`postStaffDirectMessage` would be accepted): an existing thread,\nor a tie (a class of the caller's, now or before, or an account the\ncaller created), with the account enabled and still a student.\n`scope.all` does not widen it. The row menu's \"Send message\" reads it.\n"
+          },
           "id": {
             "$ref": "#/components/schemas/Uuid"
           },
@@ -6823,10 +6839,15 @@
           "email",
           "joinedVia",
           "joinedAt",
-          "stats"
+          "stats",
+          "canMessage"
         ],
         "additionalProperties": false,
         "properties": {
+          "canMessage": {
+            "type": "boolean",
+            "description": "As `StudentRow.canMessage`, for the caller and this member. Another teacher's class read through `scope.all` answers false for its students the caller never taught."
+          },
           "userId": {
             "$ref": "#/components/schemas/Uuid"
           },
@@ -6868,6 +6889,7 @@
           "id",
           "name",
           "description",
+          "teacherId",
           "teacherName",
           "teacherAvatarUrl",
           "scheduleLabel",
@@ -6887,6 +6909,14 @@
               "string",
               "null"
             ]
+          },
+          "teacherId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The class's own teacher, so the class card can open their thread (`getStudentDirectThread`)."
           },
           "teacherName": {
             "type": [
@@ -12206,7 +12236,8 @@
           "liveAssignments",
           "answersToGrade",
           "unreadNotifications",
-          "sharedWithMe"
+          "sharedWithMe",
+          "unreadMessages"
         ],
         "description": "Cheap nav counts in the caller's own teaching scope, for an Admin too.",
         "properties": {
@@ -12235,6 +12266,11 @@
             "type": "integer",
             "minimum": 0,
             "description": "Live grants to the caller, the muted count beside \"Shared with me\"."
+          },
+          "unreadMessages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Messages past the caller's read pointers, not counting their own, over their threads. The nav shows \"99+\" above 99."
           }
         }
       },
@@ -13839,7 +13875,7 @@
       },
       "NotificationKind": {
         "type": "string",
-        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
+        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n| `message.received` | a teacher | `senderName`, `count`, `excerpt` |\n| `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |\n\nA message item is one per reader per thread: it is written again,\nunread, with the new `count` while the thread stays unread, and marked\nread when the reader's pointer passes it. Each write gives it a new\n`id` and `createdAt`, so it lists first, and once it was read its\n`count` starts again from the next message. `excerpt` is the newest\nmessage's first 80 characters; it lives only in the reader's own bell.\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
         "enum": [
           "attempt.submitted",
           "attempt.flagged",
@@ -13856,7 +13892,9 @@
           "content.transferred",
           "class.teacher_changed",
           "content.shared",
-          "test.published_by_collaborator"
+          "test.published_by_collaborator",
+          "message.received",
+          "message.from_teacher"
         ]
       },
       "NotificationAudience": {
@@ -13869,13 +13907,14 @@
       },
       "NotificationEvent": {
         "type": "string",
-        "description": "One switch of the notification settings. `attempt.submitted`,\n`attempt.flagged` and `assignment.closing` are the teacher's;\n`assignment.due_soon` and `result.ready` the student's. A switch\ngoverns the kind of the same name, and `assignment.due_soon` also\ngoverns `assignment.opened` and `assignment.extended`. `class.joined`\n`join_codes.rotated`, `class.teacher_changed`, `content.shared` and\n`test.published_by_collaborator` have no switch: the sharer's \"Send a\nnotification\" decides the first, and the owner always hears of the\nsecond.\n",
+        "description": "One switch of the notification settings. `attempt.submitted`,\n`attempt.flagged` and `assignment.closing` are the teacher's;\n`assignment.due_soon` and `result.ready` the student's;\n`message.received` both (\"New message\" for a teacher, \"Messages from\nteachers\" for a student). A switch governs the kind of the same name,\n`assignment.due_soon` also governs `assignment.opened` and\n`assignment.extended`, and `message.received` also governs\n`message.from_teacher`. `class.joined`\n`join_codes.rotated`, `class.teacher_changed`, `content.shared` and\n`test.published_by_collaborator` have no switch: the sharer's \"Send a\nnotification\" decides the first, and the owner always hears of the\nsecond.\n",
         "enum": [
           "attempt.submitted",
           "attempt.flagged",
           "assignment.closing",
           "assignment.due_soon",
-          "result.ready"
+          "result.ready",
+          "message.received"
         ]
       },
       "NotificationParams": {
@@ -13995,6 +14034,18 @@
             "type": "integer",
             "minimum": 1,
             "description": "The version a co-editor published."
+          },
+          "senderName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Who wrote the newest message (`message.*`)."
+          },
+          "excerpt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The newest message's first 80 characters, or its file's name (`message.*`)."
           }
         }
       },
@@ -14008,7 +14059,7 @@
         "properties": {
           "route": {
             "type": "string",
-            "description": "`assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`\nand `test` are pages of the teaching workspace; `result` and\n`studentAssignment` are the student's result and the student's\npage of an assignment.\n",
+            "description": "`assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`,\n`test` and `messages` are pages of the teaching workspace;\n`result`, `studentAssignment` and `studentMessages` are the\nstudent's result, the student's page of an assignment and the\nstudent's Messages.\n",
             "enum": [
               "assignment",
               "attempt",
@@ -14017,7 +14068,9 @@
               "result",
               "studentAssignment",
               "sharedWithMe",
-              "test"
+              "test",
+              "messages",
+              "studentMessages"
             ]
           },
           "assignmentId": {
@@ -14029,6 +14082,18 @@
           "testId": {
             "$ref": "#/components/schemas/Uuid",
             "description": "Present for `test`."
+          },
+          "studentId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "`messages`: the direct thread with this student."
+          },
+          "teacherId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "`studentMessages`: the direct thread with this teacher."
+          },
+          "classId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "`studentMessages`: the channel of this class."
           }
         }
       },
@@ -14102,8 +14167,8 @@
       "NotificationPreferences": {
         "type": "array",
         "description": "Every `NotificationEvent` once. The server answers them in the enum's order.",
-        "minItems": 5,
-        "maxItems": 5,
+        "minItems": 6,
+        "maxItems": 6,
         "items": {
           "$ref": "#/components/schemas/NotificationPreference"
         }
@@ -14112,13 +14177,840 @@
         "type": "object",
         "description": "What the caller's shell shows before any page is open.",
         "required": [
-          "unreadNotifications"
+          "unreadNotifications",
+          "unreadMessages"
         ],
         "additionalProperties": false,
         "properties": {
           "unreadNotifications": {
             "type": "integer",
             "minimum": 0
+          },
+          "unreadMessages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "A student's unread messages over their threads (the top bar's Messages button); 0 for staff, whose count is `TeacherSummary.unreadMessages`."
+          }
+        }
+      },
+      "MessageAttachment": {
+        "type": "object",
+        "description": "A file a staff member attached (D17): PDF, Word (DOCX or DOC), PNG,\nJPEG, MP3 or M4A, at most 20 MiB, typed by sniffing its content. It is\nfetched through a five-minute signed URL that downloads it under\n`filename`.\n",
+        "required": [
+          "id",
+          "filename",
+          "bytes",
+          "mimeType"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20971520
+          },
+          "mimeType": {
+            "type": "string",
+            "enum": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "application/msword",
+              "image/png",
+              "image/jpeg",
+              "audio/mpeg",
+              "audio/mp4"
+            ]
+          }
+        }
+      },
+      "AttachmentUrl": {
+        "type": "object",
+        "required": [
+          "url",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "A presigned GET valid five minutes that downloads the file as an attachment under its filename, with its sniffed type."
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      },
+      "MessagePreview": {
+        "type": "object",
+        "description": "The newest message of a thread, as a row of the list shows it. The\nclient words \"Attachment · {filename}\" from `attachmentName` when\n`text` is null.\n",
+        "required": [
+          "text",
+          "attachmentName",
+          "mine"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120,
+            "description": "The body's first 120 characters, on one line."
+          },
+          "attachmentName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mine": {
+            "type": "boolean",
+            "description": "The caller sent it."
+          }
+        }
+      },
+      "StaffThreadRef": {
+        "type": "object",
+        "description": "Which thread a row opens. A class channel names its class, a direct thread its student.",
+        "required": [
+          "kind",
+          "classId",
+          "studentId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "class",
+              "direct"
+            ]
+          },
+          "classId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "studentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StaffThread": {
+        "type": "object",
+        "description": "A row of the staff Messages list. A class row's `title` is the class's\nname and `studentCount` its active students. A direct row's `title` is\nthe student's name and `classNames` the caller's classes the student\nis in: empty, with `former`, when the student was in one of the\ncaller's classes and is in none now (\"Former student\"). A `candidate`\nis a student the caller may write to and has no thread with yet,\nlisted only for a search: nothing exists until the first post.\n",
+        "required": [
+          "thread",
+          "title",
+          "avatarUrl",
+          "classNames",
+          "studentCount",
+          "former",
+          "candidate",
+          "disabled",
+          "lastMessageAt",
+          "preview",
+          "unread"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "thread": {
+            "$ref": "#/components/schemas/StaffThreadRef"
+          },
+          "title": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A direct row's student photo, a presigned GET valid 24 hours; `null` for a class or when there is none."
+          },
+          "classNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "studentCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "A class row's active students; `null` on a direct row."
+          },
+          "former": {
+            "type": "boolean"
+          },
+          "candidate": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "A direct row's student account is disabled."
+          },
+          "lastMessageAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`null` for a class channel nobody has posted in, and for a candidate."
+          },
+          "preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessagePreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Messages past the caller's read pointer, not counting their own."
+          }
+        }
+      },
+      "MessageSender": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "avatarUrl"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StaffMessageSender": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "avatarUrl",
+          "side"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "staff",
+              "student"
+            ]
+          }
+        }
+      },
+      "SeenBy": {
+        "type": "object",
+        "description": "An announcement's \"Seen by {seen} of {of}\": `of` counts the class's active students now, and `seen` those whose read pointer has passed the post.",
+        "required": [
+          "seen",
+          "of"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "seen": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "of": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StaffMessage": {
+        "type": "object",
+        "description": "A message as staff read it. Messages are never edited or deleted.",
+        "required": [
+          "id",
+          "sender",
+          "body",
+          "attachment",
+          "createdAt",
+          "mine"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/StaffMessageSender"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text. A client renders it as text and links http(s) addresses; never HTML."
+          },
+          "attachment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageAttachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "seenBy": {
+            "$ref": "#/components/schemas/SeenBy",
+            "description": "Present on a class channel's posts only."
+          }
+        }
+      },
+      "StudentMessage": {
+        "type": "object",
+        "description": "A message as a student reads it: its own schema, never a projection\nof `StaffMessage` (D17, DG-91). It carries no read receipts, no member\ncount and no attempt events.\n",
+        "required": [
+          "id",
+          "sender",
+          "body",
+          "attachment",
+          "createdAt",
+          "mine"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/MessageSender"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attachment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageAttachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ContextEvent": {
+        "type": "object",
+        "description": "A flagged attempt of the thread's student on an assignment the reader\ncan read, shown in the stream as a card at `at`. Computed when the\nthread is read, never stored as a message, and never unread.\n",
+        "required": [
+          "attemptId",
+          "assignmentId",
+          "title",
+          "focusLost",
+          "at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "assignmentId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "title": {
+            "type": "string",
+            "description": "The test's title."
+          },
+          "focusLost": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      },
+      "StaffDirectThreadPeer": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "avatarUrl",
+          "classes",
+          "former",
+          "disabled",
+          "canPost"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classes": {
+            "type": "array",
+            "description": "The caller's classes the student is in now, for Details.",
+            "items": {
+              "$ref": "#/components/schemas/PersonRef"
+            }
+          },
+          "former": {
+            "type": "boolean",
+            "description": "The student was in a class of the caller's and is in none now."
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "canPost": {
+            "type": "boolean",
+            "description": "A post would be accepted. False when the account is disabled or no longer a student; the composer then gives way to a sentence."
+          }
+        }
+      },
+      "StaffDirectThread": {
+        "type": "object",
+        "required": [
+          "student",
+          "messages",
+          "contextEvents",
+          "nextBefore",
+          "latestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StaffDirectThreadPeer"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/StaffMessage"
+            }
+          },
+          "contextEvents": {
+            "type": "array",
+            "description": "The student's flagged attempts from 24 hours before the thread's first message, oldest first. Empty while the thread has no message.",
+            "items": {
+              "$ref": "#/components/schemas/ContextEvent"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "latestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StaffClassThreadClass": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "archived",
+          "studentCount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "An archived class's channel stays readable and takes no post."
+          },
+          "studentCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Active students, \"Sent to all {n} students\"."
+          }
+        }
+      },
+      "StaffClassThread": {
+        "type": "object",
+        "required": [
+          "class",
+          "messages",
+          "nextBefore",
+          "latestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "$ref": "#/components/schemas/StaffClassThreadClass"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Oldest first, each with `seenBy`.",
+            "items": {
+              "$ref": "#/components/schemas/StaffMessage"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "latestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StaffMessagePost": {
+        "type": "object",
+        "description": "A message is text, a file, or both; one of the two is required.",
+        "required": [
+          "clientId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "Made by the client for this message. Sending it again returns the message it made, so a retried send never posts twice."
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Trimmed; empty is none."
+          },
+          "attachmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file the caller uploaded with `uploadMessageAttachment` and has not sent."
+          }
+        }
+      },
+      "StudentMessagePost": {
+        "type": "object",
+        "required": [
+          "clientId",
+          "body"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Trimmed. Students send text only."
+          }
+        }
+      },
+      "MessageReadPointer": {
+        "type": "object",
+        "required": [
+          "lastReadMessageId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "lastReadMessageId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "The newest message on the reader's screen. The pointer only moves forward; an older id is a no-op."
+          }
+        }
+      },
+      "StudentThreadRef": {
+        "type": "object",
+        "required": [
+          "kind",
+          "classId",
+          "teacherId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "class",
+              "direct"
+            ]
+          },
+          "classId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "teacherId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StudentThread": {
+        "type": "object",
+        "description": "A row of the student's Messages. A direct row's `title` is the\nteacher's name and `classNames` the student's classes they teach that\nare not archived (\"Your teacher · {classes}\"). It is empty with\n`former` when the teacher taught the student and teaches them in no\nsuch class now, having left them all or seen them archived (\"Former\nteacher\"). It is empty without `former` when the staff member never\ntaught the student (one who created the student's account and wrote\nfirst): the subtitle is then \"Your teacher\" alone, with no \" · \" and\nnothing after it. A class row is a channel with at least one post\n(\"Class announcements\"), titled with the class's name.\n",
+        "required": [
+          "thread",
+          "title",
+          "avatarUrl",
+          "classNames",
+          "former",
+          "lastMessageAt",
+          "preview",
+          "unread"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "thread": {
+            "$ref": "#/components/schemas/StudentThreadRef"
+          },
+          "title": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "former": {
+            "type": "boolean"
+          },
+          "lastMessageAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessagePreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StudentDirectThreadTeacher": {
+        "type": "object",
+        "description": "The thread's header. `classNames` and `former` read as they do on the\nthread's `StudentThread` row: \"Your teacher · {classes}\", \"Former\nteacher\", or \"Your teacher\" alone when both are empty and false.\n",
+        "required": [
+          "id",
+          "name",
+          "avatarUrl",
+          "classNames",
+          "former",
+          "canPost"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "former": {
+            "type": "boolean"
+          },
+          "canPost": {
+            "type": "boolean",
+            "description": "A post would be accepted."
+          }
+        }
+      },
+      "StudentDirectThread": {
+        "type": "object",
+        "required": [
+          "teacher",
+          "messages",
+          "nextBefore",
+          "latestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "teacher": {
+            "$ref": "#/components/schemas/StudentDirectThreadTeacher"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/StudentMessage"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "latestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StudentClassThread": {
+        "type": "object",
+        "description": "A class channel, read-only for students: \"Only your teacher can post here. Reply to {teacher} directly.\"",
+        "required": [
+          "readOnly",
+          "class",
+          "teacher",
+          "messages",
+          "nextBefore",
+          "latestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "readOnly": {
+            "type": "boolean",
+            "const": true
+          },
+          "class": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "teacher": {
+            "$ref": "#/components/schemas/MessageSender"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/StudentMessage"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "latestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -20318,6 +21210,665 @@
         }
       }
     },
+    "/teacher/messages/threads": {
+      "get": {
+        "operationId": "listStaffThreads",
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "The staff Messages list",
+        "description": "Every class channel of a class the caller can read and that is not\narchived, posted in or not, and the caller's direct threads, newest\nactivity first (a channel nobody has posted in sorts last, by name).\nA direct thread is readable by its two participants only; `scope.all`\nopens none (D17, DG-08).\n\n`q` matches the student's and the class's names, accent-insensitively.\nWith `q`, the answer also lists, after the threads, up to 20 students\nthe caller may start a thread with and has none with, as\n`candidate` rows.\n\nThe rows are under `threads`, not `items`: they mix two kinds, and a\nstudent two teachers teach is rightly in both teachers' lists.\n",
+        "parameters": [
+          {
+            "name": "tab",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "direct",
+                "classes"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "threads"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "threads": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StaffThread"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/teacher/messages/students/{studentId}": {
+      "parameters": [
+        {
+          "name": "studentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStaffDirectThread",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "studentId",
+            "kind": "messaging-peer"
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "kind": "none"
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "description": "The caller's direct thread with a student, empty until the first\npost. `studentId` is a `messaging-peer`: a student the caller has a\nthread with, has taught (now or before), or created. Any other id\nanswers 404, an admin's included, and so does the thread of another\nstaff member with the same student.\n",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Older than this message, the page `nextBefore` gave.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Newer than this message, for the open thread's poll. Not with `before`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDirectThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postStaffDirectMessage",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "studentId",
+            "kind": "messaging-peer"
+          },
+          {
+            "in": "body",
+            "name": "/clientId",
+            "kind": "none"
+          },
+          {
+            "in": "body",
+            "name": "/attachmentId",
+            "kind": "attachment"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Write to a student",
+        "description": "The first post makes the thread. A thread that exists stays open to\nboth of its participants after the student leaves the caller's\nclasses. Writing first needs a tie: the student is, or was, in a\nclass of the caller's, or the caller created the account; and the\nstudent must be enabled and still a student. Not audited (D17).\n\nLimited to 30 a minute and 500 a day per staff member.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffMessagePost"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`clientId` repeats: the message it made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`MESSAGING_NOT_ALLOWED` — a messaging peer whose account is disabled or no longer a student. The thread stays readable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/teacher/messages/students/{studentId}/read": {
+      "parameters": [
+        {
+          "name": "studentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "markStaffDirectThreadRead",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "studentId",
+            "kind": "messaging-peer"
+          },
+          {
+            "in": "body",
+            "name": "/lastReadMessageId",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Move the caller's read pointer in a direct thread",
+        "description": "The pointer only moves forward. `lastReadMessageId` is checked\nagainst the thread, so it names no resource of its own.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReadPointer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the message is not in this thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teacher/messages/classes/{classId}": {
+      "parameters": [
+        {
+          "name": "classId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStaffClassThread",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "classId",
+            "kind": "class"
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "kind": "none"
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "description": "A class's announcement channel, for anyone who can read the class\n(its teacher, or `scope.all`). Each post carries `seenBy`.\n",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Older than this message, the page `nextBefore` gave.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Newer than this message, for the open thread's poll. Not with `before`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffClassThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postClassAnnouncement",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "classId",
+            "kind": "class"
+          },
+          {
+            "in": "body",
+            "name": "/clientId",
+            "kind": "none"
+          },
+          {
+            "in": "body",
+            "name": "/attachmentId",
+            "kind": "attachment"
+          }
+        ],
+        "x-permission": "teaching.classes.write",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Post an announcement to a class",
+        "description": "Reaches every active student of the class; replies come back as\ndirect messages. An announcement can be neither edited nor deleted.\nNot audited (D17).\n\nLimited to 30 a minute and 500 a day per staff member.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffMessagePost"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`clientId` repeats: the message it made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Posted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`CLASS_ARCHIVED` — restore the class first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/teacher/messages/classes/{classId}/read": {
+      "parameters": [
+        {
+          "name": "classId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "markStaffClassThreadRead",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "classId",
+            "kind": "class"
+          },
+          {
+            "in": "body",
+            "name": "/lastReadMessageId",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Move the caller's read pointer in a class channel",
+        "description": "The pointer only moves forward. `lastReadMessageId` is checked\nagainst the thread, so it names no resource of its own.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReadPointer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the message is not in this thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teacher/messages/attachments": {
+      "post": {
+        "operationId": "uploadMessageAttachment",
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Upload a file to send in a message",
+        "description": "The file waits, unsent, until a post names it; one left unsent for 24\nhours is removed. The type comes from sniffing the content, never\nfrom the part's `Content-Type` or the extension: PDF, Word (DOCX or\nDOC), PNG, JPEG, MP3 or M4A. WebP is refused. An image's header must\ndeclare at most 10000 × 10000 pixels; nothing is decoded further, and\nthe file is kept as it came. A Word file is never opened or\nconverted on the server, and one that carries macros is refused.\n`filename` is the part's name with any path dropped, at most 200\ncharacters, and ending in an extension of the sniffed type:\n`report` that holds a PDF is stored as `report.pdf`, and\n`bai-tap.exe` as `bai-tap.exe.pdf`, so a downloaded file opens as\nwhat it is.\n\nLimited to 20 an hour per staff member.\n",
+        "x-max-body-bytes": 21037056,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored, not yet sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageAttachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "`MEDIA_TOO_LARGE` — over 20 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`MEDIA_TYPE_UNSUPPORTED` — not one of the accepted types (a WebP,\na spreadsheet, a ZIP named `.docx`). `IMAGE_DIMENSIONS` — an image\nlarger than 10000 × 10000. `ATTACHMENT_HAS_MACROS` — a Word file\nwith macros (a DOCM, or a DOC with a `Macros` storage): save it\nwithout them and attach it again.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/teacher/messages/attachments/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/IdPath"
+        }
+      ],
+      "get": {
+        "operationId": "getStaffMessageAttachmentUrl",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "id",
+            "kind": "attachment"
+          }
+        ],
+        "x-permission": "workspace.teacher",
+        "tags": [
+          "teacher-messages"
+        ],
+        "summary": "Mint the download URL of a message's file",
+        "description": "For the participants of the thread whose message holds the file (a\ndirect thread's staff member and student, and a class channel's\nreaders: staff whose class scope reaches the class, and its\ncurrent members), and its uploader before it is sent. Anyone\nelse gets 404, as for a missing id: an admin on a direct\nmessage's file included, whom `scope.all` does not let into the\nthread. The URL is a credential, so the answer is not stored.\n",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "description": "`private, no-store`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentUrl"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/teacher/imports": {
       "post": {
         "operationId": "createWordImport",
@@ -24583,7 +26134,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`RESOURCE_NOT_ARCHIVED` — the account is not disabled.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an individual assignment target, or an assignment it\ncreated), `attempts`, `audit` (audit history it acted in),\n`owned_content` (tests, questions, question groups, media, classes,\njoin codes, published versions or Word imports it owns or created),\nor `other`.\n",
+            "description": "`RESOURCE_NOT_ARCHIVED` — the account is not disabled.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an individual assignment target, or an assignment it\ncreated), `attempts`, `audit` (audit history it acted in),\n`owned_content` (tests, questions, question groups, media, classes,\njoin codes, published versions or Word imports it owns or created),\n`messages` (a message it sent, a thread it is in, a file it\nuploaded), or `other`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -26595,7 +28146,7 @@
           "admin-exports"
         ],
         "summary": "Ask for a full export of the centre's data",
-        "description": "Queues one export for the worker and answers at once. It builds a ZIP\nof `users.csv` (no password hashes or tokens), `roles.csv`,\n`classes.csv` (no join codes), `class_members.csv`, `tests.csv`,\n`test_versions.csv`, `assignments.csv`, `attempts.csv`, with\n`answers.csv` when `includeAnswers` is true, and a `README.txt` in\nVietnamese and English that describes each file. Every CSV is UTF-8\nwith a byte-order mark and CRLF line ends, and a cell that a\nspreadsheet would run as a formula is written with a leading `'`.\n\nOnly one export runs at a time for the whole centre: while any is\nqueued or running, another request answers `409 EXPORT_IN_PROGRESS`.\nWhen the file is ready the requester gets an email that links to the\napp page `/admin/exports/{id}`, never to the file. The file can be\nfetched up to three times, by the requester, within 24 hours\n(`downloadDataExport`).\nThe request is audited as `data_export.requested`. A caller who has an\nexport from the last hour that has not failed (queued, running, ready\nor fetched) is refused with `429 RATE_LIMITED` and `Retry-After`, the\nseconds until that export is an hour old. A failed export, a request\nrefused with `409` and a request refused with `429` do not count.\nWithout object storage and the worker the answer is `501 EXPORT_OFF`.\n",
+        "description": "Queues one export for the worker and answers at once. It builds a ZIP\nof `users.csv` (no password hashes or tokens), `roles.csv`,\n`classes.csv` (no join codes), `class_members.csv`, `tests.csv`,\n`test_versions.csv`, `assignments.csv`, `attempts.csv`, `leads.csv`,\n`messages_summary.csv` (one row per conversation: its kind, class or\ntwo participants, message count and first and last message times,\nnever a message's text, a file's name or an attachment), with\n`answers.csv` when `includeAnswers` is true, and a `README.txt` in\nVietnamese and English that describes each file. Every CSV is UTF-8\nwith a byte-order mark and CRLF line ends, and a cell that a\nspreadsheet would run as a formula is written with a leading `'`.\n\nOnly one export runs at a time for the whole centre: while any is\nqueued or running, another request answers `409 EXPORT_IN_PROGRESS`.\nWhen the file is ready the requester gets an email that links to the\napp page `/admin/exports/{id}`, never to the file. The file can be\nfetched up to three times, by the requester, within 24 hours\n(`downloadDataExport`).\nThe request is audited as `data_export.requested`. A caller who has an\nexport from the last hour that has not failed (queued, running, ready\nor fetched) is refused with `429 RATE_LIMITED` and `Retry-After`, the\nseconds until that export is an hour old. A failed export, a request\nrefused with `409` and a request refused with `429` do not count.\nWithout object storage and the worker the answer is `501 EXPORT_OFF`.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -27521,7 +29072,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`RESOURCE_NOT_ARCHIVED` — the class is not archived.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an assignment targets the class), `members` (a\nmembership in another class came through one of its join codes),\nor `other`.\n",
+            "description": "`RESOURCE_NOT_ARCHIVED` — the class is not archived.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an assignment targets the class), `members` (a\nmembership in another class came through one of its join codes),\n`messages` (its announcement channel has posts), or `other`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -29699,6 +31250,476 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/app/messages/threads": {
+      "get": {
+        "operationId": "listStudentThreads",
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "summary": "The student's Messages list",
+        "description": "The student's direct threads, and the channels of the classes they\nare in, not archived, that have at least one post, newest first. An\narchived class's channel stays readable by its members\n(`getStudentClassThread`) and is not listed.\n",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "threads"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "threads": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StudentThread"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/app/messages/teachers/{teacherId}": {
+      "parameters": [
+        {
+          "name": "teacherId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStudentDirectThread",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "teacherId",
+            "kind": "none"
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "kind": "none"
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "description": "The student's thread with a teacher: one who teaches a class the\nstudent is in that is not archived, or one they already have a\nthread with. `teacherId`\nis a user id whose eligibility the operation checks (not an owned\nresource); any other id answers 404.\n",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Older than this message, the page `nextBefore` gave.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Newer than this message, for the open thread's poll. Not with `before`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentDirectThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postStudentDirectMessage",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "teacherId",
+            "kind": "none"
+          },
+          {
+            "in": "body",
+            "name": "/clientId",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "summary": "Write to a teacher",
+        "description": "Text only. A student may write first to the teacher of a class they\nare in that is not archived, and goes on writing in a thread that\nexists after leaving the class or after the class is archived; they\ncannot write first to a teacher of a class they left, or of a class\nthat is archived.\n\nLimited to 10 a minute and 200 a day per student.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentMessagePost"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`clientId` repeats: the message it made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`MESSAGING_NOT_ALLOWED` — the teacher's account is disabled or no longer staff, or the caller's is no longer a student. The thread stays readable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the body is blank once trimmed (`details.body`), or `clientId` already made a message in another thread (`details.clientId`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/app/messages/teachers/{teacherId}/read": {
+      "parameters": [
+        {
+          "name": "teacherId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "markStudentDirectThreadRead",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "teacherId",
+            "kind": "none"
+          },
+          {
+            "in": "body",
+            "name": "/lastReadMessageId",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "summary": "Move the caller's read pointer in a direct thread",
+        "description": "The pointer only moves forward. `lastReadMessageId` is checked\nagainst the thread, so it names no resource of its own.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReadPointer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the message is not in this thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/app/messages/classes/{classId}": {
+      "parameters": [
+        {
+          "name": "classId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getStudentClassThread",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "classId",
+            "kind": "class"
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "kind": "none"
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "description": "The announcements of a class the student is in, archived or not.\nRead-only: there is no post operation on this path, so a `POST`\nanswers 405, and the channel's post operation,\n`postClassAnnouncement`, answers a student 403.\n",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Older than this message, the page `nextBefore` gave.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Newer than this message, for the open thread's poll. Not with `before`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentClassThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/app/messages/classes/{classId}/read": {
+      "parameters": [
+        {
+          "name": "classId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "markStudentClassThreadRead",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "classId",
+            "kind": "class"
+          },
+          {
+            "in": "body",
+            "name": "/lastReadMessageId",
+            "kind": "none"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "summary": "Move the caller's read pointer in a class channel",
+        "description": "The pointer only moves forward. `lastReadMessageId` is checked\nagainst the thread, so it names no resource of its own.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReadPointer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`VALIDATION_FAILED` — the message is not in this thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/app/messages/attachments/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/IdPath"
+        }
+      ],
+      "get": {
+        "operationId": "getStudentMessageAttachmentUrl",
+        "x-resource": [
+          {
+            "in": "path",
+            "name": "id",
+            "kind": "attachment"
+          }
+        ],
+        "x-permission": "learning.take_tests",
+        "tags": [
+          "student-messages"
+        ],
+        "summary": "Mint the download URL of a message's file",
+        "description": "For the participants of the thread whose message holds the file (a\ndirect thread's staff member and student, and a class channel's\nreaders: staff whose class scope reaches the class, and its\ncurrent members), and its uploader before it is sent. Anyone\nelse gets 404, as for a missing id: an admin on a direct\nmessage's file included, whom `scope.all` does not let into the\nthread. The URL is a credential, so the answer is not stored.\n",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "description": "`private, no-store`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentUrl"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

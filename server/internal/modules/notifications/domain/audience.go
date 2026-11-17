@@ -13,8 +13,8 @@ const (
 )
 
 var kindsByAudience = map[Audience][]Kind{
-	AudienceTeacher: {AttemptSubmitted, AttemptFlagged, AssignmentClosing, ClassJoined, JoinCodesRotated, AIAllowanceWarning, AICreditRequest, AICreditRequestDecided, ContentTransferred, ClassTeacherChanged, ContentShared, TestPublishedByCollaborator},
-	AudienceStudent: {AssignmentOpened, AssignmentDueSoon, AssignmentExtended, ResultReady},
+	AudienceTeacher: {AttemptSubmitted, AttemptFlagged, AssignmentClosing, ClassJoined, JoinCodesRotated, AIAllowanceWarning, AICreditRequest, AICreditRequestDecided, ContentTransferred, ClassTeacherChanged, ContentShared, TestPublishedByCollaborator, MessageReceived},
+	AudienceStudent: {AssignmentOpened, AssignmentDueSoon, AssignmentExtended, ResultReady, MessageFromTeacher},
 }
 
 // Valid reports whether a is one of the two consoles or empty.

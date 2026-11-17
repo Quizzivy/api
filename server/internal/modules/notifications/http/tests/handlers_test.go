@@ -187,7 +187,7 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		Queries: application.Queries{
 			Summary: cqrs.HandlerFunc[query.Summary, domain.Summary](func(_ context.Context, q query.Summary) (domain.Summary, error) {
 				summarised = q
-				return domain.Summary{UnreadNotifications: 4}, nil
+				return domain.Summary{UnreadNotifications: 4, UnreadMessages: 2}, nil
 			}),
 			Preferences: cqrs.HandlerFunc[query.Preferences, []domain.Preference](func(_ context.Context, q query.Preferences) ([]domain.Preference, error) {
 				read = q
@@ -209,13 +209,13 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		}
 		return out.VisitGetMySummaryResponse(w)
 	})
-	if got := summary.Body.String(); got != `{"unreadNotifications":4}`+"\n" || summarised.UserID != caller {
-		t.Errorf("the summary is %s for %q", got, summarised.UserID)
+	if got := summary.Body.String(); got != `{"unreadMessages":2,"unreadNotifications":4}`+"\n" || summarised.UserID != caller || !summarised.Messages {
+		t.Errorf("the summary is %s for %+v, want the caller's, with their messages", got, summarised)
 	}
 
 	const switches = `[{"email":false,"event":"attempt.submitted","inApp":true},{"email":true,"event":"attempt.flagged","inApp":false},` +
 		`{"email":false,"event":"assignment.closing","inApp":true},{"email":false,"event":"assignment.due_soon","inApp":true},` +
-		`{"email":false,"event":"result.ready","inApp":true}]` + "\n"
+		`{"email":false,"event":"result.ready","inApp":true},{"email":false,"event":"message.received","inApp":true}]` + "\n"
 	preferences := answered(t, "", func(ctx context.Context, w http.ResponseWriter) error {
 		out, err := transport.GetNotificationPreferences(ctx, openapi.GetNotificationPreferencesRequestObject{})
 		if err != nil {
@@ -249,7 +249,7 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		t.Errorf("saving answered %d %s, want the stored switches", updated.Code, updated.Body.String())
 	}
 	if saved.UserID != caller || !slices.Equal(saved.Preferences, stored) {
-		t.Errorf("the command was %+v, want the caller's five switches as sent", saved)
+		t.Errorf("the command was %+v, want the caller's six switches as sent", saved)
 	}
 }
 

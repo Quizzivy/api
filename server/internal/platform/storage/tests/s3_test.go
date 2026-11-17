@@ -217,3 +217,60 @@ func TestListReturnsTheObjectsUnderAPrefixInKeyOrderUpToTheLimit(t *testing.T) {
 		t.Error("a limit of 0 was accepted")
 	}
 }
+
+func TestListAfterStartsPastTheKeyItNames(t *testing.T) {
+	client := newClient(t)
+	ctx := context.Background()
+	prefix := "test-list-after/" + testKey(t) + "/"
+	for _, name := range []string{"a", "b", "c"} {
+		key := prefix + name
+		if err := client.Put(ctx, key, "application/octet-stream", strings.NewReader("x"), 1); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Delete(context.Background(), key) })
+	}
+	after, err := client.ListAfter(ctx, prefix, prefix+"a", 10)
+	if err != nil || len(after) != 2 || after[0].Key != prefix+"b" || after[1].Key != prefix+"c" {
+		t.Fatalf("listed %+v (%v) after a, want b and c", after, err)
+	}
+	if rest, err := client.ListAfter(ctx, prefix, prefix+"c", 10); err != nil || len(rest) != 0 {
+		t.Errorf("listed %+v (%v) after the last key, want none", rest, err)
+	}
+}
+
+func TestAnAttachmentURLDownloadsUnderItsNameAndType(t *testing.T) {
+	client := newClient(t)
+	ctx := context.Background()
+	key := testKey(t)
+	payload := []byte("%PDF-1.4 synthetic")
+	if err := client.Put(ctx, key, "application/pdf", bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Delete(context.Background(), key) })
+	name := `Bài tập "tuần 3"; lớp 7B.pdf`
+	signed, err := client.SignedAttachmentURL(ctx, key, name, "application/pdf", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.Get(signed)
+	if err != nil {
+		t.Fatal("attachment download request failed")
+	}
+	defer response.Body.Close()
+	disposition := response.Header.Get("Content-Disposition")
+	kind, params, err := mime.ParseMediaType(disposition)
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/pdf" || err != nil || kind != "attachment" || params["filename"] != name {
+		t.Fatalf("attachment download headers: status=%d type=%s disposition=%q (%v)", response.StatusCode, response.Header.Get("Content-Type"), disposition, err)
+	}
+	if !strings.HasPrefix(disposition, "attachment; filename*=UTF-8''") {
+		t.Errorf("disposition %q, want the RFC 8187 form", disposition)
+	}
+}
+
+func TestAttachmentDispositionEncodesEverythingOutsideAttrChar(t *testing.T) {
+	got := storage.AttachmentDisposition("Đề 1 (bản sửa);\"x\".docx")
+	want := "attachment; filename*=UTF-8''%C4%90%E1%BB%81%201%20%28b%E1%BA%A3n%20s%E1%BB%ADa%29%3B%22x%22.docx"
+	if got != want {
+		t.Errorf("disposition %q, want %q", got, want)
+	}
+}

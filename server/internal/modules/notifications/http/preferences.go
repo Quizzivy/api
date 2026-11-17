@@ -15,7 +15,7 @@ import (
 const eventField = "event"
 
 // GetNotificationPreferences implements GET /me/notification-preferences:
-// the caller's five switches, a default for each one never saved.
+// the caller's six switches, a default for each one never saved.
 func (h Notifications) GetNotificationPreferences(ctx context.Context, _ openapi.GetNotificationPreferencesRequestObject) (openapi.GetNotificationPreferencesResponseObject, error) {
 	userID, ok := h.caller(ctx)
 	if !ok {
@@ -29,7 +29,7 @@ func (h Notifications) GetNotificationPreferences(ctx context.Context, _ openapi
 }
 
 // UpdateNotificationPreferences implements PUT /me/notification-preferences.
-// The contract's schema refuses an unknown event and any count but five; a
+// The contract's schema refuses an unknown event and any count but six; a
 // repeated event passes it and is refused here.
 func (h Notifications) UpdateNotificationPreferences(ctx context.Context, request openapi.UpdateNotificationPreferencesRequestObject) (openapi.UpdateNotificationPreferencesResponseObject, error) {
 	userID, ok := h.caller(ctx)

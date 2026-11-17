@@ -77,3 +77,31 @@ func (s *Timelines) Timeline(ctx context.Context, scope access.Scope, attemptID 
 	}
 	return domain.Timelines.Build(startedAt, minAwayMs, audioReplays, events, s.now()), nil
 }
+
+// Flagged returns studentID's flagged attempts on the assignments scope
+// reaches, as AssignmentIDs says, that visibility.Papers shows (the rule of
+// the papers list, the grading queue and the dashboard, so a former student's
+// paper on a colleague's assignment stays hidden), whose moment,
+// coalesce(submitted_at, started_at), is since or later, oldest first. The
+// title is the assignment's test's.
+func (s *Timelines) Flagged(ctx context.Context, scope access.Scope, studentID string, since time.Time) ([]domain.FlaggedAttempt, error) {
+	out, err := db.QueryMany(ctx, s, `
+		SELECT at.id::text, at.assignment_id::text, t.title, at.focus_loss_count, coalesce(at.submitted_at, at.started_at) AS at
+		  FROM app.attempts at
+		  JOIN app.assignments a ON a.id = at.assignment_id
+		  JOIN app.tests t ON t.id = a.test_id
+		 WHERE at.student_id = $1::uuid AND at.flagged
+		   AND coalesce(at.submitted_at, at.started_at) >= $2
+		   AND ($3::boolean OR at.assignment_id IN `+visibility.AssignmentIDs(4)+`)
+		   AND `+visibility.Papers(3, 4, "at.assignment_id", "at.student_id")+`
+		 ORDER BY 5, at.id`, []any{studentID, since, scope.All, opt.String(scope.UserID)},
+		func(rows pgx.Rows) (domain.FlaggedAttempt, error) {
+			var f domain.FlaggedAttempt
+			err := rows.Scan(&f.AttemptID, &f.AssignmentID, &f.Title, &f.FocusLost, &f.At)
+			return f, err
+		})
+	if err != nil {
+		return nil, fmt.Errorf("integrity: flagged attempts: %w", err)
+	}
+	return out, nil
+}

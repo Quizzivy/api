@@ -6,26 +6,20 @@ import (
 	"path"
 	"quizzivy/internal/modules/media/domain"
 	"quizzivy/internal/shared/content"
+	"quizzivy/internal/shared/filetype"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// imageTypes is §11.1's image allowlist, matched on magic bytes.
+// SniffImage is §11.1's image allowlist, matched on magic bytes:
+// shared/filetype's Image, which message attachments read too.
 //
 // Extensions and Content-Type are not consulted, for images as for audio: both
 // come from the uploader, and the question is what the file is.
 func SniffImage(head []byte) string {
-	switch {
-	case len(head) >= 8 && string(head[0:8]) == "\x89PNG\r\n\x1a\n":
-		return "image/png"
-	case len(head) >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF:
-		return "image/jpeg"
-	case len(head) >= 12 && string(head[0:4]) == "RIFF" && string(head[8:12]) == "WEBP":
-		return "image/webp"
-	}
-	return ""
+	return filetype.Image(head)
 }
 
 const copyBuffer = 32 << 10

@@ -78,6 +78,7 @@ type Queries struct {
 	Result             cqrs.QueryHandler[query.Result, domain.Result]
 	Review             cqrs.QueryHandler[query.Review, domain.Review]
 	Timeline           cqrs.QueryHandler[query.Timeline, domain.Timeline]
+	FlaggedAttempts    cqrs.QueryHandler[query.FlaggedAttempts, []domain.FlaggedAttempt]
 }
 
 func New(repo domain.TimelineRepository, reviewRepo domain.ReviewRepository, store domain.Repository) *Application {
@@ -112,6 +113,7 @@ func New(repo domain.TimelineRepository, reviewRepo domain.ReviewRepository, sto
 			Result:             query.ResultHandler{Service: service},
 			Review:             query.ReviewHandler{Review: review},
 			Timeline:           query.TimelineHandler{Integrity: integrity},
+			FlaggedAttempts:    query.FlaggedAttemptsHandler{Integrity: integrity},
 		},
 		integrity: integrity,
 		review:    review,

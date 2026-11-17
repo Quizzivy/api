@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"time"
+	"unicode/utf8"
 
 	"quizzivy/internal/modules/notifications/application/internal/support"
 	"quizzivy/internal/modules/notifications/domain"
@@ -57,4 +59,29 @@ func (s MarkAllReadHandler) Handle(ctx context.Context, cmd MarkAllRead) (cqrs.N
 		return cqrs.Nothing{}, domain.ErrUnknownAudience
 	}
 	return cqrs.Nothing{}, s.Repo.MarkAllRead(ctx, cmd.UserID, cmd.Audience)
+}
+
+// MarkKeyRead marks read the notification UserID holds under DedupeKey,
+// when it is unread and was last written no later than WrittenBy: what a
+// producer does once the reader has seen what the item tells, without
+// clearing a notice written after it looked. No user and a key out of bounds
+// are refused; a key the user does not hold changes nothing.
+type MarkKeyRead struct {
+	UserID    string
+	DedupeKey string
+	WrittenBy time.Time
+}
+
+type MarkKeyReadHandler struct {
+	*support.Service
+}
+
+func (s MarkKeyReadHandler) Handle(ctx context.Context, cmd MarkKeyRead) (cqrs.Nothing, error) {
+	switch length := utf8.RuneCountInString(cmd.DedupeKey); {
+	case cmd.UserID == "":
+		return cqrs.Nothing{}, domain.ErrNoRecipient
+	case length < 1 || length > domain.MaxDedupeKey:
+		return cqrs.Nothing{}, domain.ErrInvalidDedupeKey
+	}
+	return cqrs.Nothing{}, s.Repo.MarkKeyRead(ctx, cmd.UserID, cmd.DedupeKey, cmd.WrittenBy)
 }

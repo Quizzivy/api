@@ -114,13 +114,13 @@ func TestMissingNavPortMapsToNotImplemented(t *testing.T) {
 func TestTheSummaryCarriesWhatIsSharedWithTheCaller(t *testing.T) {
 	principal := principals()["a Teacher"]
 	app := &application.Application{Queries: application.Queries{Nav: cqrs.HandlerFunc[query.Nav, domain.Nav](func(context.Context, query.Nav) (domain.Nav, error) {
-		return domain.Nav{UnreadNotifications: 1, SharedWithMe: 3}, nil
+		return domain.Nav{UnreadNotifications: 1, SharedWithMe: 3, UnreadMessages: 100}, nil
 	})}}
 	got, err := dashboardhttp.NewDashboard(app).GetTeacherSummary(gated(t, principal, "GET /teacher/summary"), openapi.GetTeacherSummaryRequestObject{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, ok := got.(openapi.GetTeacherSummary200JSONResponse); !ok || body.SharedWithMe != 3 || body.UnreadNotifications != 1 {
-		t.Fatalf("summary %+v, want sharedWithMe 3", got)
+	if body, ok := got.(openapi.GetTeacherSummary200JSONResponse); !ok || body.SharedWithMe != 3 || body.UnreadNotifications != 1 || body.UnreadMessages != 100 {
+		t.Fatalf("summary %+v, want sharedWithMe 3 and unreadMessages 100", got)
 	}
 }

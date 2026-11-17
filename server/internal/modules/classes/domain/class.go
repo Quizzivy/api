@@ -42,18 +42,23 @@ type Member struct {
 	JoinedVia    string
 	JoinedAt     time.Time
 	JoinCodeHint *string
+	// CanMessage is whether the reader may write to the member in a direct
+	// thread: the messaging module's eligibility for a post (T-R7.10a).
+	CanMessage bool
 	// The same figures G-07 shows, so the roster reads "Bài đã nộp" and "Điểm TB" (G-06).
 	Stats stats.Student
 }
 
 // MyClass is a class as its student sees it (S-10): when and where it meets
-// and who teaches it, with no code, no count and no roster. TeacherAvatarKey
-// is the stored key of the teacher's photo, which the handler signs into
-// TeacherAvatarURL.
+// and who teaches it, with no code, no count and no roster. TeacherID is the
+// class's teacher, whose direct thread the class card opens (T-R7.10b).
+// TeacherAvatarKey is the stored key of the teacher's photo, which the handler
+// signs into TeacherAvatarURL.
 type MyClass struct {
 	ID               string
 	Name             string
 	Description      *string
+	TeacherID        string
 	TeacherName      *string
 	TeacherAvatarKey *string
 	TeacherAvatarURL *string

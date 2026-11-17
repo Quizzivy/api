@@ -74,7 +74,7 @@ func TestTheTableRefusesWhatNoReaderCouldBeSent(t *testing.T) {
 	}
 }
 
-func TestASwitchIsOneOfTheFiveEvents(t *testing.T) {
+func TestASwitchIsOneOfTheSixEvents(t *testing.T) {
 	pool := newPool(t)
 	userID := newUser(t, pool, "teacher")
 	insert := func(event string) error {

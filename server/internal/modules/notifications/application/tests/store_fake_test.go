@@ -20,6 +20,8 @@ type fakeStore struct {
 	userID   string
 	audience domain.Audience
 	ids      []string
+	key      string
+	written  time.Time
 	saved    []domain.Preference
 	cutoff   time.Time
 	stored   []domain.Preference
@@ -62,6 +64,12 @@ func (f *fakeStore) List(_ context.Context, q domain.ListQuery) (domain.Page, er
 func (f *fakeStore) MarkRead(_ context.Context, userID string, ids []string, audience domain.Audience) error {
 	f.call("MarkRead")
 	f.userID, f.ids, f.audience = userID, ids, audience
+	return nil
+}
+
+func (f *fakeStore) MarkKeyRead(_ context.Context, userID, key string, writtenBy time.Time) error {
+	f.call("MarkKeyRead")
+	f.userID, f.key, f.written = userID, key, writtenBy
 	return nil
 }
 

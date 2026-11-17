@@ -1857,3 +1857,277 @@ func TestTheR7KeysAreValidated(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------- messaging (T-R7.9)
+
+// newAttachment inserts a file uploaded by uploader and returns its id.
+func newAttachment(t *testing.T, tx *sql.Tx, uploader string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+		VALUES ($1, 'messages/' || uuidv7() || '.pdf', 'application/pdf', 2048, 'bai-tap.pdf', sha256('bai tap'))
+		RETURNING id`, uploader).Scan(&id); err != nil {
+		t.Fatalf("attachment fixture: %v", err)
+	}
+	return id
+}
+
+// newDirect inserts the direct thread of staff and student and returns its id.
+func newDirect(t *testing.T, tx *sql.Tx, staff, student string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at)
+		VALUES ('direct', $1, $2, now()) RETURNING id`, staff, student).Scan(&id); err != nil {
+		t.Fatalf("direct thread fixture: %v", err)
+	}
+	return id
+}
+
+// messagingRefusal is an insert refused by one constraint, given the fixture's
+// admin (staff), student and class, and a direct thread between the first two,
+// as $1 to $4.
+type messagingRefusal struct{ constraint, insert string }
+
+func refusesEachMessagingRow(t *testing.T, cases []messagingRefusal) {
+	t.Helper()
+	for _, c := range cases {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			thread := newDirect(t, tx, f.adminID, f.studentID)
+			rejectsWith(t, tx, c.constraint, c.insert, f.adminID, f.studentID, f.classID, thread)
+		})
+	}
+}
+
+func TestAnAttachmentIsOneOfTheSevenTypesUpToTwentyMebibytes(t *testing.T) {
+	row := func(mime, bytes, filename, checksum string) string {
+		return `INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+			SELECT $1, 'messages/' || uuidv7(), ` + mime + `, ` + bytes + `, ` + filename + `, ` + checksum + `
+			 WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`
+	}
+	const pdf, size, name, sum = `'application/pdf'`, `1024`, `'bai-tap.pdf'`, `sha256('x')`
+	refusesEachMessagingRow(t, []messagingRefusal{
+		{"message_attachments_mime_type_check", row(`'image/webp'`, size, name, sum)},
+		{"message_attachments_mime_type_check", row(`'application/vnd.ms-word.document.macroEnabled.12'`, size, name, sum)},
+		{"message_attachments_mime_type_check", row(`'application/zip'`, size, name, sum)},
+		{"message_attachments_bytes_check", row(pdf, `0`, name, sum)},
+		{"message_attachments_bytes_check", row(pdf, `20971521`, name, sum)},
+		{"message_attachments_original_filename_check", row(pdf, size, `''`, sum)},
+		{"message_attachments_original_filename_check", row(pdf, size, `repeat('a', 201)`, sum)},
+		{"message_attachments_checksum_sha256_check", row(pdf, size, name, `'\x00'::bytea`)},
+		{"message_attachments_checksum_sha256_check", row(pdf, size, name, `substring(sha256('x') from 1 for 31)`)},
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		for _, mime := range []string{
+			"application/pdf",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"application/msword",
+			"image/png",
+			"image/jpeg",
+			"audio/mpeg",
+			"audio/mp4",
+		} {
+			mustExec(t, tx, `INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+				VALUES ($1, 'messages/' || uuidv7(), $2, 20971520, repeat('ạ', 200), sha256('x'))`, f.adminID, mime)
+		}
+		mustExec(t, tx, `INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+			VALUES ($1, 'messages/one.pdf', 'application/pdf', 1, 'a', sha256('x'))`, f.adminID)
+		rejectsWith(t, tx, "message_attachments_storage_key_key",
+			`INSERT INTO app.message_attachments (uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+			 VALUES ($1, 'messages/one.pdf', 'application/pdf', 1, 'b', sha256('y'))`, f.adminID)
+	})
+}
+
+func TestAConversationIsAClassChannelOrADirectThreadAndNothingBetween(t *testing.T) {
+	refusesEachMessagingRow(t, []messagingRefusal{
+		{"conversations_kind_check", `INSERT INTO app.conversations (kind, class_id, last_message_at)
+			SELECT 'group', $3, now() WHERE $1::uuid IS NOT NULL AND $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_class_shape", `INSERT INTO app.conversations (kind, last_message_at)
+			SELECT 'class', now() WHERE $1::uuid IS NOT NULL AND $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_class_shape", `INSERT INTO app.conversations (kind, class_id, staff_id, last_message_at)
+			SELECT 'class', $3, $1, now() WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_class_shape", `INSERT INTO app.conversations (kind, class_id, student_id, last_message_at)
+			SELECT 'class', $3, $2, now() WHERE $1::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_direct_shape", `INSERT INTO app.conversations (kind, class_id, staff_id, student_id, last_message_at)
+			SELECT 'direct', $3, $1, $2, now() WHERE $4::uuid IS NOT NULL`},
+		{"conversations_direct_shape", `INSERT INTO app.conversations (kind, staff_id, last_message_at)
+			SELECT 'direct', $1, now() WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_direct_shape", `INSERT INTO app.conversations (kind, student_id, last_message_at)
+			SELECT 'direct', $2, now() WHERE $1::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_participants_differ", `INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at)
+			SELECT 'direct', $1, $1, now() WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_direct_key", `INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at)
+			SELECT 'direct', $1, $2, now() WHERE $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.conversations (kind, class_id, last_message_at) VALUES ('class', $1, now())`, f.classID)
+		// The direct key binds a pair, not a staff member: one staff member has a
+		// thread with each student, and one student a thread with each teacher.
+		newDirect(t, tx, f.adminID, f.studentID)
+		var other string
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('hv-' || uuidv7() || '@example.com', 'Học viên khác', (SELECT id FROM app.roles WHERE builtin_key = 'student')) RETURNING id`).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		newDirect(t, tx, f.adminID, other)
+		rejectsWith(t, tx, "conversations_class_key",
+			`INSERT INTO app.conversations (kind, class_id, last_message_at) VALUES ('class', $1, now())`, f.classID)
+	})
+}
+
+func TestAMessageIsATrimmedBodyOrAFileAndIsSentOnce(t *testing.T) {
+	refusesEachMessagingRow(t, []messagingRefusal{
+		{"messages_body_check", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			SELECT $4, $1, uuidv7(), '' WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL`},
+		{"messages_body_check", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			SELECT $4, $1, uuidv7(), ' Chào em' WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL`},
+		{"messages_body_check", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			SELECT $4, $1, uuidv7(), E'Chào em\n' WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL`},
+		{"messages_body_check", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			SELECT $4, $1, uuidv7(), repeat('a', 4001) WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL`},
+		{"messages_has_content", `INSERT INTO app.messages (conversation_id, sender_id, client_id)
+			SELECT $4, $1, uuidv7() WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL`},
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		thread := newDirect(t, tx, f.adminID, f.studentID)
+		file := newAttachment(t, tx, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, attachment_id) VALUES ($1, $2, uuidv7(), $3)`, thread, f.adminID, file)
+		mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body) VALUES ($1, $2, uuidv7(), repeat('ạ', 4000))`, thread, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body, attachment_id)
+			VALUES ($1, $2, uuidv7(), 'Cô gửi đề', $3)`, thread, f.adminID, newAttachment(t, tx, f.adminID))
+		rejectsWith(t, tx, "messages_attachment_id_key",
+			`INSERT INTO app.messages (conversation_id, sender_id, client_id, body, attachment_id) VALUES ($1, $2, uuidv7(), 'Lần nữa', $3)`, thread, f.adminID, file)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		thread := newDirect(t, tx, f.adminID, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			VALUES ($1, $2, '01935000-0000-7000-8000-00000000c1d1', 'Chào em')`, thread, f.adminID)
+		// Another sender may reuse a client id: the key is the sender's.
+		mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			VALUES ($1, $2, '01935000-0000-7000-8000-00000000c1d1', 'Em chào cô')`, thread, f.studentID)
+		rejectsWith(t, tx, "messages_sender_client_key", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
+			VALUES ($1, $2, '01935000-0000-7000-8000-00000000c1d1', 'Gửi lại')`, thread, f.adminID)
+	})
+}
+
+func TestAMessageKeepsItsThreadAndItsFile(t *testing.T) {
+	for _, c := range []struct{ constraint, remove string }{
+		{"messages_conversation_id_fkey", `DELETE FROM app.conversations WHERE id = $1 AND $2::uuid IS NOT NULL`},
+		{"messages_attachment_id_fkey", `DELETE FROM app.message_attachments WHERE id = $2 AND $1::uuid IS NOT NULL`},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			thread, file := newDirect(t, tx, f.adminID, f.studentID), newAttachment(t, tx, f.adminID)
+			mustExec(t, tx, `INSERT INTO app.messages (conversation_id, sender_id, client_id, attachment_id) VALUES ($1, $2, uuidv7(), $3)`, thread, f.adminID, file)
+			rejectsWith(t, tx, c.constraint, c.remove, thread, file)
+		})
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		// An unsent file goes, and so does a thread without messages, with its
+		// read pointers.
+		mustExec(t, tx, `DELETE FROM app.message_attachments WHERE id = $1`, newAttachment(t, tx, f.adminID))
+		thread := newDirect(t, tx, f.adminID, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.conversation_reads (conversation_id, user_id, last_read_message_id) VALUES ($1, $2, uuidv7())`, thread, f.studentID)
+		mustExec(t, tx, `DELETE FROM app.conversations WHERE id = $1`, thread)
+		var left int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.conversation_reads WHERE conversation_id = $1`, thread).Scan(&left); err != nil || left != 0 {
+			t.Errorf("%d read pointers outlived their thread (%v)", left, err)
+		}
+	})
+}
+
+func TestAReaderHasOnePointerPerThread(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		thread := newDirect(t, tx, f.adminID, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.conversation_reads (conversation_id, user_id, last_read_message_id) VALUES ($1, $2, uuidv7())`, thread, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.conversation_reads (conversation_id, user_id, last_read_message_id) VALUES ($1, $2, uuidv7())`, thread, f.adminID)
+		rejectsWith(t, tx, "conversation_reads_pkey",
+			`INSERT INTO app.conversation_reads (conversation_id, user_id, last_read_message_id) VALUES ($1, $2, uuidv7())`, thread, f.studentID)
+	})
+}
+
+// The R6 binary, still serving between 00167 and the new binary, writes no
+// tie. 00167's triggers write them at its commit; SET CONSTRAINTS fires them
+// here, in a transaction that rolls back (T-R7.9).
+func TestTheOldBinarysEnrolmentsAndChangesOfTeacherAreTiedAtCommit(t *testing.T) {
+	const fire = `SET CONSTRAINTS app.class_members_fill_messaging_ties, app.classes_fill_messaging_ties IMMEDIATE`
+	tied := func(t *testing.T, tx *sql.Tx, staff, student string) bool {
+		t.Helper()
+		var ok bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2)`, staff, student).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		if tied(t, tx, f.adminID, f.studentID) {
+			t.Fatal("the member is tied before the commit; the trigger is not deferred, so the module's own write goes untested")
+		}
+		mustExec(t, tx, fire)
+		if !tied(t, tx, f.adminID, f.studentID) {
+			t.Error("a member the old binary enrolled is not tied to the class's teacher")
+		}
+
+		var heir string
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('heir-' || uuidv7() || '@example.com', 'Giáo viên mới', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&heir); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, `UPDATE app.classes SET teacher_id = $2 WHERE id = $1`, f.classID, heir)
+		mustExec(t, tx, fire)
+		if !tied(t, tx, heir, f.studentID) {
+			t.Error("a class the old binary gave another teacher does not tie them to its member")
+		}
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		mustExec(t, tx, `DELETE FROM app.class_members WHERE user_id = $1`, f.studentID)
+		mustExec(t, tx, `DELETE FROM app.users WHERE id = $1`, f.studentID)
+		mustExec(t, tx, fire)
+		var left int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE staff_id = $1`, f.adminID).Scan(&left); err != nil || left != 0 {
+			t.Errorf("a member whose account went in the same transaction left %d ties (%v)", left, err)
+		}
+	})
+}
+
+// D16's anonymisation deletes an account's ties and keeps its memberships, so
+// 00169 has the triggers leave an anonymised member out (T-R7.12).
+func TestTheOldBinaryTiesNoAnonymisedMember(t *testing.T) {
+	const fire = `SET CONSTRAINTS app.class_members_fill_messaging_ties, app.classes_fill_messaging_ties IMMEDIATE`
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `UPDATE app.users SET email = 'anonymous-' || id::text || '@anonymous.invalid', disabled_at = now() WHERE id = $1`, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $3)`, f.classID, f.studentID, f.adminID)
+		var heir string
+		if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+			VALUES ('heir-' || uuidv7() || '@example.com', 'Giáo viên mới', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&heir); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, `UPDATE app.classes SET teacher_id = $2 WHERE id = $1`, f.classID, heir)
+		mustExec(t, tx, fire)
+		var ties int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE student_id = $1`, f.studentID).Scan(&ties); err != nil || ties != 0 {
+			t.Errorf("the old binary's enrolment and change of teacher tied an anonymised member %d times (%v), want none", ties, err)
+		}
+	})
+}
+
+func TestATieIsBetweenTwoAccountsOnceAndGoesWithEither(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		rejectsWith(t, tx, "messaging_ties_participants_differ",
+			`INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $1)`, f.adminID)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $2)`, f.adminID, f.studentID)
+		rejectsWith(t, tx, "messaging_ties_pkey",
+			`INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $2)`, f.adminID, f.studentID)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, `INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $2)`, f.adminID, f.studentID)
+		mustExec(t, tx, `DELETE FROM app.class_members WHERE user_id = $1`, f.studentID)
+		mustExec(t, tx, `DELETE FROM app.users WHERE id = $1`, f.studentID)
+		var left int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE staff_id = $1`, f.adminID).Scan(&left); err != nil || left != 0 {
+			t.Errorf("%d ties outlived the student (%v)", left, err)
+		}
+	})
+}

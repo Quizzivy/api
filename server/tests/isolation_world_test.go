@@ -161,6 +161,19 @@ func avatarPNG(t *testing.T) []byte {
 	return b.Bytes()
 }
 
+// tinyPDF is enough of a PDF for an attachment's sniffing: "%PDF-" at 0.
+var tinyPDF = []byte("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n")
+
+// uploadAttachment uploads a PDF as c, unsent, and returns its id.
+func uploadAttachment(t *testing.T, c *client, filename string) string {
+	t.Helper()
+	got := c.send(http.MethodPost, "/teacher/messages/attachments", new(filePayload(t, filename, tinyPDF)))
+	if got.status != http.StatusCreated {
+		t.Fatalf("uploading %s: %s", filename, answer(got))
+	}
+	return got.json["id"].(string)
+}
+
 func tinyDocx(t *testing.T) []byte {
 	t.Helper()
 	var b bytes.Buffer
@@ -298,6 +311,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	user := created["user"].(map[string]any)
 	p.ids["student"] = user["id"].(string)
+	// The teacher created the student and teaches them, so the student is a
+	// messaging peer of the teacher's.
+	p.ids["messaging-peer"] = p.ids["student"]
 
 	assignment := c.assign(versionID, p.ids["class"])
 	p.ids["assignment"] = id(assignment)
@@ -330,7 +346,16 @@ func (w *world) teacherWorld(name string) *party {
 		"version-question":  id(open["questions"].([]any)[0].(map[string]any)),
 		"version-recording": stimulus["recordings"].([]any)[0].(map[string]any)["id"].(string),
 		"media":             p.ids["media"],
+		"class":             p.ids["class"],
 	}}
+	// The student's Messages hold their teacher's thread and their class's
+	// announcement, so the walk compares a list that is not empty.
+	// The teacher's message to the student holds a file, so both have an
+	// attachment to download, and the posts' attachmentId a kind to name.
+	p.ids["attachment"] = uploadAttachment(w.t, c, "bai-tap-"+name+".pdf")
+	p.student.ids["attachment"] = p.ids["attachment"]
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/students/"+p.student.userID, map[string]any{"clientId": uuid.NewString(), "body": "Chào em " + name, "attachmentId": p.ids["attachment"]})
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/classes/"+p.ids["class"], map[string]any{"clientId": uuid.NewString(), "body": "Chào lớp " + name})
 	return p
 }
 

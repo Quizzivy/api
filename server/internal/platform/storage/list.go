@@ -21,16 +21,27 @@ const listPage = 1000
 // List returns at most limit objects whose keys begin with prefix, in key
 // order. Objects beyond limit are left out, not an error.
 func (c *Client) List(ctx context.Context, prefix string, limit int) ([]Object, error) {
+	return c.ListAfter(ctx, prefix, "", limit)
+}
+
+// ListAfter is List from the first key after after, in key order, so a
+// sweep can take a long listing a page at a time. An empty after starts at
+// the prefix's first key.
+func (c *Client) ListAfter(ctx context.Context, prefix, after string, limit int) ([]Object, error) {
 	if limit <= 0 {
 		return nil, errors.New("storage: list needs a positive limit")
 	}
 	var out []Object
 	var token *string
 	for len(out) < limit {
-		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		input := &s3.ListObjectsV2Input{
 			Bucket: aws.String(c.bucket), Prefix: aws.String(prefix),
 			MaxKeys: aws.Int32(int32(min(limit-len(out), listPage))), ContinuationToken: token,
-		})
+		}
+		if after != "" && token == nil {
+			input.StartAfter = aws.String(after)
+		}
+		page, err := c.s3.ListObjectsV2(ctx, input)
 		if err != nil {
 			return nil, fmt.Errorf("storage: list %s: %w", prefix, err)
 		}

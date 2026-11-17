@@ -187,6 +187,10 @@ func TestTheWorkerCreatesTheAccountsOfAnEmailJobInBatchesAndFinishesIt(t *testin
 	if got := w.count(t, `SELECT count(*) FROM app.class_members WHERE class_id = $1::uuid AND added_by = $2::uuid AND joined_via = 'admin'`, class, w.importer); got != 57 {
 		t.Errorf("%d student(s) enrolled by the importer, want 57", got)
 	}
+	if got := w.count(t, `SELECT count(*) FROM app.messaging_ties t JOIN app.classes c ON c.teacher_id = t.staff_id
+		 JOIN app.class_members m ON m.class_id = c.id AND m.user_id = t.student_id WHERE c.id = $1::uuid`, class); got != 57 {
+		t.Errorf("%d student(s) tied to the class's teacher, want the 57 enrolled (T-R7.9)", got)
+	}
 	var role string
 	if err := w.admin.QueryRow(context.Background(), `
 		SELECT r.builtin_key FROM app.users u JOIN app.roles r ON r.id = u.role_id WHERE u.email = $1`, teacher).Scan(&role); err != nil || role != "teacher" {
