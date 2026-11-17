@@ -26,6 +26,7 @@ const (
 	emailRetry               = time.Minute
 	emailBusy                = 10 * time.Second
 	emailFloor               = time.Second
+	emailIdle                = time.Minute
 )
 
 // Mail is the outgoing mail of one process: the outbox its modules enqueue
@@ -36,12 +37,16 @@ type Mail struct {
 	Dispatcher *email.Dispatcher
 }
 
-// Run dispatches until ctx ends, on this process's enqueues and on the
-// earliest pending row's due time.
+// Run dispatches until ctx ends, on this process's enqueues, on the earliest
+// pending row's due time and at least once a minute: the maintenance console
+// queues a credit decision email without a dispatcher of its own and cannot
+// wake this one, so the minute is the longest that email waits, against the
+// Admin operation's wake within the same process. On an empty outbox the
+// minute costs each process one dispatch pass and one NextDue query.
 func (m Mail) Run(ctx context.Context, logger *slog.Logger) {
 	jobs.RunEmail(ctx, logger, m.Dispatcher, jobs.EmailSchedule{
 		Wake:  m.Outbox.Wake(),
-		Retry: emailRetry, Busy: emailBusy, Floor: emailFloor,
+		Retry: emailRetry, Busy: emailBusy, Floor: emailFloor, Idle: emailIdle,
 	})
 }
 

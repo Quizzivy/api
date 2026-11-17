@@ -100,10 +100,31 @@ func TestAnEmptyOutboxIsDispatchedOnceAtStartAndThenLeftAloneUntilWoken(t *testi
 	waitForCalls(t, d, 1)
 	time.Sleep(150 * time.Millisecond)
 	if got := d.calls.Load(); got != 1 {
-		t.Fatalf("an idle outbox was dispatched %d times; it must not wake the database on a timer", got)
+		t.Fatalf("an idle outbox with no Idle was dispatched %d times; without it nothing wakes the database on a timer", got)
 	}
 	wake <- struct{}{}
 	waitForCalls(t, d, 2)
+}
+
+// TestARowQueuedWithoutAWakeIsDispatchedWithinIdle is the maintenance
+// console's decision email: queued by a process that cannot fire Wake, into
+// an outbox that was empty, it is sent at the dispatcher's next idle pass.
+func TestARowQueuedWithoutAWakeIsDispatchedWithinIdle(t *testing.T) {
+	d := &scriptedDispatcher{called: make(chan struct{}, 8)}
+	stop, _ := runEmail(t, d, jobs.EmailSchedule{Wake: make(chan struct{}), Retry: time.Hour, Busy: time.Hour, Floor: time.Millisecond, Idle: 50 * time.Millisecond})
+	defer stop()
+	waitForCalls(t, d, 3)
+}
+
+// TestIdleBoundsTheWaitForARowFallingDueLater keeps a row queued by another
+// process from waiting behind a pending row due hours from now: the timer is
+// armed for Idle, not for that row's due time.
+func TestIdleBoundsTheWaitForARowFallingDueLater(t *testing.T) {
+	later := time.Now().Add(time.Hour)
+	d := &scriptedDispatcher{called: make(chan struct{}, 8), dues: []time.Time{later, later}}
+	stop, _ := runEmail(t, d, jobs.EmailSchedule{Wake: make(chan struct{}), Retry: time.Hour, Busy: time.Hour, Floor: time.Millisecond, Idle: 50 * time.Millisecond})
+	defer stop()
+	waitForCalls(t, d, 3)
 }
 
 func TestARowFallingDueArmsATimerAndAFullBatchIsFollowedAtOnce(t *testing.T) {

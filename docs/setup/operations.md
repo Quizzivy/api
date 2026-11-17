@@ -767,7 +767,10 @@ their hash.
 ## Outgoing email
 
 Mail is sent from `email_outbox` by a dispatcher in the API and one in the
-worker, through Resend's HTTP API with `RESEND_API_KEY`. `EMAIL_FROM` and the
+worker, through Resend's HTTP API with `RESEND_API_KEY`. Each dispatcher runs at
+once for its own process's mail, when a held row falls due, and at least once a
+minute for mail another process queued (the maintenance console's credit
+decisions). `EMAIL_FROM` and the
 key are set together, and production refuses to start without both. A message's
 link points into one of the two web hosts ("The two web hosts", above): the
 staff host when the recipient's role, as the message is sent, opens the teacher
@@ -1106,9 +1109,8 @@ maintenance ai-reservations-sweep
 - **`approve`** raises the teacher's allowance for the request's month by the amount and
   **`decline`** changes nothing but the status; both tell the teacher, in the app and by email, as
   the Admin's buttons do (the owner's decision of 2026-11-16). The command only queues the email in
-  `email_outbox`; the API's or the worker's dispatcher sends it on its next pass, which on a quiet
-  outbox is when that process next queues an email of its own, a held row falls due, or it
-  restarts. The command honours `NOTIFY_EMAIL_EVENTS` from its own environment as the API does, so
+  `email_outbox`; the API's or the worker's dispatcher sends it on its next pass, which each runs
+  at least once a minute, so the teacher has it within about a minute. The command honours `NOTIFY_EMAIL_EVENTS` from its own environment as the API does, so
   run it with the API's value (unset sends the email); a value the API would refuse fails every
   `-apply` before it writes. An earlier month's request can only be declined.
 - **`set-rules`** takes any of `-default-allowance` (rewrites this month's allowances that are not
