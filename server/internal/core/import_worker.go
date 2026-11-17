@@ -35,16 +35,16 @@ func RunImportWorker(ctx context.Context, logger *slog.Logger) error {
 	if err := pool.WaitReady(ctx, dbReadyBudget); err != nil {
 		return err
 	}
-	runner, err := wiring.ImportWorker(ctx, cfg, db.NewContext(pool.Pool), logger)
-	if err != nil {
-		return err
-	}
-	runner.Observe = jobs.ObserveImportRun(logger)
 	dbx := db.NewContext(pool.Pool)
 	mail, err := wiring.BuildMail(cfg.Base, dbx, wiring.OrganizationBranding(cfg.Base, dbx, logger), logger)
 	if err != nil {
 		return err
 	}
+	runner, err := wiring.ImportWorker(ctx, cfg, db.NewContext(pool.Pool), mail, logger)
+	if err != nil {
+		return err
+	}
+	runner.Observe = jobs.ObserveImportRun(logger)
 	userImports, err := wiring.UserImportsWorker(ctx, cfg, db.NewContext(pool.Pool), mail.Outbox, logger)
 	if err != nil {
 		return err
