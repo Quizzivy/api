@@ -729,3 +729,70 @@ func TestTheSuppressionListComesAndGoesWithItsMigration(t *testing.T) {
 		t.Errorf("after the second up the list holds %d rows (%v), want an empty table", listed, err)
 	}
 }
+
+// TestTheDecisionEmailGrantsComeAndGoWithTheirMigration runs 00173 up, down
+// and up again: Down revokes exactly what Up granted, so the maintenance role
+// holds 00172's grants again, and drops the outbox guard with its function.
+func TestTheDecisionEmailGrantsComeAndGoWithTheirMigration(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, grants int64 = 172, 173
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	held := func() map[string]string {
+		t.Helper()
+		rows, err := conn.Query(maintenanceGrantsQuery, maintenanceRole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]string{}
+		for rows.Next() {
+			var table, priv, columns string
+			if err := rows.Scan(&table, &priv, &columns); err != nil {
+				t.Fatal(err)
+			}
+			out[table+" "+priv] = columns
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	guarded := func() bool {
+		t.Helper()
+		var guard *string
+		if err := conn.QueryRow(`SELECT to_regprocedure('app.email_outbox_maintenance_guard()')::text`).Scan(&guard); err != nil {
+			t.Fatal(err)
+		}
+		return guard != nil
+	}
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	was := held()
+	if err := goose.UpTo(conn, dir, grants); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if now := held(); now["email_outbox INSERT"] == "" || !guarded() {
+		t.Fatalf("after up the role holds %v and the guard exists %v", now, guarded())
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if after := held(); !maps.Equal(after, was) || guarded() {
+		t.Errorf("after down the role holds %v, want %v; the guard exists %v", after, was, guarded())
+	}
+	if err := goose.UpTo(conn, dir, grants); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+}

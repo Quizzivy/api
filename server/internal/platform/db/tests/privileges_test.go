@@ -273,13 +273,17 @@ var maintenanceGrants = map[string]map[string]string{
 	"classes":                      {"SELECT": "teacher_id"},
 	"conversation_reads":           {"SELECT": "conversation_id,user_id", "DELETE": "*"},
 	"conversations":                {"SELECT": "id,kind,staff_id,student_id", "DELETE": "*"},
-	"leads":                        {"SELECT": "created_at,id", "DELETE": "*"},
-	"maintenance_windows":          {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
-	"media_assets":                 {"SELECT": "owner_id"},
-	"message_attachments":          {"SELECT": "id,uploaded_by", "DELETE": "*"},
-	"messages":                     {"SELECT": "attachment_id,conversation_id,id", "DELETE": "*"},
-	"messaging_ties":               {"SELECT": "staff_id,student_id", "DELETE": "*"},
-	"notification_preferences":     {"SELECT": "event,in_app,user_id"},
+	"email_outbox": {
+		"SELECT": "dedupe_key,id",
+		"INSERT": "dedupe_key,deliver_after,expires_at,id,locale,params,secret_ciphertext,template,to_address,to_user_id",
+	},
+	"leads":                    {"SELECT": "created_at,id", "DELETE": "*"},
+	"maintenance_windows":      {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
+	"media_assets":             {"SELECT": "owner_id"},
+	"message_attachments":      {"SELECT": "id,uploaded_by", "DELETE": "*"},
+	"messages":                 {"SELECT": "attachment_id,conversation_id,id", "DELETE": "*"},
+	"messaging_ties":           {"SELECT": "staff_id,student_id", "DELETE": "*"},
+	"notification_preferences": {"SELECT": "email,event,in_app,user_id"},
 	"notifications": {
 		"SELECT": "dedupe_key,id,kind,params,target,user_id",
 		"INSERT": "dedupe_key,kind,params,target,user_id",
@@ -298,7 +302,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"tests":                 {"SELECT": "owner_id"},
 	"user_identities":       {"SELECT": "user_id", "DELETE": "*"},
 	"users": {
-		"SELECT": "disabled_at,display_name,email,full_name,id,role_id",
+		"SELECT": "disabled_at,display_name,email,full_name,id,locale,role_id",
 		"UPDATE": "avatar_key,disabled_at,display_name,email,full_name,must_change_password,password_hash,phone",
 	},
 }
@@ -516,5 +520,55 @@ func TestTheSuppressionListHoldsWhatT_R7_15Grants(t *testing.T) {
 	}
 	if any {
 		t.Errorf("%s holds a privilege on app.email_suppressions; no maintenance command reads or writes it", maintenanceRole)
+	}
+}
+
+// TestTheMaintenanceRoleMayOnlyQueueTheDecisionEmail pins 00173, the owner's
+// decision of 2026-11-16 that the console emails a credit decision: the role
+// inserts into the outbox and reads back a row's id by its dedupe key, and
+// nothing more of it, so it can neither read what a queued email says nor
+// change, hold back or delete one; and the guard that keeps its inserts to a
+// decision email at an account's own address fires for the role alone, as
+// 00139's users guard does.
+func TestTheMaintenanceRoleMayOnlyQueueTheDecisionEmail(t *testing.T) {
+	conn := migrated(t)
+	for _, column := range []string{"to_address", "to_user_id", "template", "params", "secret_ciphertext", "locale", "sent_at", "failed_at", "last_error_code"} {
+		var reads bool
+		if err := conn.QueryRow(`SELECT has_column_privilege($1, 'app.email_outbox', $2, 'SELECT')`, maintenanceRole, column).Scan(&reads); err != nil {
+			t.Fatal(err)
+		}
+		if reads {
+			t.Errorf("%s may read app.email_outbox.%s; it queues an email and reads back nothing it says", maintenanceRole, column)
+		}
+	}
+	var writes bool
+	if err := conn.QueryRow(`SELECT has_any_column_privilege($1, 'app.email_outbox', 'UPDATE, REFERENCES')
+		OR has_table_privilege($1, 'app.email_outbox', 'DELETE, TRUNCATE, TRIGGER')`, maintenanceRole).Scan(&writes); err != nil {
+		t.Fatal(err)
+	}
+	if writes {
+		t.Errorf("%s may change or delete a queued email; only the dispatchers do", maintenanceRole)
+	}
+	for _, c := range []struct {
+		query string
+		what  string
+	}{
+		{`SELECT EXISTS (SELECT 1 FROM pg_trigger t
+		     WHERE t.tgrelid = 'app.email_outbox'::regclass AND t.tgname = 'email_outbox_maintenance_guard' AND t.tgenabled = 'O'
+		       AND pg_get_triggerdef(t.oid) LIKE 'CREATE TRIGGER email_outbox_maintenance_guard BEFORE INSERT ON app.email_outbox FOR EACH ROW WHEN%'
+		       AND pg_get_triggerdef(t.oid) LIKE '%' || $1 || '%')`, "a BEFORE INSERT guard on app.email_outbox that fires for the role alone"},
+		{`SELECT NOT has_function_privilege('public', 'app.email_outbox_maintenance_guard()', 'EXECUTE')
+		     AND NOT has_function_privilege($1, 'app.email_outbox_maintenance_guard()', 'EXECUTE')`, "no EXECUTE on the outbox guard, which fires without it"},
+		{`SELECT coalesce(NOT p.prosecdef AND p.proconfig = ARRAY['search_path=pg_catalog, pg_temp']
+		       AND p.proowner <> (SELECT oid FROM pg_roles WHERE rolname = $1), false)
+		    FROM pg_proc p WHERE p.oid = 'app.email_outbox_maintenance_guard()'::regprocedure`, "a SECURITY INVOKER outbox guard, not owned by the role, with search_path pinned to pg_catalog, pg_temp"},
+	} {
+		var got bool
+		if err := conn.QueryRow(c.query, maintenanceRole).Scan(&got); err != nil {
+			t.Fatalf("%s: %v", c.what, err)
+		}
+		if !got {
+			t.Errorf("%s: want %s", maintenanceRole, c.what)
+		}
 	}
 }
