@@ -36,9 +36,9 @@ func TestEachRecipientIsSkippedForTheFirstReasonThatApplies(t *testing.T) {
 		"a student who holds a stray row": {domain.Candidate{UserID: colleague, Exists: true, Granted: true}, owner, domain.SkipNotATeacher, true},
 	}
 	for name, c := range cases {
-		code, skipped := domain.Skip(c.candidate, owner, c.actor)
+		code, skipped := domain.SkipReason(c.candidate, owner, c.actor)
 		if code != c.code || skipped != c.skipped {
-			t.Errorf("%s: Skip = %q, %v; want %q, %v", name, code, skipped, c.code, c.skipped)
+			t.Errorf("%s: SkipReason = %q, %v; want %q, %v", name, code, skipped, c.code, c.skipped)
 		}
 	}
 }

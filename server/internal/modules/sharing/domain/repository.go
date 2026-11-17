@@ -20,7 +20,7 @@ type Repository interface {
 	Holds(ctx context.Context, kind Kind, resourceID, userID string) (bool, error)
 	// Grants returns the grants to the resource, oldest first.
 	Grants(ctx context.Context, kind Kind, resourceID string) ([]Grant, error)
-	// Grant shares the live resource with each recipient Skip lets through,
+	// Grant shares the live resource with each recipient SkipReason lets through,
 	// in the order named, and audits each grant; ErrNotFound when the resource
 	// is gone.
 	Grant(ctx context.Context, req GrantRequest) (Granted, error)
