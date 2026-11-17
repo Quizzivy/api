@@ -453,3 +453,185 @@ BEGIN
 
   RAISE NOTICE 'seed: question types hold';
 END $$;
+
+-- 11's collaboration (T-R7.24): grants, question sets and messages as the API writes
+-- them, then the decks' shapes. Every id 11 fixes starts 01935000-0000-7000-8000-00000110,
+-- and its messages are those of its threads.
+DO $$
+DECLARE
+  mine constant text := '01935000-0000-7000-8000-00000110%';
+  lan constant uuid := '01935000-0000-7000-8000-000000000601';
+  minh constant uuid := '01935000-0000-7000-8000-000000000602';
+  khang constant uuid := '01935000-0000-7000-8000-000001100601';
+  admin constant uuid := '01935000-0000-7000-8000-0000000000a1';
+  bad text;
+  found integer;
+BEGIN
+  -- A grant names a live resource of another teacher, enabled, and is given by its owner.
+  SELECT string_agg(g.id::text, ', ') INTO bad
+    FROM app.content_shares g
+    LEFT JOIN app.tests t ON t.id = g.test_id AND t.deleted_at IS NULL
+    LEFT JOIN app.question_sets s ON s.id = g.question_set_id AND s.deleted_at IS NULL
+    JOIN app.users u ON u.id = g.grantee_id
+    JOIN app.roles r ON r.id = u.role_id
+   WHERE g.id::text LIKE mine
+     AND (coalesce(t.owner_id, s.owner_id) IS NULL
+          OR coalesce(t.owner_id, s.owner_id) = g.grantee_id
+          OR g.granted_by <> coalesce(t.owner_id, s.owner_id)
+          OR r.builtin_key IS DISTINCT FROM 'teacher' OR u.disabled_at IS NOT NULL);
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: grant(s) not as the share command writes them: %', bad;
+  END IF;
+
+  -- Both ways between Lan and R2's second teacher: SHARE_IN (a test and a set to Lan, Can
+  -- edit and Can use) and SHARE_0 (Lan's test and set to Minh).
+  SELECT count(DISTINCT g.kind || ':' || g.access) INTO found
+    FROM app.content_shares g
+    LEFT JOIN app.tests t ON t.id = g.test_id
+    LEFT JOIN app.question_sets s ON s.id = g.question_set_id
+   WHERE g.id::text LIKE mine AND g.grantee_id = lan AND coalesce(t.owner_id, s.owner_id) = minh;
+  IF found < 2 OR NOT EXISTS (
+       SELECT 1 FROM app.content_shares g
+         LEFT JOIN app.tests t ON t.id = g.test_id
+         LEFT JOIN app.question_sets s ON s.id = g.question_set_id
+        WHERE g.id::text LIKE mine AND g.grantee_id = minh AND coalesce(t.owner_id, s.owner_id) = lan AND g.kind = 'test')
+     OR NOT EXISTS (
+       SELECT 1 FROM app.content_shares g JOIN app.question_sets s ON s.id = g.question_set_id
+        WHERE g.id::text LIKE mine AND g.grantee_id = minh AND s.owner_id = lan) THEN
+    RAISE EXCEPTION 'seed: Lan and Minh do not share a test and a question set both ways';
+  END IF;
+
+  -- A set holds its owner's live standalone questions, and is not empty.
+  SELECT string_agg(DISTINCT s.id::text, ', ') INTO bad
+    FROM app.question_sets s
+    LEFT JOIN app.question_set_items i ON i.set_id = s.id
+    LEFT JOIN app.questions q ON q.id = i.question_id
+   WHERE s.id::text LIKE mine
+     AND (i.set_id IS NULL OR q.owner_id <> s.owner_id OR q.context_group_id IS NOT NULL OR q.deleted_at IS NOT NULL);
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: question set(s) empty or holding what is not the owner''s standalone question: %', bad;
+  END IF;
+
+  -- The round trip: a published test of Minh's that nobody shares, holding a question
+  -- another of his tests' drafts holds, so a co-editor's edit of it forks.
+  SELECT count(*) INTO found
+    FROM app.tests t
+   WHERE t.id::text LIKE mine AND t.owner_id = minh AND t.status = 'published' AND t.deleted_at IS NULL
+     AND NOT EXISTS (SELECT 1 FROM app.content_shares g WHERE g.test_id = t.id)
+     AND EXISTS (SELECT 1 FROM app.test_sections s
+                   JOIN app.test_section_questions m ON m.test_section_id = s.id
+                   JOIN app.test_section_questions other ON other.question_id = m.question_id
+                   JOIN app.test_sections os ON os.id = other.test_section_id AND os.test_id <> t.id
+                   JOIN app.tests ot ON ot.id = os.test_id AND ot.deleted_at IS NULL AND ot.owner_id = minh
+                  WHERE s.test_id = t.id);
+  IF found <> 1 THEN
+    RAISE EXCEPTION 'seed: expected one unshared published test of Minh''s holding a question another test uses, found %', found;
+  END IF;
+
+  -- A thread is shaped as the first post makes it: a direct thread's pair is tied and only
+  -- they write in it, a channel only its class's teacher; last_message_at is its newest
+  -- post; ids order its posts as their times do.
+  SELECT string_agg(v.id::text, ', ') INTO bad
+    FROM app.conversations v
+    LEFT JOIN app.classes c ON c.id = v.class_id
+   WHERE v.id::text LIKE mine
+     AND ((v.kind = 'direct' AND NOT EXISTS (SELECT 1 FROM app.messaging_ties t
+                                              WHERE t.staff_id = v.staff_id AND t.student_id = v.student_id))
+          OR EXISTS (SELECT 1 FROM app.messages m
+                      WHERE m.conversation_id = v.id
+                        AND m.sender_id <> ALL (CASE v.kind WHEN 'direct' THEN ARRAY[v.staff_id, v.student_id]
+                                                            ELSE ARRAY[c.teacher_id] END))
+          OR v.last_message_at IS DISTINCT FROM (SELECT max(m.created_at) FROM app.messages m WHERE m.conversation_id = v.id)
+          OR EXISTS (SELECT 1 FROM app.messages a JOIN app.messages b ON b.conversation_id = a.conversation_id
+                      WHERE a.conversation_id = v.id AND a.id < b.id AND a.created_at >= b.created_at));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: thread(s) not shaped as posting makes them: %', bad;
+  END IF;
+
+  -- A read pointer names a message of its thread, read by a participant or a member of
+  -- the class; and in 08's roster, by someone who has signed in.
+  SELECT string_agg(r.conversation_id::text || '/' || r.user_id::text, ', ') INTO bad
+    FROM app.conversation_reads r
+    JOIN app.conversations v ON v.id = r.conversation_id
+    JOIN app.users u ON u.id = r.user_id
+   WHERE v.id::text LIKE mine
+     AND (NOT EXISTS (SELECT 1 FROM app.messages m WHERE m.id = r.last_read_message_id AND m.conversation_id = v.id)
+          OR (v.kind = 'direct' AND r.user_id <> ALL (ARRAY[v.staff_id, v.student_id]))
+          OR (v.kind = 'class' AND NOT EXISTS (SELECT 1 FROM app.class_members cm WHERE cm.class_id = v.class_id AND cm.user_id = r.user_id)
+                               AND NOT EXISTS (SELECT 1 FROM app.classes c WHERE c.id = v.class_id AND c.teacher_id = r.user_id))
+          OR (u.id::text LIKE '01935000-0000-7000-8000-00000080%' AND u.last_sign_in_at IS NULL));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: read pointer(s) no reader could have left: %', bad;
+  END IF;
+
+  -- The Teacher deck's CONVS: Lan's unread direct messages are Nam's two and Thu Hà's one.
+  SELECT string_agg(u.full_name || '=' || n.unread, ', ' ORDER BY u.full_name) INTO bad
+    FROM app.conversations v
+    JOIN app.users u ON u.id = v.student_id
+    CROSS JOIN LATERAL (
+      SELECT count(*) AS unread FROM app.messages m
+       WHERE m.conversation_id = v.id AND m.sender_id <> lan
+         AND m.id > coalesce((SELECT r.last_read_message_id FROM app.conversation_reads r
+                               WHERE r.conversation_id = v.id AND r.user_id = lan), '00000000-0000-0000-0000-000000000000'::uuid)) n
+   WHERE v.id::text LIKE mine AND v.kind = 'direct' AND v.staff_id = lan AND n.unread > 0;
+  IF bad IS DISTINCT FROM 'Lê Hoàng Nam=2, Phạm Thu Hà=1' THEN
+    RAISE EXCEPTION 'seed: expected Lan''s unread to be Nam''s two and Thu Hà''s one, found %', bad;
+  END IF;
+
+  -- Its MSGS' "Seen by": every announcement seen by some of its class but not all.
+  SELECT string_agg(m.id::text, ', ') INTO bad
+    FROM app.messages m
+    JOIN app.conversations v ON v.id = m.conversation_id AND v.kind = 'class' AND v.class_id <> '01935000-0000-7000-8000-000000000621'
+    CROSS JOIN LATERAL (
+      SELECT count(*) FILTER (WHERE r.last_read_message_id >= m.id) AS seen, count(*) AS students
+        FROM app.class_members cm
+        LEFT JOIN app.conversation_reads r ON r.conversation_id = v.id AND r.user_id = cm.user_id
+       WHERE cm.class_id = v.class_id) s
+   WHERE v.id::text LIKE mine AND (s.seen = 0 OR s.seen >= s.students);
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: announcement(s) seen by none or all of their class: %', bad;
+  END IF;
+
+  -- The context card: Nam's thread with Lan starts within a day of his flagged attempt on
+  -- her assignment (ContextWindow).
+  IF NOT EXISTS (
+       SELECT 1 FROM app.conversations v
+         JOIN app.attempts a ON a.student_id = v.student_id AND a.flagged AND a.focus_loss_count > 0
+         JOIN app.assignments asg ON asg.id = a.assignment_id AND asg.created_by = v.staff_id
+        WHERE v.id::text LIKE mine AND v.kind = 'direct' AND v.staff_id = lan
+          AND coalesce(a.submitted_at, a.started_at)
+              >= (SELECT min(m.created_at) FROM app.messages m WHERE m.conversation_id = v.id) - interval '24 hours') THEN
+    RAISE EXCEPTION 'seed: no thread of Lan''s whose context card shows a flagged attempt';
+  END IF;
+
+  -- The live specs' pair: Khang alone in Minh's class, with an announcement there and a
+  -- direct thread with Minh, nothing unread on either side, and no peer of the Admin's
+  -- (visibility.MessagingPeerIDs), so the Admin's token finds no thread with him.
+  SELECT count(*) INTO found FROM app.class_members WHERE class_id = '01935000-0000-7000-8000-000000000621';
+  IF found <> 1 OR NOT EXISTS (SELECT 1 FROM app.class_members
+                                WHERE class_id = '01935000-0000-7000-8000-000000000621' AND user_id = khang) THEN
+    RAISE EXCEPTION 'seed: expected Khang to be the only member of Minh''s class, found % members', found;
+  END IF;
+  IF EXISTS (SELECT 1 FROM app.conversations v WHERE v.kind = 'direct' AND v.staff_id = admin AND v.student_id = khang)
+     OR EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = admin AND t.student_id = khang)
+     OR EXISTS (SELECT 1 FROM app.users u WHERE u.id = khang AND u.created_by = admin) THEN
+    RAISE EXCEPTION 'seed: Khang is a peer of the Admin''s, so the Admin''s token would find a thread with him';
+  END IF;
+  SELECT string_agg(v.kind, ', ' ORDER BY v.kind) INTO bad
+    FROM app.conversations v
+   WHERE v.id::text LIKE mine
+     AND (v.class_id = '01935000-0000-7000-8000-000000000621' OR (v.staff_id = minh AND v.student_id = khang))
+     AND EXISTS (SELECT 1 FROM app.messages m WHERE m.conversation_id = v.id)
+     AND NOT EXISTS (
+       SELECT 1 FROM unnest(CASE v.kind WHEN 'direct' THEN ARRAY[minh, khang] ELSE ARRAY[khang] END) AS reader(id)
+        WHERE EXISTS (SELECT 1 FROM app.messages m
+                       WHERE m.conversation_id = v.id AND m.sender_id <> reader.id
+                         AND m.id > coalesce((SELECT r.last_read_message_id FROM app.conversation_reads r
+                                               WHERE r.conversation_id = v.id AND r.user_id = reader.id),
+                                             '00000000-0000-0000-0000-000000000000'::uuid)));
+  IF bad IS DISTINCT FROM 'class, direct' THEN
+    RAISE EXCEPTION 'seed: expected Minh''s channel and his thread with Khang, posted in and read, found %', bad;
+  END IF;
+
+  RAISE NOTICE 'seed: collaboration holds';
+END $$;
