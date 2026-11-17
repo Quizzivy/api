@@ -13,7 +13,8 @@
 --   Lan shares         Mid-term Reading Mock             with Minh, Can edit
 --                      Vocabulary Quiz: Travel           with Trang and Bảo, Can use
 --                      Travel vocabulary                 her question set, with Minh, Can use
--- Word lists and courses (SHARE_IN's s3 and s4) arrive with R10.
+-- Word lists and courses (SHARE_IN's s3 and s4) arrive with R10. Collocations holds 12
+-- questions where the deck's card reads 48, so Lan's card reads 12.
 --
 -- Minh also owns "Farm animals · Unit check", published and shared with no one, which holds
 -- 06's question "Write three animals that live on a farm." that his draft "Farm animals
@@ -21,7 +22,9 @@
 -- round trip sharing.live.spec.ts runs.
 --
 -- Messages, the Teacher deck's CONVS and MSGS for Lan, with the reads that give its unread
--- counts and "Seen by" figures:
+-- counts and "Seen by" figures. The words are the Vietnamese of the R7 Messages proposal's
+-- SAY table where it has them, and a translation of the deck's English where it does not
+-- (Thu Hà's thread, and the Foundation A and TOEIC posts):
 --   Lê Hoàng Nam        two unread, after his flagged Reading Mock attempt (the context card)
 --   Phạm Thu Hà         one unread, after Lan's reply
 --   Đỗ Phương Thảo      read
@@ -355,47 +358,47 @@ DECLARE
 BEGIN
   -- d1 · Lê Hoàng Nam, unread 2.
   thread := pg_temp.direct(4, pg_temp.lan(), nam, t + interval '2 minutes');
-  m1 := pg_temp.post(thread, nam, 'd1:1', 'Hi teacher, my wifi dropped during the mock and it counted as leaving fullscreen.', t + interval '2 minutes');
-  m2 := pg_temp.post(thread, nam, 'd1:2', 'Can you check my attempt? I did not open anything else.', t + interval '6 minutes');
+  m1 := pg_temp.post(thread, nam, 'd1:1', 'Dạ, lúc làm bài thi thử wifi nhà em bị rớt nên hệ thống tính là em rời khỏi bài ạ.', t + interval '2 minutes');
+  m2 := pg_temp.post(thread, nam, 'd1:2', 'Nhờ cô xem lại lượt làm bài giúp em. Em không mở gì khác ạ.', t + interval '6 minutes');
   PERFORM pg_temp.read(thread, nam, m2, t + interval '6 minutes');
 
   -- d2 · Phạm Thu Hà, unread 1.
   thread := pg_temp.direct(5, pg_temp.lan(), thuha, t - interval '2 hours 16 minutes');
-  m1 := pg_temp.post(thread, thuha, 'd2:1', 'Can I retake the Unit 3 quiz? I only got 5/10.', t - interval '2 hours 16 minutes');
-  m2 := pg_temp.post(thread, pg_temp.lan(), 'd2:2', 'Yes. I reopened it for you until Friday. Review the notes on question 4 first.', t - interval '2 hours 13 minutes');
-  m3 := pg_temp.post(thread, thuha, 'd2:3', 'Thank you so much!', t - interval '2 hours 12 minutes');
+  m1 := pg_temp.post(thread, thuha, 'd2:1', 'Cô ơi, em làm lại bài kiểm tra Unit 3 được không ạ? Em mới được 5/10.', t - interval '2 hours 16 minutes');
+  m2 := pg_temp.post(thread, pg_temp.lan(), 'd2:2', 'Được em. Cô mở lại bài cho em đến thứ Sáu. Em xem lại phần nhận xét ở câu 4 trước nhé.', t - interval '2 hours 13 minutes');
+  m3 := pg_temp.post(thread, thuha, 'd2:3', 'Em cảm ơn cô nhiều ạ!', t - interval '2 hours 12 minutes');
   PERFORM pg_temp.read(thread, pg_temp.lan(), m2, t - interval '2 hours 13 minutes');
   PERFORM pg_temp.read(thread, thuha, m3, t - interval '2 hours 12 minutes');
 
   -- d3 · Đỗ Phương Thảo, read.
   thread := pg_temp.direct(6, pg_temp.lan(), thao, t - interval '2 days 10 hours 9 minutes');
-  m1 := pg_temp.post(thread, pg_temp.lan(), 'd3:1', 'Great result on the vocabulary quiz. 24/25!', t - interval '2 days 10 hours 9 minutes');
-  m2 := pg_temp.post(thread, thao, 'd3:2', 'Thank you!', t - interval '2 days 9 hours 52 minutes');
+  m1 := pg_temp.post(thread, pg_temp.lan(), 'd3:1', 'Điểm bài từ vựng tốt lắm: 24/25!', t - interval '2 days 10 hours 9 minutes');
+  m2 := pg_temp.post(thread, thao, 'd3:2', 'Em cảm ơn ạ!', t - interval '2 days 9 hours 52 minutes');
   PERFORM pg_temp.read(thread, pg_temp.lan(), m2, t - interval '2 days 9 hours 40 minutes');
   PERFORM pg_temp.read(thread, thao, m2, t - interval '2 days 9 hours 52 minutes');
 
   -- The Student deck's t1 · Lan to Nguyễn Gia Bảo, the second message unread.
   thread := pg_temp.direct(7, pg_temp.lan(), giabao, t - interval '2 days 10 hours 12 minutes');
-  m1 := pg_temp.post(thread, pg_temp.lan(), 't1:1', 'Hi Bảo, great progress on the grammar check this week.', t - interval '2 days 10 hours 12 minutes');
-  m2 := pg_temp.post(thread, pg_temp.lan(), 't1:2', 'For Unit 4 on Thursday, please wear headphones. The audio plays twice.', t - interval '2 days 10 hours 11 minutes');
+  m1 := pg_temp.post(thread, pg_temp.lan(), 't1:1', 'Chào Bảo, tuần này phần ngữ pháp của em tiến bộ rõ.', t - interval '2 days 10 hours 12 minutes');
+  m2 := pg_temp.post(thread, pg_temp.lan(), 't1:2', 'Thứ Năm học Unit 4, em nhớ mang tai nghe. Audio phát hai lần.', t - interval '2 days 10 hours 11 minutes');
   PERFORM pg_temp.read(thread, pg_temp.lan(), m2, t - interval '2 days 10 hours 11 minutes');
   PERFORM pg_temp.read(thread, giabao, m1, t - interval '2 days 10 hours 12 minutes');
 
   -- c1 · IELTS 6.5 Evening: Monday's post seen by all 22 who have signed in, today's by 21.
   thread := pg_temp.channel(1, pg_temp.ws(3, 1), t - interval '2 days 11 hours 2 minutes');
-  m1 := pg_temp.post(thread, pg_temp.lan(), 'c1:1', 'Class moves to Room 3 on Friday because of the fire drill.', t - interval '2 days 11 hours 2 minutes');
-  m2 := pg_temp.post(thread, pg_temp.lan(), 'c1:2', E'Reminder: the Reading Mock closes tonight at 21:00.\nUse a laptop if you can. Phones are allowed but the passage is easier to read on a bigger screen.', t - interval '2 hours 44 minutes');
+  m1 := pg_temp.post(thread, pg_temp.lan(), 'c1:1', 'Thứ Sáu này lớp chuyển sang Phòng 3 vì trung tâm diễn tập phòng cháy.', t - interval '2 days 11 hours 2 minutes');
+  m2 := pg_temp.post(thread, pg_temp.lan(), 'c1:2', 'Nhắc lại: bài Reading Mock đóng lúc 21:00 tối nay. Nên làm trên laptop.', t - interval '2 hours 44 minutes');
   PERFORM pg_temp.read_post(thread, pg_temp.ws(3, 1), m2, t - interval '1 hour', 21, ARRAY[giabao, nam, thuha]);
   PERFORM pg_temp.read_post(thread, pg_temp.ws(3, 1), m1, t - interval '2 days 8 hours', NULL, ARRAY[]::uuid[]);
 
   -- c2 · IELTS Foundation A: seen by 13 of 16.
   thread := pg_temp.channel(2, pg_temp.ws(3, 2), t - interval '1 day 3 hours 34 minutes');
-  m1 := pg_temp.post(thread, pg_temp.lan(), 'c2:1', 'Unit 4 listening is open until Thursday 22:00. Wear headphones. The audio plays twice.', t - interval '1 day 3 hours 34 minutes');
+  m1 := pg_temp.post(thread, pg_temp.lan(), 'c2:1', 'Bài nghe Unit 4 mở đến 22:00 thứ Năm. Các em nhớ đeo tai nghe, audio phát hai lần.', t - interval '1 day 3 hours 34 minutes');
   PERFORM pg_temp.read_post(thread, pg_temp.ws(3, 2), m1, t - interval '1 day', 13, ARRAY[giabao, thuha]);
 
   -- c3 · TOEIC 600 Weekend: seen by 20 of 22.
   thread := pg_temp.channel(3, pg_temp.ws(3, 3), t - interval '3 days 12 hours 14 minutes');
-  m1 := pg_temp.post(thread, pg_temp.lan(), 'c3:1', 'No class this Sunday. We will make it up on Saturday afternoon.', t - interval '3 days 12 hours 14 minutes');
+  m1 := pg_temp.post(thread, pg_temp.lan(), 'c3:1', 'Chủ nhật này lớp nghỉ. Cả lớp học bù vào chiều thứ Bảy nhé.', t - interval '3 days 12 hours 14 minutes');
   PERFORM pg_temp.read_post(thread, pg_temp.ws(3, 3), m1, t - interval '3 days 6 hours', 20, ARRAY[thao]);
 END $$;
 
