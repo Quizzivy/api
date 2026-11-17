@@ -90,6 +90,8 @@ func (w *aiWorld) decisionNotices(teacher string) int {
 // the request's id alone, keyed by the request and the teacher, with no
 // secret, due at once and waiting for the API's dispatcher.
 func TestApproveAndDeclineEmailTheTeacherAsTheMaintenanceRole(t *testing.T) {
+	// Unset, as on the API: every event is emailed, whatever the shell exports.
+	t.Setenv("NOTIFY_EMAIL_EVENTS", "")
 	iso := newIsolated(t)
 	w := &aiWorld{t: t, ctx: iso.ctx, tx: iso.owner, conn: iso.role, month: aiMonth(t)}
 	for _, c := range []struct {
