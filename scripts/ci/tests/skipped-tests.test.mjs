@@ -9,7 +9,9 @@ const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8', maxB
 
 const GO_TESTS = /^server\/.+_test\.go$/;
 
-const GO_SKIP = /\b\w+\.(?:Skip|Skipf|SkipNow)\(\s*("(?:[^"\\]|\\.)*"|`[^`]*`)?/g;
+// Only a testing receiver (t, b, tb, f, tt) skips a test: a package function
+// that happens to be called Skip, such as domain.Skip(x), is not one.
+const GO_SKIP = /\b(?:t|b|tb|f|tt)\.(?:Skip|Skipf|SkipNow)\(\s*("(?:[^"\\]|\\.)*"|`[^`]*`)?/g;
 
 const NAMES_A_PREREQUISITE = /\b(?:TEST_|S3_|IMPORT_)[A-Z_]+|\bAPP_DATABASE_URL\b/;
 
@@ -48,4 +50,11 @@ test('the scanners refuse what they are there to refuse', () => {
   assert.equal(unapprovedGoSkips('t.SkipNow()').length, 1);
   assert.equal(unapprovedGoSkips('t.Skip("TEST_DATABASE_URL is not set")').length, 0);
   assert.equal(unapprovedGoSkips('t.Skip("private MinIO required")').length, 0);
+  assert.equal(unapprovedGoSkips('b.Skip("x")').length, 1);
+});
+
+test('a package function called Skip is not a test skip', () => {
+  assert.equal(unapprovedGoSkips('domain.Skip(x)').length, 0);
+  assert.equal(unapprovedGoSkips('got := domain.Skip(x); t.Skip("x")').length, 1);
+  assert.equal(unapprovedGoSkips('t.Skip("x")').length, 1);
 });
