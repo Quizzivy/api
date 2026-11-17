@@ -5,8 +5,10 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -69,11 +71,14 @@ type isoCase struct {
 	query   map[string]string
 	body    func(x *iso, own *party, slot string) any
 	format  string
+	omit    []string
 	fresh   func(x *iso, own *party) *party
 	link    map[string][]string
 	as      map[string]string
 	excuse  map[string]string
 	blind   map[string]string
+	pending string
+	each    []isoCase
 }
 
 type iso struct {
@@ -206,7 +211,7 @@ func (x *iso) build(op scopedOp, c isoCase, own *party, slot string, value strin
 		case "path":
 			path = strings.ReplaceAll(path, "{"+s.Name+"}", values[s.In+" "+s.Name])
 		case "query":
-			if !bare || !op.optional[s.Name] {
+			if (!bare || !op.optional[s.Name]) && !slices.Contains(c.omit, s.Name) {
 				query.Set(s.Name, values[s.In+" "+s.Name])
 			}
 		}
@@ -274,8 +279,38 @@ func answer(s sent) string {
 
 func success(s sent) bool { return s.status >= 200 && s.status < 300 }
 
+func (x *iso) pendingAnswer(op scopedOp, c isoCase) {
+	x.t.Helper()
+	own := x.b
+	if c.student {
+		own = x.b.student
+	}
+	method, path, body := x.request(op, c, own, "", "")
+	if got := own.c.send(method, path, body); got.status != http.StatusNotImplemented {
+		x.t.Errorf("%s is pending (%s) yet answers %s: give it its isolation case", op.id, c.pending, answer(got))
+	}
+}
+
+// sharingSlots are the parameters that name what a grant would open: the
+// resource of a share, the set or test a bank write works in, and the
+// questions a copy or a set takes. With no grant, another teacher's id in any
+// of them is a 404, whatever else the operation answers to a missing id.
+var sharingSlots = map[string]bool{
+	"query resourceId": true, "body /resourceId": true, "query setId": true, "query forTestId": true, "body /questionIds/-": true,
+}
+
 func (x *iso) substitute(op scopedOp, c isoCase) {
 	x.t.Helper()
+	if c.pending != "" {
+		x.pendingAnswer(op, c)
+		return
+	}
+	for _, variant := range c.each {
+		x.substitute(op, variant)
+	}
+	if c.each != nil {
+		return
+	}
 	caller := func(p *party) *party {
 		if c.student {
 			return p.student
@@ -311,6 +346,9 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 		}
 		if answer(theirs) != answer(missing) {
 			x.t.Errorf("%s: another owner's %s answered\n  %s\nwhere a missing one answers\n  %s", where, s.Kind, answer(theirs), answer(missing))
+		}
+		if sharingSlots[slot] && excused == "" && theirs.status != http.StatusNotFound {
+			x.t.Errorf("%s: another owner's %s answered %s, want 404: no grant opens it", where, s.Kind, answer(theirs))
 		}
 		if leaked := mentions([]byte(strings.ReplaceAll(string(theirs.body), theirID, "")), foreign); len(leaked) > 0 {
 			x.t.Errorf("%s: the answer to another owner's %s names their %v", where, s.Kind, leaked)

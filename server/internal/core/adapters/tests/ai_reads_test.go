@@ -187,6 +187,7 @@ func TestAStoredQuestionIsReadWithItsKeyAndAMissingOneIsNotFound(t *testing.T) {
 		}
 		return stored, nil
 	})}
+	stored.Access = questionsdomain.AccessOwner
 	got, err := r.Get(context.Background(), access.Scope{UserID: "t"}, "q-1")
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +331,7 @@ func draftReading(reads *groupReads, sections ...testsdomain.Section) adapters.A
 			if q.ID != "t-1" {
 				return testsdomain.Test{}, testsdomain.ErrNotFound
 			}
-			return testsdomain.Test{ID: "t-1", Sections: sections}, nil
+			return testsdomain.Test{ID: "t-1", Sections: sections, Access: testsdomain.AccessOwner}, nil
 		}),
 		Group: cqrs.HandlerFunc[testsquery.Group, testsdomain.StoredGroup](func(_ context.Context, q testsquery.Group) (testsdomain.StoredGroup, error) {
 			reads.fetched = append(reads.fetched, q.ID)
@@ -344,7 +345,7 @@ func draftReading(reads *groupReads, sections ...testsdomain.Section) adapters.A
 			if q.ID == "q-gone" {
 				return questionsdomain.Question{}, questionsdomain.ErrNotFound
 			}
-			return questionsdomain.Question{ID: q.ID, Type: "short_answer", Prompt: "Prompt of " + q.ID}, nil
+			return questionsdomain.Question{ID: q.ID, Type: "short_answer", Prompt: "Prompt of " + q.ID, Access: questionsdomain.AccessOwner}, nil
 		}),
 	}
 }
@@ -547,11 +548,13 @@ func TestTheNewTypesAreReadWithTheirKeysChooseNAndRubric(t *testing.T) {
 		"q-essay": {ID: "q-essay", Type: questionsdomain.Essay, Prompt: "Write.", Rubric: []questionsdomain.RubricCriterion{{ID: "c2", Ordinal: 1, Label: "Coherence"}, {ID: "c1", Ordinal: 0, Label: "Task response"}}},
 	}
 	read := cqrs.HandlerFunc[questionsquery.Get, questionsdomain.Question](func(_ context.Context, q questionsquery.Get) (questionsdomain.Question, error) {
-		return stored[q.ID], nil
+		found := stored[q.ID]
+		found.Access = questionsdomain.AccessOwner
+		return found, nil
 	})
 	r := adapters.AITests{
 		Test: cqrs.HandlerFunc[testsquery.Get, testsdomain.Test](func(context.Context, testsquery.Get) (testsdomain.Test, error) {
-			return testsdomain.Test{ID: "t-1", Sections: []testsdomain.Section{{Units: unitsOf("question", "q-match", "q-two", "q-essay")}}}, nil
+			return testsdomain.Test{ID: "t-1", Sections: []testsdomain.Section{{Units: unitsOf("question", "q-match", "q-two", "q-essay")}}, Access: testsdomain.AccessOwner}, nil
 		}),
 		Question: read,
 	}
@@ -576,5 +579,36 @@ func TestTheNewTypesAreReadWithTheirKeysChooseNAndRubric(t *testing.T) {
 	}
 	if fmt.Sprint(bank.MatchItems) != fmt.Sprint(wantItems) {
 		t.Errorf("a stored matching question reads items %v, want %v", bank.MatchItems, wantItems)
+	}
+}
+
+// TestARecipientOfAShareAsksTheAssistantNothing: the AI operations stay the
+// owner's and scope.all's (web#79), so a test or a question read through a
+// share answers as missing.
+func TestARecipientOfAShareAsksTheAssistantNothing(t *testing.T) {
+	for _, level := range []testsdomain.Access{testsdomain.AccessUse, testsdomain.AccessEdit} {
+		r := adapters.AITests{
+			Test: cqrs.HandlerFunc[testsquery.Get, testsdomain.Test](func(context.Context, testsquery.Get) (testsdomain.Test, error) {
+				return testsdomain.Test{ID: "t-1", Sections: []testsdomain.Section{{ID: "s-1", Units: unitsOf("question", "q-1")}}, Access: level}, nil
+			}),
+		}
+		scope := access.Scope{UserID: "grantee"}
+		if _, err := r.Draft(context.Background(), scope, "t-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("the draft of a %s test: %v, want not found", level, err)
+		}
+		if _, err := r.Section(context.Background(), scope, "t-1", "s-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a section of a %s test: %v, want not found", level, err)
+		}
+		if _, err := r.Passage(context.Background(), scope, "t-1", "p-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a passage of a %s test: %v, want not found", level, err)
+		}
+	}
+	for _, level := range []questionsdomain.Access{questionsdomain.AccessUse, questionsdomain.AccessEdit} {
+		r := adapters.AIQuestions{Question: cqrs.HandlerFunc[questionsquery.Get, questionsdomain.Question](func(context.Context, questionsquery.Get) (questionsdomain.Question, error) {
+			return questionsdomain.Question{ID: "q-1", Type: "short_answer", Prompt: "Shared", Access: level}, nil
+		})}
+		if _, err := r.Get(context.Background(), access.Scope{UserID: "grantee"}, "q-1"); !errors.Is(err, aidomain.ErrNotFound) {
+			t.Errorf("a %s question: %v, want not found", level, err)
+		}
 	}
 }

@@ -28,7 +28,7 @@ func (s *Postgres) Preview(ctx context.Context, scope access.Scope, testID strin
         SELECT v.id::text, v.version FROM app.test_versions v
         JOIN app.tests t ON t.id=v.test_id
         WHERE v.test_id=$1 AND t.deleted_at IS NULL
-        AND ($3::boolean OR t.owner_id = $4::uuid)
+        AND `+testAccess("t", 3, 4)+` IS NOT NULL
         AND v.version=CASE WHEN $2::integer=0 THEN t.current_version ELSE $2 END
         FOR SHARE OF v`, testID, version, scope.All, opt.String(scope.UserID)).Scan(&versionID, &paper.Version)
 	if errors.Is(err, pgx.ErrNoRows) {

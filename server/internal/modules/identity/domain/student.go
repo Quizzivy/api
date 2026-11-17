@@ -9,9 +9,12 @@ import (
 // Student is §7's User narrowed to the role this listing returns, plus what
 // G-07 draws beside it: the memberships and figures the reader's scope reaches.
 type Student struct {
-	ID                 string
-	Email              string
-	FullName           string
+	ID       string
+	Email    string
+	FullName string
+	// CanMessage is whether the reader may write to the student in a direct
+	// thread: the messaging module's eligibility for a post (T-R7.10a).
+	CanMessage         bool
 	HasPassword        bool
 	LinkedProviders    []string
 	MustChangePassword bool

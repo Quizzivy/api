@@ -8,6 +8,11 @@ var (
 	ErrNotFound = errors.New("questions: not found")
 	// ErrReferenced is a delete refused because a draft outline still uses it.
 	ErrReferenced = errors.New("questions: referenced by a draft test outline")
+	// ErrStaleWrite is an update based on a revision of the question other
+	// than its current one (WriteRequest.ExpectedUpdatedAt). The repository
+	// answers it as a provenance.StaleError naming the write the editor had
+	// not seen.
+	ErrStaleWrite = errors.New("questions: edited elsewhere since the version read")
 )
 
 // ErrMediaNotFound is a well-formed asset id that resolves to nothing.

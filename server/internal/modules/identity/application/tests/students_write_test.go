@@ -65,6 +65,11 @@ func TestCreatingAStudentEnrolsThemAndForcesAChange(t *testing.T) {
 	if created.Classes[0].JoinedVia != "admin" {
 		t.Errorf("joinedVia = %q, want admin", created.Classes[0].JoinedVia)
 	}
+	var tied bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM app.messaging_ties t JOIN app.classes c ON c.teacher_id = t.staff_id
+		 WHERE c.id = $1::uuid AND t.student_id = $2::uuid)`, w.class, created.ID).Scan(&tied); err != nil || !tied {
+		t.Errorf("the student is not tied to the class's teacher (%v), T-R7.9", err)
+	}
 }
 
 func TestAStudentMadeBeforeTheRuleWithAnInvisibleAddressCanStillBeRenamed(t *testing.T) {

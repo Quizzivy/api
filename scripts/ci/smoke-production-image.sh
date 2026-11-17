@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts /app/api and /app/import-worker from a built production image as the
-# image's own user, with fly.toml's [env] and throwaway secrets, against a
+# image's own user, with deploy/production.env and throwaway secrets, against a
 # migrated Postgres on localhost. Fails unless the API answers /livez and the
 # worker logs that it started, and prints both logs when either exits first.
 # Before that it runs /app/maintenance once, a dry run of the retention sweep
@@ -32,13 +32,23 @@ fail() {
   exit 1
 }
 
-python3 - "$root/fly.toml" > "$env_file" <<'PY'
+python3 - "$root/deploy/production.env" > "$env_file" <<'PY'
 import os
+import re
 import sys
-import tomllib
 
-with open(sys.argv[1], "rb") as f:
-    env = tomllib.load(f)["env"]
+# KEY=value lines, a value optionally quoted, as the box's compose reads them.
+# docker run --env-file would keep the quotes, so they are taken off here.
+env = {}
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.fullmatch(r'([A-Z0-9_]+)=(?:"([^"]*)"|\'([^\']*)\'|([^\s#"\']*))\s*(?:#.*)?', line)
+        if m is None:
+            sys.exit(f"deploy/production.env: cannot read {line!r}")
+        env[m.group(1)] = "".join(g or "" for g in m.groups()[1:])
 
 env.update({
     "DATABASE_URL": f"postgres://quizzivy_app:app@localhost:5432/{os.environ['SMOKE_DATABASE']}?sslmode=disable",

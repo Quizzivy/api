@@ -194,13 +194,17 @@ type AdminClassRef struct {
 }
 
 // OwnedContent counts what an account owns and a transfer would move.
+// QuestionSets is counted for Any only: the contract's ownedContent and the
+// USER_OWNS_CONTENT details name no sets yet, so neither carries it.
 type OwnedContent struct {
-	Classes, Tests, Questions, Media, Assignments int
+	Classes, Tests, Questions, Media, Assignments, QuestionSets int
 }
 
-// Any reports whether the account owns anything a transfer would move.
+// Any reports whether the account owns anything a transfer would move. A set
+// counts on its own: one emptied of its questions still keeps its grants
+// open to others, and only a teacher workspace reaches it.
 func (o OwnedContent) Any() bool {
-	return o.Classes+o.Tests+o.Questions+o.Media+o.Assignments > 0
+	return o.Classes+o.Tests+o.Questions+o.Media+o.Assignments+o.QuestionSets > 0
 }
 
 // UserEventKind is what a line of an account's recent activity records.

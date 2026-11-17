@@ -61,6 +61,13 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 	"DELETE /auth/sessions/{familyId}":           {{Burst: 10, Window: time.Minute}, {Burst: 60, Window: time.Hour}},
 	"POST /auth/sessions/revoke-others":          {{Burst: 5, Window: time.Minute}, {Burst: 30, Window: time.Hour}},
 	"POST /auth/set-password/request":            {{Burst: 3, Window: time.Minute}, {Burst: 10, Window: time.Hour}},
+	"GET /teacher/directory/teachers":            {{Burst: 60, Window: time.Minute}},
+	"POST /teacher/shares":                       {{Burst: 30, Window: time.Hour}},
+
+	"POST /teacher/messages/students/{studentId}": messagePosts,
+	"POST /teacher/messages/classes/{classId}":    messagePosts,
+	"POST /app/messages/teachers/{teacherId}":     studentPosts,
+	"POST /teacher/messages/attachments":          {{Burst: 20, Window: time.Hour}},
 
 	"POST /teacher/ai/questions/generate":                                         aiSuggestion,
 	"POST /teacher/ai/tests/{id}/check":                                           aiSuggestion,
@@ -82,6 +89,8 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 }
 
 var (
+	messagePosts = []ratelimit.Rule{{Burst: 30, Window: time.Minute}, {Burst: 500, Window: 24 * time.Hour}}
+	studentPosts = []ratelimit.Rule{{Burst: 10, Window: time.Minute}, {Burst: 200, Window: 24 * time.Hour}}
 	aiSuggestion = []ratelimit.Rule{{Burst: 10, Window: time.Minute}, {Burst: 100, Window: time.Hour}}
 	aiConsole    = aiSuggestion
 	aiRead       = []ratelimit.Rule{{Burst: 60, Window: time.Minute}, {Burst: 600, Window: time.Hour}}
@@ -261,8 +270,8 @@ func TestThePrincipalAssertionActuallyFails(t *testing.T) {
 		t.Errorf("err = %v, want it to name the entry that is no operation of the contract", err)
 	}
 
-	err = httpx.AssertPrincipalRoutesGated(spec, "bearerAuth", keyed(theOpenTwelve...))
-	for _, open := range theOpenTwelve {
+	err = httpx.AssertPrincipalRoutesGated(spec, "bearerAuth", keyed(theOpenThirteen...))
+	for _, open := range theOpenThirteen {
 		if err == nil || !strings.Contains(err.Error(), open+": is an open operation") {
 			t.Errorf("err = %v, want it to name %q", err, open)
 		}

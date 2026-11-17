@@ -161,6 +161,19 @@ func avatarPNG(t *testing.T) []byte {
 	return b.Bytes()
 }
 
+// tinyPDF is enough of a PDF for an attachment's sniffing: "%PDF-" at 0.
+var tinyPDF = []byte("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n")
+
+// uploadAttachment uploads a PDF as c, unsent, and returns its id.
+func uploadAttachment(t *testing.T, c *client, filename string) string {
+	t.Helper()
+	got := c.send(http.MethodPost, "/teacher/messages/attachments", new(filePayload(t, filename, tinyPDF)))
+	if got.status != http.StatusCreated {
+		t.Fatalf("uploading %s: %s", filename, answer(got))
+	}
+	return got.json["id"].(string)
+}
+
 func tinyDocx(t *testing.T) []byte {
 	t.Helper()
 	var b bytes.Buffer
@@ -192,6 +205,8 @@ type party struct {
 	beacon  string
 	code    string
 	student *party
+	mate    *client
+	mateID  string
 }
 
 func (p *party) id(kind string) string {
@@ -243,6 +258,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	p.ids["question"] = id(question)
 	c.must(http.StatusOK, http.MethodPost, "/teacher/questions/tags", map[string]any{"questionIds": []string{p.ids["question"]}, "tags": []string{"cách ly"}})
+	p.ids["question-set"] = id(c.must(http.StatusCreated, http.MethodPost, "/teacher/question-sets", map[string]any{
+		"name": "Bộ cách ly " + name, "questionIds": []string{p.ids["question"]},
+	}))
 	test := c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề cách ly " + name + " " + nonce(w.t)})
 	p.ids["test"] = id(test)
 	test = c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+id(test), map[string]any{
@@ -256,6 +274,13 @@ func (w *world) teacherWorld(name string) *party {
 	c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+p.ids["test"], map[string]any{
 		"expectedUpdatedAt": test["updatedAt"], "title": "Đề cách ly có bản nháp " + name,
 	})
+
+	p.mate = w.signedIn(w.createStaff("teacher"))
+	p.mateID = id(p.mate.must(http.StatusOK, http.MethodGet, "/auth/me", nil))
+	p.ids["share"] = p.shareWith(p.c, p.ids["test"], p.mateID)
+	p.ids["shared-with-me"] = p.shareWith(p.mate, id(p.mate.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{
+		"title": "Đề của đồng nghiệp " + name + " " + nonce(w.t),
+	})), p.userID)
 
 	group := c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
 		"bundle": map[string]any{
@@ -286,6 +311,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	user := created["user"].(map[string]any)
 	p.ids["student"] = user["id"].(string)
+	// The teacher created the student and teaches them, so the student is a
+	// messaging peer of the teacher's.
+	p.ids["messaging-peer"] = p.ids["student"]
 
 	assignment := c.assign(versionID, p.ids["class"])
 	p.ids["assignment"] = id(assignment)
@@ -318,8 +346,28 @@ func (w *world) teacherWorld(name string) *party {
 		"version-question":  id(open["questions"].([]any)[0].(map[string]any)),
 		"version-recording": stimulus["recordings"].([]any)[0].(map[string]any)["id"].(string),
 		"media":             p.ids["media"],
+		"class":             p.ids["class"],
 	}}
+	// The student's Messages hold their teacher's thread and their class's
+	// announcement, so the walk compares a list that is not empty.
+	// The teacher's message to the student holds a file, so both have an
+	// attachment to download, and the posts' attachmentId a kind to name.
+	p.ids["attachment"] = uploadAttachment(w.t, c, "bai-tap-"+name+".pdf")
+	p.student.ids["attachment"] = p.ids["attachment"]
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/students/"+p.student.userID, map[string]any{"clientId": uuid.NewString(), "body": "Chào em " + name, "attachmentId": p.ids["attachment"]})
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/classes/"+p.ids["class"], map[string]any{"clientId": uuid.NewString(), "body": "Chào lớp " + name})
 	return p
+}
+
+func (p *party) shareWith(sharer *client, test, grantee string) string {
+	made := sharer.must(http.StatusCreated, http.MethodPost, "/teacher/shares", map[string]any{
+		"kind": "test", "resourceId": test, "granteeIds": []string{grantee}, "access": "use", "notify": false,
+	})
+	grants, _ := made["grants"].([]any)
+	if len(grants) != 1 {
+		p.c.w.t.Fatalf("sharing %s with %s made %v", test, grantee, made)
+	}
+	return id(grants[0].(map[string]any))
 }
 
 func (w *world) handedInShortAnswer(p *party, teacher, learner *client, name string) (question, attempt string) {
@@ -427,6 +475,8 @@ func (w *world) snapshotOf(p *party) string {
 		  UNION ALL SELECT row_to_json(x)::text FROM app.test_versions x JOIN app.tests t ON t.id = x.test_id WHERE t.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.test_sections x JOIN app.tests t ON t.id = x.test_id WHERE t.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.questions x WHERE x.owner_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.question_sets x WHERE x.owner_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.question_set_items x JOIN app.question_sets s ON s.id = x.set_id WHERE s.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.question_groups x WHERE x.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.media_assets x WHERE x.owner_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.word_imports x WHERE x.created_by = $1::uuid

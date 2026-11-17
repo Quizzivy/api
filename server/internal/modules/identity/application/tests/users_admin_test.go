@@ -394,6 +394,10 @@ func TestAClassIsGivenOnlyToAStudentTargetByACallerWhoReachesEveryClass(t *testi
 	if via != "admin" || addedBy != w.actor {
 		t.Errorf("membership = %s by %s, want admin by the actor", via, addedBy)
 	}
+	if n := w.count(t, `SELECT count(*) FROM app.messaging_ties t JOIN app.classes c ON c.teacher_id = t.staff_id
+		 WHERE c.id = $1::uuid AND t.student_id = $2::uuid`, open, result.User.ID); n != 1 {
+		t.Errorf("%d tie(s) between the class's teacher and the student, want one (T-R7.9)", n)
+	}
 }
 
 func TestAnEmailAlreadyInUseInAnyCaseIsRefusedWithNoSecondInvite(t *testing.T) {

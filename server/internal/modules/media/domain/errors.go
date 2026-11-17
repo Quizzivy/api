@@ -37,6 +37,11 @@ var ErrNothingToUpdate = errors.New("media: the update changes nothing")
 // ErrReferenced rejects deletion while a published version or independent group still depends on the asset.
 var ErrReferenced = errors.New("media: asset is referenced by assessment content")
 
+// ErrInUseElsewhere rejects deletion while content of another owner uses the
+// asset, a copy's or a co-editor's (T-R7.7): their live bank questions, their
+// groups or their published versions. Nothing of theirs is named.
+var ErrInUseElsewhere = errors.New("media: asset is used by another owner's content")
+
 var ErrNoID = errors.New("media: could not generate an asset id")
 
 // ErrForbidden is a student asking for an asset they cannot reach. Deliberately

@@ -6,8 +6,10 @@ import (
 	"quizzivy/internal/modules/dashboard/application"
 	"quizzivy/internal/modules/dashboard/application/query"
 	"quizzivy/internal/modules/dashboard/domain"
+	messagingquery "quizzivy/internal/modules/messaging/application/query"
 	notificationsquery "quizzivy/internal/modules/notifications/application/query"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
+	sharingquery "quizzivy/internal/modules/sharing/application/query"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/cqrs"
 	"quizzivy/internal/shared/paging"
@@ -156,5 +158,61 @@ func TestNotificationErrorsAreNotHidden(t *testing.T) {
 	}))
 	if _, err := app.Queries.Nav.Handle(context.Background(), query.Nav{}); !errors.Is(err, expected) {
 		t.Fatalf("port error=%v", err)
+	}
+}
+
+func TestNavCountsWhatIsSharedWithTheCallerThroughTheSharingPort(t *testing.T) {
+	unread := cqrs.HandlerFunc[notificationsquery.Summary, notificationsdomain.Summary](func(context.Context, notificationsquery.Summary) (notificationsdomain.Summary, error) {
+		return notificationsdomain.Summary{}, nil
+	})
+	out, err := application.New(&store{t: t}).WithNotifications(unread).Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher"}})
+	if err != nil || out.SharedWithMe != 0 {
+		t.Fatalf("without the port the nav counts %d (%v), want 0", out.SharedWithMe, err)
+	}
+	var asked sharingquery.CountSharedWithMe
+	app := application.New(&store{t: t}).WithNotifications(unread).WithSharedWithMe(cqrs.HandlerFunc[sharingquery.CountSharedWithMe, int](func(_ context.Context, q sharingquery.CountSharedWithMe) (int, error) {
+		asked = q
+		return 4, nil
+	}))
+	out, err = app.Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher", All: true}})
+	if err != nil || out.SharedWithMe != 4 || asked.UserID != "teacher" {
+		t.Fatalf("the nav counts %d (%v) after asking %+v, want 4 for the caller", out.SharedWithMe, err, asked)
+	}
+	expected := errors.New("sharing unavailable")
+	failing := application.New(&store{t: t}).WithNotifications(unread).WithSharedWithMe(cqrs.HandlerFunc[sharingquery.CountSharedWithMe, int](func(context.Context, sharingquery.CountSharedWithMe) (int, error) {
+		return 0, expected
+	}))
+	if _, err := failing.Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher"}}); !errors.Is(err, expected) {
+		t.Fatalf("a failing count gave %v", err)
+	}
+}
+
+func TestNavCountsTheCallersUnreadMessagesInTheirOwnScope(t *testing.T) {
+	unread := cqrs.HandlerFunc[notificationsquery.Summary, notificationsdomain.Summary](func(_ context.Context, q notificationsquery.Summary) (notificationsdomain.Summary, error) {
+		if q.Messages {
+			t.Error("the nav asked notifications for a student's messages")
+		}
+		return notificationsdomain.Summary{}, nil
+	})
+	out, err := application.New(&store{t: t}).WithNotifications(unread).Queries.Nav.Handle(context.Background(), query.Nav{Scope: access.Scope{UserID: "teacher"}})
+	if err != nil || out.UnreadMessages != 0 {
+		t.Fatalf("without the port the nav counts %d messages (%v), want 0", out.UnreadMessages, err)
+	}
+	var asked messagingquery.StaffUnread
+	app := application.New(&store{t: t}).WithNotifications(unread).WithUnreadMessages(cqrs.HandlerFunc[messagingquery.StaffUnread, int](func(_ context.Context, q messagingquery.StaffUnread) (int, error) {
+		asked = q
+		return 120, nil
+	}))
+	scope := access.Scope{UserID: "teacher"}
+	out, err = app.Queries.Nav.Handle(context.Background(), query.Nav{Scope: scope})
+	if err != nil || out.UnreadMessages != 120 || asked.Scope != scope {
+		t.Fatalf("the nav counts %d messages (%v) after asking %+v, want 120 in the scope it was given", out.UnreadMessages, err, asked)
+	}
+	expected := errors.New("messaging unavailable")
+	failing := application.New(&store{t: t}).WithNotifications(unread).WithUnreadMessages(cqrs.HandlerFunc[messagingquery.StaffUnread, int](func(context.Context, messagingquery.StaffUnread) (int, error) {
+		return 0, expected
+	}))
+	if _, err := failing.Queries.Nav.Handle(context.Background(), query.Nav{Scope: scope}); !errors.Is(err, expected) {
+		t.Fatalf("a failing count gave %v", err)
 	}
 }

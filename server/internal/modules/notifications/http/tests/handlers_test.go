@@ -19,6 +19,7 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 	notificationshttp "quizzivy/internal/modules/notifications/http"
 	"quizzivy/internal/platform/httpx"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/cqrs"
 )
 
@@ -182,12 +183,12 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 	var summarised query.Summary
 	var read query.Preferences
 	var saved command.UpdatePreferences
-	stored := domain.WithDefaults([]domain.Preference{{Event: domain.EventAttemptFlagged, InApp: false, Email: true}})
+	stored := domain.WithDefaults([]domain.Preference{{Event: domain.EventAttemptFlagged, InApp: false, Email: true}}, domain.Staff)
 	transport := notificationshttp.NewNotifications(&application.Application{
 		Queries: application.Queries{
 			Summary: cqrs.HandlerFunc[query.Summary, domain.Summary](func(_ context.Context, q query.Summary) (domain.Summary, error) {
 				summarised = q
-				return domain.Summary{UnreadNotifications: 4}, nil
+				return domain.Summary{UnreadNotifications: 4, UnreadMessages: 2}, nil
 			}),
 			Preferences: cqrs.HandlerFunc[query.Preferences, []domain.Preference](func(_ context.Context, q query.Preferences) ([]domain.Preference, error) {
 				read = q
@@ -209,13 +210,14 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		}
 		return out.VisitGetMySummaryResponse(w)
 	})
-	if got := summary.Body.String(); got != `{"unreadNotifications":4}`+"\n" || summarised.UserID != caller {
-		t.Errorf("the summary is %s for %q", got, summarised.UserID)
+	if got := summary.Body.String(); got != `{"unreadMessages":2,"unreadNotifications":4}`+"\n" || summarised.UserID != caller || !summarised.Messages {
+		t.Errorf("the summary is %s for %+v, want the caller's, with their messages", got, summarised)
 	}
 
 	const switches = `[{"email":false,"event":"attempt.submitted","inApp":true},{"email":true,"event":"attempt.flagged","inApp":false},` +
-		`{"email":false,"event":"assignment.closing","inApp":true},{"email":false,"event":"assignment.due_soon","inApp":true},` +
-		`{"email":false,"event":"result.ready","inApp":true}]` + "\n"
+		`{"email":false,"event":"assignment.closing","inApp":true},{"email":true,"event":"assignment.due_soon","inApp":true},` +
+		`{"email":true,"event":"result.ready","inApp":true},{"email":true,"event":"message.received","inApp":true},` +
+		`{"email":true,"event":"summary.weekly","inApp":false}]` + "\n"
 	preferences := answered(t, "", func(ctx context.Context, w http.ResponseWriter) error {
 		out, err := transport.GetNotificationPreferences(ctx, openapi.GetNotificationPreferencesRequestObject{})
 		if err != nil {
@@ -223,7 +225,7 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 		}
 		return out.VisitGetNotificationPreferencesResponse(w)
 	})
-	if got := preferences.Body.String(); got != switches || read.UserID != caller {
+	if got := preferences.Body.String(); got != switches || read.UserID != caller || read.Recipient != domain.Staff {
 		t.Errorf("the switches are %s for %q, want %s", got, read.UserID, switches)
 	}
 	var decoded []any
@@ -248,8 +250,19 @@ func TestTheSummaryAndTheSwitchesAreTheCallersOwn(t *testing.T) {
 	if updated.Code != http.StatusOK || updated.Body.String() != switches {
 		t.Errorf("saving answered %d %s, want the stored switches", updated.Code, updated.Body.String())
 	}
-	if saved.UserID != caller || !slices.Equal(saved.Preferences, stored) {
-		t.Errorf("the command was %+v, want the caller's five switches as sent", saved)
+	if saved.UserID != caller || saved.Recipient != domain.Staff || !slices.Equal(saved.Preferences, stored) {
+		t.Errorf("the command was %+v, want the caller's seven switches as sent", saved)
+	}
+
+	answeredAs(t, access.BuiltinStudent, "", func(ctx context.Context, _ http.ResponseWriter) error {
+		if _, err := transport.GetNotificationPreferences(ctx, openapi.GetNotificationPreferencesRequestObject{}); err != nil {
+			return err
+		}
+		_, err := transport.UpdateNotificationPreferences(ctx, openapi.UpdateNotificationPreferencesRequestObject{Body: &body})
+		return err
+	})
+	if read.Recipient != domain.Student || saved.Recipient != domain.Student {
+		t.Errorf("a student's switches were read as %v and saved as %v, want a student's (DG-82)", read.Recipient, saved.Recipient)
 	}
 }
 

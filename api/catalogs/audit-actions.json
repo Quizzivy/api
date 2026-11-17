@@ -301,6 +301,11 @@
       "en": "Deleted a question"
     },
     {
+      "key": "question.forked",
+      "vi": "Đã tách bản sao câu hỏi khi sửa",
+      "en": "Forked a question while editing it"
+    },
+    {
       "key": "question.updated",
       "vi": "Đã cập nhật câu hỏi",
       "en": "Updated a question"
@@ -334,6 +339,21 @@
       "key": "question_group.updated",
       "vi": "Đã cập nhật bài đọc, điền từ hoặc bài nghe",
       "en": "Updated a passage, cloze or recording"
+    },
+    {
+      "key": "question_set.created",
+      "vi": "Đã tạo bộ câu hỏi",
+      "en": "Created a question set"
+    },
+    {
+      "key": "question_set.deleted",
+      "vi": "Đã xoá bộ câu hỏi",
+      "en": "Deleted a question set"
+    },
+    {
+      "key": "question_set.updated",
+      "vi": "Đã cập nhật bộ câu hỏi",
+      "en": "Updated a question set"
     },
     {
       "key": "refresh_token.reuse_detected",
@@ -374,6 +394,31 @@
       "key": "session.revoked_others",
       "vi": "Đã thu hồi các phiên đăng nhập khác",
       "en": "Revoked the other sign-in sessions"
+    },
+    {
+      "key": "share.changed",
+      "vi": "Đã đổi quyền chia sẻ",
+      "en": "Changed a share's access"
+    },
+    {
+      "key": "share.copied",
+      "vi": "Đã tạo bản sao từ nội dung được chia sẻ",
+      "en": "Made a copy of shared content"
+    },
+    {
+      "key": "share.granted",
+      "vi": "Đã chia sẻ",
+      "en": "Shared content"
+    },
+    {
+      "key": "share.removed",
+      "vi": "Đã gỡ khỏi danh sách được chia sẻ",
+      "en": "Removed shared content from their list"
+    },
+    {
+      "key": "share.revoked",
+      "vi": "Đã ngừng chia sẻ",
+      "en": "Stopped sharing"
     },
     {
       "key": "student.created",

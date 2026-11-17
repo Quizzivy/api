@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -97,4 +98,99 @@ func TransferredKey(fromUserID string) string {
 // teacher changed: a later change replaces the item.
 func TeacherChangedKey(classID string) string {
 	return "teacher_changed:" + classID
+}
+
+// SharedKey is the dedupe key of a teacher being told that a test or a
+// question set was shared with them: a later share of the same content, after
+// a revocation, replaces the item.
+func SharedKey(kind, resourceID string) string {
+	return "shared:" + kind + ":" + resourceID
+}
+
+// CollaboratorPublishedKey is the dedupe key of an owner being told that a
+// co-editor published version of their test: each version is told once.
+func CollaboratorPublishedKey(testID string, version int) string {
+	return "collaborator_published:" + testID + ":" + strconv.Itoa(version)
+}
+
+// MessageKeyPrefix begins the dedupe key of every message item, so that a
+// statement can name the items of a set of threads.
+const MessageKeyPrefix = "msg:"
+
+// MessageKey is the dedupe key of the item a reader holds for one thread,
+// the conversation conversationID: one per reader per thread.
+func MessageKey(conversationID string) string {
+	return MessageKeyPrefix + conversationID
+}
+
+// ConversationOf is the conversation a MessageKey names, and false for a key
+// that is not a message item's.
+func ConversationOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, MessageKeyPrefix)
+	return id, ok && id != ""
+}
+
+// SharedOf is the kind and the id of the content a SharedKey names, and false
+// for a key that is not a share's.
+func SharedOf(key string) (kind, resourceID string, ok bool) {
+	rest, ok := strings.CutPrefix(key, "shared:")
+	if !ok {
+		return "", "", false
+	}
+	kind, resourceID, ok = strings.Cut(rest, ":")
+	return kind, resourceID, ok && kind != "" && resourceID != ""
+}
+
+// AllowanceWarningOf is the month an AllowanceWarningKey names, its first day
+// as 00:00 UTC, and false for a key that is not an allowance warning's.
+func AllowanceWarningOf(key string) (time.Time, bool) {
+	month, ok := strings.CutPrefix(key, "ai_warning:")
+	if !ok {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.DateOnly, month)
+	return at, err == nil && at.Day() == 1
+}
+
+// CreditRequestOf is the request a CreditRequestKey names, and false for a
+// key that is not one.
+func CreditRequestOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "ai_request:")
+	return id, ok && id != ""
+}
+
+// CreditDecisionOf is the request a CreditDecisionKey names, and false for a
+// key that is not one.
+func CreditDecisionOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "ai_decision:")
+	return id, ok && id != ""
+}
+
+// TeacherChangedOf is the class a TeacherChangedKey names, and false for a
+// key that is not a change of teacher's.
+func TeacherChangedOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "teacher_changed:")
+	return id, ok && id != ""
+}
+
+// SubmittedFrom is the start of the bucket a SubmittedKey names, and false
+// for a key that is not one.
+func SubmittedFrom(key string) (time.Time, bool) {
+	rest, ok := strings.CutPrefix(key, "submitted:")
+	i := strings.LastIndexByte(rest, ':')
+	if !ok || i <= 0 {
+		return time.Time{}, false
+	}
+	bucket, err := strconv.ParseInt(rest[i+1:], 10, 64)
+	if err != nil || bucket < 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(bucket*int64(SubmittedBucket/time.Second), 0).UTC(), true
+}
+
+// SubmittedBucketOf is the start of the fifteen-minute bucket SubmittedKey
+// puts at in.
+func SubmittedBucketOf(at time.Time) time.Time {
+	size := int64(SubmittedBucket / time.Second)
+	return time.Unix(at.Unix()/size*size, 0).UTC()
 }

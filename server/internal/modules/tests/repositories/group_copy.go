@@ -14,7 +14,7 @@ func (s *GroupsPostgres) Copy(ctx context.Context, in domain.CopyGroupInput) (do
 		return domain.StoredGroup{}, err
 	}
 	if source.Revision != in.ExpectedSourceRevision {
-		return domain.StoredGroup{}, domain.ErrStaleWrite
+		return domain.StoredGroup{}, staleGroup(source, nil)
 	}
 	bundle, err := detachedGroupCopy(source.Bundle)
 	if err != nil {

@@ -9,7 +9,9 @@ import (
 	identityrepo "quizzivy/internal/modules/identity/repositories"
 	importsrepo "quizzivy/internal/modules/imports/repositories"
 	mediarepo "quizzivy/internal/modules/media/repositories"
+	messagingrepo "quizzivy/internal/modules/messaging/repositories"
 	questionsrepo "quizzivy/internal/modules/questions/repositories"
+	sharingrepo "quizzivy/internal/modules/sharing/repositories"
 	testsrepo "quizzivy/internal/modules/tests/repositories"
 )
 
@@ -24,15 +26,18 @@ func TestEveryPageSizeMatchesItsContract(t *testing.T) {
 	}
 
 	want := map[string]int{
-		"ListWordImports":    importsrepo.DefaultLimit,
-		"ListTests":          testsrepo.DefaultLimit,
-		"ListQuestionGroups": testsrepo.DefaultLimit,
-		"ListQuestions":      questionsrepo.DefaultLimit,
-		"ListMedia":          mediarepo.DefaultLimit,
-		"ListAssignments":    assignmentsrepo.DefaultLimit,
-		"ListStudents":       identityrepo.DefaultLimit,
-		"ListUsers":          identityrepo.AdminUsersDefaultLimit,
-		"ListAllClasses":     classesrepo.AdminDefaultLimit,
+		"ListWordImports":      importsrepo.DefaultLimit,
+		"ListTests":            testsrepo.DefaultLimit,
+		"ListQuestionGroups":   testsrepo.DefaultLimit,
+		"ListQuestions":        questionsrepo.DefaultLimit,
+		"ListMedia":            mediarepo.DefaultLimit,
+		"ListAssignments":      assignmentsrepo.DefaultLimit,
+		"ListStudents":         identityrepo.DefaultLimit,
+		"ListUsers":            identityrepo.AdminUsersDefaultLimit,
+		"ListAllClasses":       classesrepo.AdminDefaultLimit,
+		"ListSharedWithMe":     sharingrepo.DefaultLimit,
+		"GetStaffDirectThread": messagingrepo.DefaultLimit,
+		"GetStaffClassThread":  messagingrepo.DefaultLimit,
 	}
 
 	seen := map[string]bool{}

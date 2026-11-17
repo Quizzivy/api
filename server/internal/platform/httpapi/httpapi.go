@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/platform/httpx"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/actor"
+	"quizzivy/internal/shared/provenance"
 	"quizzivy/internal/shared/stats"
 	"quizzivy/internal/shared/validation"
 )
@@ -67,6 +68,22 @@ func ErrorWithDetails(ctx context.Context, code openapi.ErrorCode, message strin
 	resp := Error(ctx, code, message)
 	resp.Error.Details = &details
 	return resp
+}
+
+// StaleWrite is a 409 STALE_WRITE with message. When err names the write the
+// caller had not seen (provenance.Of), its details carry it as
+// {updatedBy: {id, name} | null, updatedAt}, so a co-editor is told who saved
+// last; without one it carries no details.
+func StaleWrite(ctx context.Context, message string, err error) openapi.ErrorResponse {
+	last, named := provenance.Of(err)
+	if !named {
+		return Error(ctx, openapi.STALEWRITE, message)
+	}
+	var by *openapi.PersonRef
+	if last.By != nil {
+		by = &openapi.PersonRef{Id: ParseUUID(last.By.ID), Name: last.By.Name}
+	}
+	return ErrorWithDetails(ctx, openapi.STALEWRITE, message, map[string]interface{}{"updatedBy": by, "updatedAt": last.At})
 }
 
 func FieldError(ctx context.Context, field, message string) openapi.ErrorResponse {

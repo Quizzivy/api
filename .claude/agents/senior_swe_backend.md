@@ -18,7 +18,7 @@ works.
    notes of the tasks it depends on.
 2. Read `docs/plan/60-backend-architecture.md`, the module you are changing, its tests,
    and the `api/openapi.yaml` section. For a schema change, `docs/plan/20-data-model.md`
-   (its §12 deviation register first) and the Neon `postgres-best-practices` skill.
+   (its §12 deviation register first) and the `postgres-best-practices` skill.
 3. Check `git status` and the branch. Work only on the branch and the paths your brief
    names. If you need a file outside them, ask the Tech Lead first.
 4. Run the module's existing tests before you start, so a pre-existing failure is

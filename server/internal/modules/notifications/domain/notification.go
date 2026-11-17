@@ -32,6 +32,14 @@ const (
 
 	ContentTransferred  Kind = "content.transferred"
 	ClassTeacherChanged Kind = "class.teacher_changed"
+
+	ContentShared               Kind = "content.shared"
+	TestPublishedByCollaborator Kind = "test.published_by_collaborator"
+
+	MessageReceived    Kind = "message.received"
+	MessageFromTeacher Kind = "message.from_teacher"
+
+	SummaryWeekly Kind = "summary.weekly"
 )
 
 var governing = map[Kind]Event{
@@ -42,12 +50,16 @@ var governing = map[Kind]Event{
 	AssignmentDueSoon:  EventAssignmentDueSoon,
 	AssignmentExtended: EventAssignmentDueSoon,
 	ResultReady:        EventResultReady,
+	MessageReceived:    EventMessageReceived,
+	MessageFromTeacher: EventMessageReceived,
+	SummaryWeekly:      EventSummaryWeekly,
 }
 
 var switchless = map[Kind]bool{
 	ClassJoined: true, JoinCodesRotated: true,
 	AIAllowanceWarning: true, AICreditRequest: true, AICreditRequestDecided: true,
 	ContentTransferred: true, ClassTeacherChanged: true,
+	ContentShared: true, TestPublishedByCollaborator: true,
 }
 
 // Known reports whether k is a kind this binary writes and words.
@@ -81,8 +93,10 @@ const (
 	MaxLimit = 50
 	// MaxMarkedIDs is how many notifications one call may mark read by id.
 	MaxMarkedIDs = 100
-	// Retention is how long a notification is kept, counted from when it was
-	// first written; a merge does not extend it.
+	// Retention is how long a notification is kept, counted from its
+	// created_at: when it was first written, or, for one a Renew notice
+	// wrote again, when it was last written, since Renew writes it as a new
+	// notification. A Replace or Add merge does not extend it.
 	Retention = 180 * 24 * time.Hour
 )
 
@@ -114,7 +128,9 @@ type Page struct {
 	NextBefore string
 }
 
-// Summary is what the reader's shell shows before any page is open.
+// Summary is what the reader's shell shows before any page is open: the
+// unread notifications and, for a student, the unread messages.
 type Summary struct {
 	UnreadNotifications int
+	UnreadMessages      int
 }

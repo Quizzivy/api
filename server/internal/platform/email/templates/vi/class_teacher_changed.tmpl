@@ -1,0 +1,29 @@
+{{define "subject"}}{{.Org}}: {{if .Params.Previous}}Lớp {{.Params.ClassName}} đã được giao cho {{.Params.TeacherName}}{{else}}Bạn được giao dạy lớp {{.Params.ClassName}}{{end}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Chào {{.Params.FullName}},{{else}}Chào bạn,{{end}}
+
+{{if .Params.Previous}}Quản trị viên đã giao lớp {{.Params.ClassName}} cho {{.Params.TeacherName}}. Bạn không còn dạy lớp này.{{else}}Quản trị viên đã giao cho bạn dạy lớp {{.Params.ClassName}}.{{end}}
+
+{{if .Params.Previous}}Danh sách lớp của bạn:{{else}}Hãy mở lớp để xem:{{end}}
+
+{{.Link}}
+
+--
+Chọn loại email bạn muốn nhận:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Chào {{.Params.FullName}},{{else}}Chào bạn,{{end}}</p>
+<p>{{if .Params.Previous}}Quản trị viên đã giao lớp {{.Params.ClassName}} cho {{.Params.TeacherName}}. Bạn không còn dạy lớp này.{{else}}Quản trị viên đã giao cho bạn dạy lớp {{.Params.ClassName}}.{{end}}</p>
+<p>{{if .Params.Previous}}Danh sách lớp của bạn:{{else}}Hãy mở lớp để xem:{{end}}</p>
+<p><a href="{{.Link}}">{{if .Params.Previous}}Mở danh sách lớp{{else}}Mở lớp{{end}}</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Chọn loại email bạn muốn nhận</a></p>
+</body>
+</html>{{end}}

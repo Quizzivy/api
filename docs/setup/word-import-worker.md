@@ -45,7 +45,7 @@ refused. For such a file the worker:
 - draws every page in the same PDFium sandbox, as a JPEG of at most 1568 pixels and 1 MiB,
   in at most three minutes and the sandbox's 256 MiB. Forty pages of 300 dpi scans took
   about 30 s and 322 MiB resident, forty 12-megapixel photographs about 33 s and 530 MiB,
-  so the worker's 1 GB machine holds either beside its 512 MiB Go target;
+  so the worker's 1 GB container holds either beside its 512 MiB Go target;
 - refuses a file of more than 40 pages as `PDF_TOO_LONG_FOR_AI`, before it holds or sends
   anything;
 - reserves 60 credits a page for the whole file from the teacher who started the run, and
@@ -144,8 +144,8 @@ the 25-minute run limit. A failed batch is logged with the class of its failure 
 passwords of a sheet nobody downloads are erased 24 hours after the job finished by the API's daily housekeeping
 (the `import_sheets` step), not by this process.
 
-It never polls sooner than every two seconds. An idle worker therefore lets
-Neon's compute suspend (#143). SIGTERM/SIGINT cancels the current job,
+It never polls sooner than every two seconds. An idle worker therefore costs
+the database almost nothing (#143). SIGTERM/SIGINT cancels the current job,
 records a result that finished before the signal, and otherwise releases the run
 to the queue without spending an attempt; the fenced write gets at most five
 seconds. A heartbeat that fails transiently is retried until the lease is nearly
@@ -183,22 +183,23 @@ release acceptance are still pending.
 ## Production
 
 Word and PDF import run in production (O-24, decided 2026-09-25). One image
-carries both processes, and `fly.toml` declares them:
+carries both processes, and the box's Compose file (`Quizzivy/infra`,
+`vps/compose.yaml`) runs each in its own container:
 
-- `[processes]` runs `app = "/app/api"` and `worker = "/app/import-worker"`.
-- `[http_service]` serves `processes = ["app"]` only. The worker has no public
-  service.
-- The app keeps its 512 MB `[[vm]]`. The worker gets its own with 1 GB: a 512 MiB
-  Go memory target, plus up to 256 MiB of PDF sandbox.
-- `[env]` holds the import settings:
+- `api` runs `/app/api`, and is the only container Caddy sends requests to. The
+  worker has no public service.
+- `worker` runs `/app/import-worker` with a 1 GB memory limit: a 512 MiB Go
+  memory target, plus up to 256 MiB of PDF sandbox.
+- `deploy/production.env` holds the import settings, as the box's `vps/app.env`
+  does:
 
-  ```toml
-  IMPORT_S3_BUCKET = "quizzivy-imports"
-  IMPORT_WORK_DIR = "/home/nonroot/imports"
-  IMPORT_PROCESSING_ENABLED = "true"
-  IMPORT_WORKER_WAKE_URL = "http://worker.process.quizzivy-api.internal:8091/wake"
-  IMPORT_WORKER_WAKE_ADDR = "fly-local-6pn:8091"
-  IMPORT_WORKER_IDLE_POLL = "6h"
+  ```
+  IMPORT_S3_BUCKET=quizzivy-imports
+  IMPORT_WORK_DIR=/home/nonroot/imports
+  IMPORT_PROCESSING_ENABLED=true
+  IMPORT_WORKER_WAKE_URL=http://worker:8091/wake
+  IMPORT_WORKER_WAKE_ADDR=0.0.0.0:8091
+  IMPORT_WORKER_IDLE_POLL=6h
   ```
 
 The import store reuses the `S3_*` secrets; no new secret is needed.
@@ -206,20 +207,19 @@ The import store reuses the `S3_*` secrets; no new secret is needed.
 `platform/config/tests/deployment_test.go` boots both processes on these
 values. It fails when:
 
-- the processing switch and the worker process disagree;
-- the Dockerfile does not build and copy `/app/import-worker`;
-- the worker listens where the API machine cannot reach it, or the wake URL and
-  the listener disagree;
+- import processing is on and the Dockerfile does not build and copy
+  `/app/import-worker`;
+- the worker listens on its own loopback, where the API container cannot reach
+  it, or the wake URL and the listener disagree;
 - the idle poll is under an hour;
-- `[http_service]` is not scoped to the app;
-- the worker's `[[vm]]` has less than 1 GB;
 - `.doc` is enabled. Its converter needs a Docker daemon, and the image has none.
-  Hosting one means a separate privileged Machine, which this runbook does not
+  Hosting one means a separate privileged service, which this runbook does not
   cover.
 
-`IMPORT_WORK_DIR` works because the image's nonroot user owns its home
-directory. A Machine's root filesystem is disk, not tmpfs. It is reset on every
-deploy, which is fine for scratch files.
+`IMPORT_WORK_DIR` is a volume of each container (`api-imports` and
+`worker-imports` in `compose.yaml`). The API and the worker refuse to start when
+they cannot make it a private directory, mode 0700 (INC-5, `ci.md`, "The
+production image"). Its files are scratch files.
 
 **Before the first deploy with import on:**
 
@@ -242,30 +242,27 @@ deploy, which is fine for scratch files.
    wrangler r2 bucket dev-url get quizzivy-imports    # "disabled"
    wrangler r2 bucket domain list quizzivy-imports    # no custom domains
    ```
-2. **Deploy.** Deploy as usual. `flyctl deploy --ha=false` creates exactly one
-   worker Machine the first time the `worker` group appears; without the flag it
-   would add a standby that the deploy's start step turns into a second worker.
-   The deploy fails unless every process group ends with a started machine.
-   Check it with `flyctl machines list -a quizzivy-api`: one `app` and one
-   `worker`, both `started`. The worker logs `import worker started` with the
-   pipeline version.
+2. **Deploy.** Deploy as usual: the box replaces the `api` and `worker`
+   containers together. On the box, as `deploy`, `vps/scripts/compose ps` shows
+   both running, and `vps/scripts/compose logs worker` shows
+   `import worker started` with the pipeline version.
 3. **Acceptance.** Take one small `.docx` and one text-layer PDF through upload,
-   review and draft. Then check `/healthz` and the Neon console: compute should
-   suspend again after the worker's last query.
+   review and draft. Then check `/healthz`.
 
 **Monitoring.** Only the deploy checks that the worker runs. The production
-monitor probes `/healthz` and the web app, not the worker. A worker that later
-exhausts its restart budget shows as imports that stay queued, so check
-`flyctl machines list` when that happens.
+monitor probes `/healthz` and the web app, not the worker. A worker that keeps
+failing shows as imports that stay queued, so check `vps/scripts/compose ps`
+and the worker's log on the box when that happens.
 
-**Turning it off.** Remove `IMPORT_PROCESSING_ENABLED` and the `worker` process
-together; `deployment_test.go` refuses one without the other. Finished imports
+**Turning it off.** Remove `IMPORT_PROCESSING_ENABLED` (from
+`deploy/production.env` and the box's `vps/app.env`) and the `worker` service
+together. Finished imports
 stay reviewable while import storage stays configured. Removing
 `IMPORT_S3_BUCKET` and `IMPORT_WORK_DIR` as well hides the feature, and
 retention stops with it.
 
-**Cost.** Each running worker is one more Machine. The worker queries PostgreSQL
-only when woken, when work falls due, and once per `IMPORT_WORKER_IDLE_POLL`. At
-`6h`, an idle worker keeps Neon's compute awake about 20 minutes a day. The wake
-listener is on Fly's private network only, and wakes cannot make the worker poll
-more than once every two seconds.
+**Load.** The worker queries PostgreSQL only when woken, when work falls due,
+and once per `IMPORT_WORKER_IDLE_POLL`. The wake listener is on the stack's own
+network only (no container but the API publishes a port, and that one on
+`127.0.0.1`), and wakes cannot make the worker poll more than once every two
+seconds.

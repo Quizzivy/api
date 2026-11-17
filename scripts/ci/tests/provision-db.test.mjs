@@ -54,7 +54,7 @@ function provision({ args = [], env = {}, roles = '' }) {
   }
 }
 
-const managed = 'postgres://admin:secret@ep-quiet-sun.eu-central-1.aws.neon.tech/neondb?sslmode=require';
+const managed = 'postgres://admin:secret@db.example.com/postgres?sslmode=require';
 const existing = 'quizzivy_migrate,quizzivy_app';
 
 test('adding the maintenance role to a managed database leaves the other two roles alone', () => {
@@ -129,7 +129,7 @@ test('a local run keeps the development defaults and gives the migrate role CREA
 });
 
 test('a libpq host that is not local is a managed database', () => {
-  const run = provision({ env: { PGHOST: 'ep-quiet-sun.eu-central-1.aws.neon.tech' }, roles: existing });
+  const run = provision({ env: { PGHOST: 'db.example.com' }, roles: existing });
   assert.notEqual(run.status, 0);
   assert.doesNotMatch(run.log, /COMMAND ALTER ROLE quizzivy_migrate CREATEDB|SET PASSWORD/);
 });
@@ -145,7 +145,7 @@ test('a localhost DSN is a local run', () => {
 });
 
 test('a tunnel to a production database is managed when the owner says so, and the script says what it assumed when they do not', () => {
-  const tunnel = 'postgres://admin:secret@localhost:15432/neondb?sslmode=require';
+  const tunnel = 'postgres://admin:secret@localhost:15432/postgres?sslmode=require';
   const assumed = provision({
     args: [tunnel],
     roles: existing,
@@ -189,7 +189,7 @@ test('the warning about a localhost tunnel is printed before the first statement
     chmodSync(bin, 0o755);
     const log = join(dir, 'log');
     writeFileSync(log, '');
-    const result = spawnSync('bash', ['-c', 'bash "$0" "$1" 2>>"$STUB_LOG"', script, 'postgres://admin:secret@localhost:15432/neondb'], {
+    const result = spawnSync('bash', ['-c', 'bash "$0" "$1" 2>>"$STUB_LOG"', script, 'postgres://admin:secret@localhost:15432/postgres'], {
       encoding: 'utf8',
       env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, STUB_ROLES: existing },
     });
@@ -205,7 +205,7 @@ test('the warning about a localhost tunnel is printed before the first statement
 });
 
 test('only QUIZZIVY_MANAGED=1 makes a localhost database managed', () => {
-  const tunnel = 'postgres://admin:secret@localhost:15432/neondb?sslmode=require';
+  const tunnel = 'postgres://admin:secret@localhost:15432/postgres?sslmode=require';
   for (const value of ['true', 'yes', '0', '']) {
     const run = provision({ args: [tunnel], roles: existing, env: { QUIZZIVY_MANAGED: value } });
     assert.equal(run.status, 0, `${value}: ${run.stderr}`);

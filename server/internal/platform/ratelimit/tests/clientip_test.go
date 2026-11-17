@@ -61,9 +61,9 @@ func TestAClientCannotForgeTheKeyByPresettingXForwardedFor(t *testing.T) {
 }
 
 func TestSpoofingTheSameHeaderIsHarmlessBecauseTheProxyOverwritesIt(t *testing.T) {
-	key := ratelimit.ClientIP("Fly-Client-IP")
-	a := key(req("10.0.0.1:5555", map[string]string{"Fly-Client-IP": "203.0.113.9"}))
-	b := key(req("10.0.0.1:5555", map[string]string{"Fly-Client-IP": "203.0.113.9"}))
+	key := ratelimit.ClientIP("X-Real-IP")
+	a := key(req("10.0.0.1:5555", map[string]string{"X-Real-IP": "203.0.113.9"}))
+	b := key(req("10.0.0.1:5555", map[string]string{"X-Real-IP": "203.0.113.9"}))
 	if a != b || a != "203.0.113.9" {
 		t.Errorf("unstable key: %q, %q", a, b)
 	}

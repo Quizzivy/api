@@ -124,7 +124,7 @@ type scriptedRepo struct {
 	totalled  []domain.ListInput
 	faceted   []domain.ListInput
 	questions map[string]int
-	versions  map[string][]domain.TestRef
+	versions  map[string]domain.VersionUses
 }
 
 func (r *scriptedRepo) Insert(_ context.Context, in domain.InsertInput) (domain.Asset, error) {
@@ -186,7 +186,7 @@ func (r *scriptedRepo) SoftDelete(context.Context, domain.DeleteInput) (domain.R
 	return domain.Retired{}, nil
 }
 
-func (r *scriptedRepo) ReferencesFor(context.Context, []string) (map[string][]domain.TestRef, error) {
+func (r *scriptedRepo) VersionUses(context.Context, []string) (map[string]domain.VersionUses, error) {
 	return r.versions, nil
 }
 
@@ -558,7 +558,7 @@ func TestAnUpdateWritesTheTrimmedNameAndTheLimit(t *testing.T) {
 	b := newBench()
 	b.repo.stored = domain.Asset{ID: asset, Kind: domain.KindAudio, StorageKey: "audio/a.mp3", DisplayName: "cũ.mp3"}
 	b.repo.questions = map[string]int{asset: 4}
-	b.repo.versions = map[string][]domain.TestRef{asset: {{ID: "t1", Title: "Đề 1", Version: 2}}}
+	b.repo.versions = map[string]domain.VersionUses{asset: {Tests: []domain.TestRef{{ID: "t1", Title: "Đề 1", Version: 2}}, Count: 1}}
 
 	updated, err := b.update(domain.UpdateInput{DisplayName: name("  Cambridge 15 · Test 2 · Part 1  "), SetDefaultMaxPlays: true, DefaultMaxPlays: plays(2), All: true, IP: "203.0.113.5", UserAgent: "kiểm thử"})
 	if err != nil {
@@ -624,7 +624,7 @@ func TestTheLibrarysFiguresAreReadWithTheListsOwnFilters(t *testing.T) {
 	b := newBench()
 	b.repo.stored = domain.Asset{ID: asset, Kind: domain.KindAudio, StorageKey: "audio/a.mp3", Bytes: 42}
 	b.repo.questions = map[string]int{asset: 3}
-	b.repo.versions = map[string][]domain.TestRef{asset: {{ID: "t1", Title: "Đề 1", Version: 1}, {ID: "t1", Title: "Đề 1", Version: 2}}}
+	b.repo.versions = map[string]domain.VersionUses{asset: {Tests: []domain.TestRef{{ID: "t1", Title: "Đề 1", Version: 1}, {ID: "t1", Title: "Đề 1", Version: 2}}, Count: 2}}
 	audio := domain.KindAudio
 	in := domain.ListInput{Scope: access.Scope{UserID: uploader}, Kind: &audio, Query: "nghe", Unused: true, Page: 2, Limit: 10}
 	ctx := context.Background()

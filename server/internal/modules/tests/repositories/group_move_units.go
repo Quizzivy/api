@@ -108,13 +108,16 @@ func without(ids []string, id string) []string {
 	return rest
 }
 
-func setMemberOrder(ctx context.Context, tx pgx.Tx, ids []string) error {
+// setMemberOrder renumbers a group's members. A shifted sibling's updated_at moves
+// through questions_set_updated_at, so its updated_by moves with it: the actor
+// whose move shifted it is its last writer.
+func setMemberOrder(ctx context.Context, tx pgx.Tx, ids []string, actorID string) error {
 	ordinals := make([]int, len(ids))
 	for i := range ids {
 		ordinals[i] = i
 	}
-	_, err := tx.Exec(ctx, `UPDATE app.questions q SET context_ordinal=o.ordinal FROM unnest($1::uuid[],$2::int[]) AS o(id,ordinal)
-		WHERE q.id=o.id AND q.context_ordinal IS DISTINCT FROM o.ordinal`, ids, ordinals)
+	_, err := tx.Exec(ctx, `UPDATE app.questions q SET context_ordinal=o.ordinal, updated_by=$3 FROM unnest($1::uuid[],$2::int[]) AS o(id,ordinal)
+		WHERE q.id=o.id AND q.context_ordinal IS DISTINCT FROM o.ordinal`, ids, ordinals, actorID)
 	return err
 }
 

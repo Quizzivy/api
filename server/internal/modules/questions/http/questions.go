@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/platform/httpapi"
 	"quizzivy/internal/platform/httpx"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/content"
 	"quizzivy/internal/shared/matchkey"
 	"strconv"
@@ -27,6 +28,15 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 	}
 
 	in := domain.ListInput{Scope: httpapi.ScopeFromContext(ctx).Own()}
+	if request.Params.SetId != nil {
+		// A set's own operations need content.questions.write; without it a
+		// set's questions are as unreadable as a set the caller holds no
+		// grant to, so a grant cannot reach them through the bank list.
+		if principal, _ := httpx.PrincipalFromContext(ctx); !principal.Access.Permissions.Has(access.ContentQuestionsWrite) {
+			return openapi.ListQuestions404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
+		}
+		in.SetID = request.Params.SetId.String()
+	}
 	questionListDimensions(&in, request.Params)
 	if request.Params.Tag != nil {
 		in.Tags = append(in.Tags, *request.Params.Tag...)
@@ -42,8 +52,11 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 		in.Limit = int(*request.Params.Limit)
 	}
 
-	listResult, err := h.app.Queries.List.Handle(ctx, query.List{Input: in})
+	listResult, err := h.app.Queries.List.Handle(ctx, query.List{Input: in, Reader: httpapi.ScopeFromContext(ctx)})
 	found, page := listResult.Items, listResult.Page
+	if errors.Is(err, domain.ErrSetNotFound) {
+		return openapi.ListQuestions404JSONResponse(httpapi.NotFound(ctx, msgSetNotFound(ctx))), nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +77,12 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 		return nil, err
 	}
 
+	items, err := h.listItems(ctx, found, listResult.Set)
+	if err != nil {
+		return nil, err
+	}
 	out := openapi.ListQuestions200JSONResponse{
-		Items: make([]openapi.AdminQuestion, len(found)),
+		Items: items,
 		Facets: openapi.QuestionTypeFacets{
 			All:            facets.All,
 			SingleChoice:   facets.ByType[domain.SingleChoice],
@@ -96,13 +113,29 @@ func (h Questions) ListQuestions(ctx context.Context, request openapi.ListQuesti
 	out.Facets.Skills.Listening = facets.BySkill["listening"]
 	out.Facets.Skills.Writing = facets.BySkill["writing"]
 	out.Facets.Skills.Speaking = facets.BySkill["speaking"]
+	return out, nil
+}
+
+func (h Questions) listItems(ctx context.Context, found []domain.Question, set *domain.QuestionSet) ([]openapi.AdminQuestion, error) {
+	items := make([]openapi.AdminQuestion, len(found))
 	for i, q := range found {
-		out.Items[i], err = h.toAPIQuestion(ctx, q)
+		item, err := h.toAPIQuestion(ctx, q)
 		if err != nil {
 			return nil, err
 		}
+		if q.Owner != nil {
+			// The bank lists the caller's own questions; a set lists its
+			// questions at the reader's access to the set.
+			access := openapi.ContentAccess(domain.AccessOwner)
+			if set != nil {
+				access = rowAccess(*set, q, httpapi.ScopeFromContext(ctx))
+			}
+			item.Access = &access
+			item.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
+		}
+		items[i] = item
 	}
-	return out, nil
+	return items, nil
 }
 
 func (h Questions) GetQuestion(ctx context.Context, request openapi.GetQuestionRequestObject) (openapi.GetQuestionResponseObject, error) {
@@ -133,8 +166,14 @@ func (h Questions) CreateQuestion(ctx context.Context, request openapi.CreateQue
 		return nil, httpx.ErrNotImplemented
 	}
 
-	q, err := h.app.Commands.Create.Handle(ctx, command.Create{Request: req})
-	if resp, handled := questionWriteError(ctx, err); handled {
+	q, err := h.app.Commands.Create.Handle(ctx, command.Create{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
+	if errors.Is(err, domain.ErrTestNotFound) {
+		return openapi.CreateQuestion404JSONResponse(httpapi.NotFound(ctx, msgTestNotFound(ctx))), nil
+	}
+	if errors.Is(err, domain.ErrTestReadOnly) {
+		return openapi.CreateQuestion403JSONResponse(testReadOnly(ctx)), nil
+	}
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.CreateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -156,12 +195,19 @@ func (h Questions) DuplicateQuestion(ctx context.Context, request openapi.Duplic
 		return nil, httpx.ErrNotImplemented
 	}
 
-	q, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req})
+	q, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req, ForTestID: uuidString(request.Params.ForTestId)})
+	if refused, ok := questionRefusal(ctx, err); ok {
+		return refused, nil
+	}
+	if errors.Is(err, domain.ErrTestNotFound) {
+		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
+			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.DuplicateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
 	}
-	if resp, handled := questionWriteError(ctx, err); handled {
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.DuplicateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -182,13 +228,33 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 	if !ok {
 		return nil, httpx.ErrNotImplemented
 	}
+	req.ExpectedUpdatedAt = request.Body.ExpectedUpdatedAt
 
-	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req})
+	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req, SetID: uuidString(request.Params.SetId)})
+	if errors.Is(err, domain.ErrSetNotFound) {
+		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: setNotFound(ctx)}, nil
+	}
+	if errors.Is(err, domain.ErrSetReadOnly) {
+		return openapi.UpdateQuestion403JSONResponse(setReadOnly(ctx)), nil
+	}
+	if errors.Is(err, domain.ErrReadOnly) {
+		return openapi.UpdateQuestion403JSONResponse(questionReadOnly(ctx)), nil
+	}
+	if errors.Is(err, domain.ErrEditContextRequired) {
+		return openapi.UpdateQuestion422JSONResponse(httpapi.Error(ctx, openapi.EDITCONTEXTREQUIRED,
+			httpx.Text(ctx, "Câu hỏi này thuộc ngân hàng của người khác. Hãy sửa nó trong đề hoặc bộ câu hỏi được chia sẻ với bạn.",
+				"This question belongs to someone else's bank. Edit it in the test or question set shared with you."))), nil
+	}
+	if errors.Is(err, domain.ErrStaleWrite) {
+		return openapi.UpdateQuestion409JSONResponse(httpapi.StaleWrite(ctx,
+			httpx.Text(ctx, "Câu hỏi đã được sửa ở nơi khác. Vui lòng tải lại trước khi lưu.",
+				"The question was edited elsewhere. Please reload before saving."), err)), nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.UpdateQuestion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgQuestionNotFound(ctx)))}, nil
 	}
-	if resp, handled := questionWriteError(ctx, err); handled {
+	if resp, handled := QuestionWriteError(ctx, err); handled {
 		return openapi.UpdateQuestion400JSONResponse{BadRequestJSONResponse: openapi.BadRequestJSONResponse(resp)}, nil
 	}
 	if err != nil {
@@ -211,6 +277,9 @@ func (h Questions) DeleteQuestion(ctx context.Context, request openapi.DeleteQue
 	}
 
 	_, err := h.app.Commands.Delete.Handle(ctx, command.Delete{Request: req})
+	if refused, ok := questionRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	switch {
 	case err == nil:
 		return openapi.DeleteQuestion204Response{}, nil
@@ -235,7 +304,10 @@ func (h Questions) DeleteQuestion(ctx context.Context, request openapi.DeleteQue
 	}
 }
 
-func questionWriteError(ctx context.Context, err error) (openapi.ErrorResponse, bool) {
+// QuestionWriteError is the 400 a question write's validation refusal answers,
+// and false for any other error: the bank's own writes and the tests module's
+// editTestQuestion answer them alike.
+func QuestionWriteError(ctx context.Context, err error) (openapi.ErrorResponse, bool) {
 	var invalid *domain.ValidationError
 	if errors.As(err, &invalid) {
 		return httpapi.Invalid(ctx, httpx.Text(ctx, "Dữ liệu câu hỏi không hợp lệ.", "The question data is not valid."), invalid), true
@@ -324,6 +396,14 @@ func ToQuestionInput(body openapi.QuestionInput) domain.Input {
 }
 
 func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openapi.AdminQuestion, error) {
+	return ToAPIQuestion(ctx, h.media, q)
+}
+
+// ToAPIQuestion is q as the contract's AdminQuestion, its attachment and the
+// media its prose shows signed through media (nil when object storage is
+// off): what a bank question's read and every write of one answer, the tests
+// module's editTestQuestion included.
+func ToAPIQuestion(ctx context.Context, media Media, q domain.Question) (openapi.AdminQuestion, error) {
 	points, err := strconv.ParseFloat(q.Points, 64)
 	if err != nil {
 		return openapi.AdminQuestion{}, err
@@ -350,6 +430,7 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		UpdatedAt:          q.UpdatedAt,
 	}
 	out.MaxWords, out.EssayMaxWords = httpapi.WordLimits(q.Type == domain.Essay, q.MaxWords)
+	readerAccess(&out, q)
 	if out.Tags == nil {
 		out.Tags = []string{}
 	}
@@ -387,9 +468,9 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 		}
 	}
 	out.Blanks = &blanks
-	if q.MediaAssetID != nil && h.media != nil {
-		if asset, err := h.media.Get(ctx, *q.MediaAssetID); err == nil {
-			url, err := h.media.SignedURL(ctx, asset)
+	if q.MediaAssetID != nil && media != nil {
+		if asset, err := media.Get(ctx, *q.MediaAssetID); err == nil {
+			url, err := media.SignedURL(ctx, asset)
 			if err != nil {
 				return openapi.AdminQuestion{}, err
 			}
@@ -397,15 +478,26 @@ func (h Questions) toAPIQuestion(ctx context.Context, q domain.Question) (openap
 			out.Media = &api
 		}
 	}
-	return out, h.contentAssets(ctx, q, &out)
+	return out, contentAssets(ctx, media, q, &out)
+}
+
+// readerAccess sets the reader's access and the question's owner on out, where
+// the read carries them (a read by id, a write's answer).
+func readerAccess(out *openapi.AdminQuestion, q domain.Question) {
+	if q.Owner == nil || q.Access == "" {
+		return
+	}
+	access := openapi.ContentAccess(q.Access)
+	out.Access = &access
+	out.Owner = &openapi.PersonRef{Id: httpapi.ParseUUID(q.Owner.ID), Name: q.Owner.Name}
 }
 
 // contentAssets signs the media a question's prompt and explanation show
 // (DG-109) for the editor; a file that cannot be loaded is left out, as the
 // attachment is.
-func (h Questions) contentAssets(ctx context.Context, q domain.Question, out *openapi.AdminQuestion) error {
+func contentAssets(ctx context.Context, media Media, q domain.Question, out *openapi.AdminQuestion) error {
 	shown, err := content.QuestionMedia(q.PromptContent, q.ExplanationContent)
-	if err != nil || len(shown) == 0 || h.media == nil {
+	if err != nil || len(shown) == 0 || media == nil {
 		return nil
 	}
 	seen := make(map[string]bool, len(shown))
@@ -415,11 +507,11 @@ func (h Questions) contentAssets(ctx context.Context, q domain.Question, out *op
 			continue
 		}
 		seen[ref.ID] = true
-		asset, err := h.media.Get(ctx, ref.ID)
+		asset, err := media.Get(ctx, ref.ID)
 		if err != nil {
 			continue
 		}
-		url, err := h.media.SignedURL(ctx, asset)
+		url, err := media.SignedURL(ctx, asset)
 		if err != nil {
 			return err
 		}
@@ -492,6 +584,17 @@ func apiTypeParts(out *openapi.AdminQuestion, q domain.Question) {
 func writeRequest(ctx context.Context, id string, input domain.Input) (domain.WriteRequest, bool) {
 	actor, ok := httpapi.ActorFromContext(ctx)
 	return domain.WriteRequest{ID: id, Input: input, ActorID: actor.ID, All: actor.Scope.All, IP: actor.IP, UserAgent: actor.UserAgent}, ok
+}
+
+func uuidString(id *openapi.Uuid) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
+}
+
+func msgTestNotFound(ctx context.Context) string {
+	return httpx.Text(ctx, "Không tìm thấy bài kiểm tra.", "The test was not found.")
 }
 
 func optionID(id *openapi.Uuid) *string {

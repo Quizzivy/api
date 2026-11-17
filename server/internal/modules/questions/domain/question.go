@@ -37,11 +37,23 @@ type Question struct {
 	MatchItems      []MatchItem
 	Rubric          []RubricCriterion
 	Tags            []string
+	// Owner is the question's owner, read where a list names it (a set's
+	// questions) and on a read by id; nil elsewhere. Access is what the reader
+	// may do with it, on a read by id: Owner for its owner and scope.all, Edit
+	// or Use through a test or set shared with the reader (D4).
+	Owner  *Owner
+	Access Access
 	// Draft outlines referencing this question.
 	UsedInTests int
 	UsedIn      []TestRef
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+// Owner is a person who owns content, by id and display name.
+type Owner struct {
+	ID   string
+	Name string
 }
 
 type Option struct {

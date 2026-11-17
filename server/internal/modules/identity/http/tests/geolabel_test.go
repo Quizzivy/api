@@ -37,7 +37,7 @@ func TestTheLabelIsBuiltOnlyWhenTheClientAddressComesFromCloudflare(t *testing.T
 			t.Errorf("configured %q: label = %q, want Ho Chi Minh City, VN", configured, got)
 		}
 	}
-	for _, configured := range []string{"", "Fly-Client-IP", "X-Real-IP", "X-Forwarded-For"} {
+	for _, configured := range []string{"", "X-Real-IP", "X-Forwarded-For"} {
 		if got := labelFor(t, configured, cloudflare("Ho Chi Minh City", "VN")); got != "" {
 			t.Errorf("configured %q: label = %q, want none: the location headers are trusted only behind Cloudflare", configured, got)
 		}

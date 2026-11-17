@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Quizzivy API
-  version: 0.13.12
+  version: 0.14.0
   contact:
     name: Thuong
     url: https://github.com/SekiroKenjii/Quizzivy
@@ -68,7 +68,14 @@ info:
       `kind` is the owned resource the id names: `test`, `test-version`,
       `section`, `question`, `version-question`, `version-recording`,
       `question-group`, `media`, `import`, `import-source`, `class`,
-      `assignment`, `attempt`, `student`, `notification` or `override`. The two `version-` kinds are a
+      `assignment`, `attempt`, `student`, `notification`, `override`,
+      `question-set`, `share`, `messaging-peer` or `attachment`. A `share` is
+      a grant (`ShareGrant.id`), which its content's owner and its recipient
+      can name. A `messaging-peer` is a student a staff member may read a
+      direct thread with: one they have a thread with, have taught, now or
+      before, or created; it outlives the class, where `student` does not.
+      An `attachment` is a message's file, named by its uploader and the
+      participants of the thread that holds it. The two `version-` kinds are a
       question and a group recording of a published version, as grading and
       the student's autosave, events and plays name them. A section unit's
       `id` names a question or a group, as its `kind` says, and is declared
@@ -113,6 +120,16 @@ tags:
     description: Tests, their drafts and sections, shared-context groups, publishing, versions and the preview.
   - name: teacher-questions
     description: The question bank, with its tags, its search and the question groups it holds.
+  - name: teacher-sharing
+    description: |
+      Sharing tests and question sets with other teachers (D4): the colleague
+      directory, grants as Can use or Can edit, and Shared with me.
+  - name: teacher-messages
+    description: |
+      Class announcement channels and direct messages with students (D17).
+      A direct thread is readable by its two participants only, `scope.all`
+      included. Messages are never edited or deleted, and posting is not
+      audited: the messages are the record.
   - name: teacher-imports
     description: Private Word source intake and durable import review.
   - name: teacher-media
@@ -185,6 +202,8 @@ tags:
     description: The student console, with its classes, assigned tests, results and settings.
   - name: take-test
     description: Taking a test, from starting or resuming an attempt to saving answers, submitting and the integrity beacon.
+  - name: student-messages
+    description: The student's Messages, with their teachers' direct threads and their classes' announcements, read-only.
   - name: me
     description: |
       The caller's own notifications and notification switches, for any
@@ -834,15 +853,16 @@ components:
       description: |
         What a limit is when nothing is stored. `value` is `null` for no limit.
         `source` says where it comes from: `r2_free` (Cloudflare R2's free tier,
-        10 GB), `neon_launch` (the warning line chosen for Neon's Launch plan,
-        which has no cap), `resend_free` (Resend's free plan, 100 a day and
+        10 GB), `vps_disk` (the warning line chosen for the database on the
+        server's 50 GB disk, which also holds the monthly restore drill's copy
+        beside it), `resend_free` (Resend's free plan, 100 a day and
         3,000 a month), `deploy` (a deploy variable that overrides the plan),
         `app` (the app's own figure) or `none`.
       required: [value, source]
       additionalProperties: false
       properties:
         value: { type: [integer, 'null'], format: int64, minimum: 1 }
-        source: { type: string, enum: [none, app, deploy, r2_free, neon_launch, resend_free] }
+        source: { type: string, enum: [none, app, deploy, r2_free, vps_disk, resend_free] }
 
     UsageLimitDefaults:
       type: object
@@ -1213,6 +1233,14 @@ components:
         - MEDIA_KIND_MISMATCH
         - MEDIA_QUOTA_EXCEEDED
         - IMAGE_DIMENSIONS
+        # sharing
+        - SHARE_OWNER_ONLY
+        - SHARE_READ_ONLY
+        - EDIT_CONTEXT_REQUIRED
+        - MEDIA_IN_USE_ELSEWHERE
+        # messages
+        - MESSAGING_NOT_ALLOWED
+        - ATTACHMENT_HAS_MACROS
         # Word imports
         - IMPORT_CONFLICT
         - IMPORT_QUOTA_EXCEEDED
@@ -2571,10 +2599,11 @@ components:
       description: |
         What still references a row whose permanent delete answered
         `RESOURCE_REFERENCED`, carried as `details.referencedBy` by
-        `deleteClass` and `deleteUser`. `other` is a reference the server does
-        not name. Later releases add values; a client treats an unknown one as
-        `other`.
-      enum: [assignments, attempts, audit, members, owned_content, other]
+        `deleteClass` and `deleteUser`. `messages` is a class channel with posts,
+        or an account's messages, threads or files. `other` is a reference the
+        server does not name. Later releases add values; a client treats an
+        unknown one as `other`.
+      enum: [assignments, attempts, audit, members, messages, owned_content, other]
 
     MediaReplacementCounts:
       type: object
@@ -2928,9 +2957,17 @@ components:
         rejects the very body it documents (see issue #41).
       required:
         [id, email, fullName, hasPassword, linkedProviders, mustChangePassword,
-         createdAt, disabledAt, lastActiveAt, accountStatus, classes, stats]
+         createdAt, disabledAt, lastActiveAt, accountStatus, classes, stats, canMessage]
       additionalProperties: false
       properties:
+        canMessage:
+          type: boolean
+          description: |
+            The caller may open a direct thread with this student and post in
+            it (`postStaffDirectMessage` would be accepted): an existing thread,
+            or a tie (a class of the caller's, now or before, or an account the
+            caller created), with the account enabled and still a student.
+            `scope.all` does not widen it. The row menu's "Send message" reads it.
         id: { $ref: '#/components/schemas/Uuid' }
         email: { type: string, format: email, maxLength: 254 }
         fullName: { type: string, minLength: 1, maxLength: 200 }
@@ -3208,15 +3245,18 @@ components:
           type: object
           description: |
             What changed owner, counted as `ownedContent` counts it: every
-            class, and every test, question, question group and media asset
-            not deleted, and every assignment. Deleted rows move too, uncounted.
-          required: [classes, tests, questions, questionGroups, media, assignments]
+            class, and every test, question, question group, question set and
+            media asset not deleted, and every assignment. Deleted rows move
+            too, uncounted. Grants to the moved tests and sets move with them;
+            a grant to the recipient, who now owns the content, is deleted.
+          required: [classes, tests, questions, questionGroups, questionSets, media, assignments]
           additionalProperties: false
           properties:
             classes: { type: integer, minimum: 0 }
             tests: { type: integer, minimum: 0 }
             questions: { type: integer, minimum: 0 }
             questionGroups: { type: integer, minimum: 0 }
+            questionSets: { type: integer, minimum: 0 }
             media: { type: integer, minimum: 0 }
             assignments: { type: integer, minimum: 0 }
         leftBehind:
@@ -3729,9 +3769,12 @@ components:
 
     ClassMember:
       type: object
-      required: [userId, fullName, email, joinedVia, joinedAt, stats]
+      required: [userId, fullName, email, joinedVia, joinedAt, stats, canMessage]
       additionalProperties: false
       properties:
+        canMessage:
+          type: boolean
+          description: As `StudentRow.canMessage`, for the caller and this member. Another teacher's class read through `scope.all` answers false for its students the caller never taught.
         userId: { $ref: '#/components/schemas/Uuid' }
         stats:
           $ref: '#/components/schemas/StudentStats'
@@ -3756,12 +3799,16 @@ components:
         A class as its student sees it (S-10): the name, who teaches it, when
         and where it meets, and when they joined. Never the join code, a count,
         the roster or an average.
-      required: [id, name, description, teacherName, teacherAvatarUrl, scheduleLabel, room, joinedAt]
+      required: [id, name, description, teacherId, teacherName, teacherAvatarUrl, scheduleLabel, room, joinedAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
         name: { type: string }
         description: { type: [string, 'null'] }
+        teacherId:
+          type: [string, 'null']
+          format: uuid
+          description: The class's own teacher, so the class card can open their thread (`getStudentDirectThread`).
         teacherName:
           type: [string, 'null']
           description: The display name of the class's own teacher.
@@ -4696,7 +4743,8 @@ components:
         which `importBytes` bounds. `email` counts what was sent today and this
         month in `APP_TIMEZONE`, and `held` the messages a cap moved to a
         later day or month. `database.bytes` is PostgreSQL's
-        `pg_database_size`, which approximates and is not what Neon bills.
+        `pg_database_size`, which approximates the files the database takes
+        on the server's disk.
         `attemptsKept` has no limit.
       required: [seats, teachers, storage, media, imports, email, database, attemptsKept, aiCredits, warnAtPercent]
       additionalProperties: false
@@ -4933,6 +4981,17 @@ components:
           items: { $ref: '#/components/schemas/ReferencingTest' }
           description: Current test outlines using the question, sorted by title. Included on individual question responses; loaded on demand for the bank's nested usage table. Published snapshots are excluded.
         createdAt: { $ref: '#/components/schemas/Timestamp' }
+        access:
+          $ref: '#/components/schemas/ContentAccess'
+          description: |
+            What the caller may do with the question: `owner` for its owner
+            and `scope.all`, `edit` when a test or a set the caller can edit
+            holds it, `use` when only one the caller can read does. Present on
+            the question bank's operations; absent where a grading page
+            carries a question.
+        owner:
+          $ref: '#/components/schemas/PersonRef'
+          description: The question's owner. Present wherever `access` is.
         updatedAt: { $ref: '#/components/schemas/Timestamp' }
 
     StudentOption:
@@ -5596,7 +5655,7 @@ components:
 
     Test:
       type: object
-      required: [id, title, status, currentVersion, nextVersion, totalPoints, questionCount, audioCount, skills, assignments, unpublishedChanges, sections, createdAt, updatedAt]
+      required: [id, title, status, currentVersion, nextVersion, totalPoints, questionCount, audioCount, skills, assignments, unpublishedChanges, sections, access, owner, sharedWith, createdAt, updatedAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
@@ -5649,6 +5708,16 @@ components:
           type: array
           items: { $ref: '#/components/schemas/TestSection' }
           description: The **draft** outline. Published content lives in versions.
+        access:
+          $ref: '#/components/schemas/ContentAccess'
+          description: What the caller may do with the test. A recipient sees the draft and every version, as the owner does.
+        owner:
+          $ref: '#/components/schemas/PersonRef'
+          description: The test's owner. A client tells its own tests from `owner.id`.
+        sharedWith:
+          type: integer
+          minimum: 0
+          description: Teachers holding a grant to the test, for the card's "Shared · {n}"; 0 for a caller who is not its owner and holds no `scope.all`.
         createdAt: { $ref: '#/components/schemas/Timestamp' }
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
@@ -6535,7 +6604,7 @@ components:
     TeacherSummary:
       type: object
       additionalProperties: false
-      required: [liveAssignments, answersToGrade, unreadNotifications]
+      required: [liveAssignments, answersToGrade, unreadNotifications, sharedWithMe, unreadMessages]
       description: Cheap nav counts in the caller's own teaching scope, for an Admin too.
       properties:
         liveAssignments:
@@ -6550,6 +6619,14 @@ components:
           type: integer
           minimum: 0
           description: The caller's own unread notifications.
+        sharedWithMe:
+          type: integer
+          minimum: 0
+          description: Live grants to the caller, the muted count beside "Shared with me".
+        unreadMessages:
+          type: integer
+          minimum: 0
+          description: Messages past the caller's read pointers, not counting their own, over their threads. The nav shows "99+" above 99.
 
     ClosingAssignment:
       type: object
@@ -7356,6 +7433,18 @@ components:
         | `ai.credit_request.decided` | a teacher | `credits`, `decision` |
         | `content.transferred` | a teacher | `teacherName`, `count` |
         | `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |
+        | `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |
+        | `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |
+        | `message.received` | a teacher | `senderName`, `count`, `excerpt` |
+        | `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |
+        | `summary.weekly` | a teacher | `count`, `toGrade`, `flagged`, `classNames` |
+
+        A message item is one per reader per thread: it is written again,
+        unread, with the new `count` while the thread stays unread, and marked
+        read when the reader's pointer passes it. Each write gives it a new
+        `id` and `createdAt`, so it lists first, and once it was read its
+        `count` starts again from the next message. `excerpt` is the newest
+        message's first 80 characters; it lives only in the reader's own bell.
 
         The three `ai.*` kinds are for the teacher's bell. `ai.credit_request`
         is written for every holder of `ai.credits.manage`, who reads it in the
@@ -7379,6 +7468,11 @@ components:
         - ai.credit_request.decided
         - content.transferred
         - class.teacher_changed
+        - content.shared
+        - test.published_by_collaborator
+        - message.received
+        - message.from_teacher
+        - summary.weekly
 
     NotificationAudience:
       type: string
@@ -7399,16 +7493,32 @@ components:
       description: |
         One switch of the notification settings. `attempt.submitted`,
         `attempt.flagged` and `assignment.closing` are the teacher's;
-        `assignment.due_soon` and `result.ready` the student's. A switch
-        governs the kind of the same name, and `assignment.due_soon` also
-        governs `assignment.opened` and `assignment.extended`. `class.joined`
-        `join_codes.rotated` and `class.teacher_changed` have no switch.
+        `assignment.due_soon` and `result.ready` the student's;
+        `message.received` both ("New message" for a teacher, "Messages from
+        teachers" for a student). A switch governs the kind of the same name,
+        `assignment.due_soon` also governs `assignment.opened` and
+        `assignment.extended`, and `message.received` also governs
+        `message.from_teacher`. `summary.weekly` is the teacher's Monday
+        summary, by email and, when its in-app switch is on, in the bell.
+
+        Each switch covers both channels for a student (DG-82): a student's
+        `inApp` and `email` are always equal. A teacher's two columns are
+        separate, with the deck's defaults: in app on and email off for
+        `attempt.submitted` and `assignment.closing`, both on for
+        `attempt.flagged` and `message.received`, in app off and email on
+        for `summary.weekly`. `class.joined`
+        `join_codes.rotated`, `class.teacher_changed`, `content.shared` and
+        `test.published_by_collaborator` have no switch: the sharer's "Send a
+        notification" decides the first, and the owner always hears of the
+        second.
       enum:
         - attempt.submitted
         - attempt.flagged
         - assignment.closing
         - assignment.due_soon
         - result.ready
+        - message.received
+        - summary.weekly
 
     NotificationParams:
       type: object
@@ -7423,7 +7533,7 @@ components:
         count:
           type: integer
           minimum: 0
-          description: Papers handed in (`attempt.submitted`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`).
+          description: Papers handed in (`attempt.submitted`, and last week's on the teacher's classes for `summary.weekly`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`).
         toGrade: { type: integer, minimum: 0, description: 'Of the papers handed in, those with an answer waiting for a mark.' }
         focusLost: { type: integer, minimum: 0, description: Times the student left the test. }
         notSubmitted: { type: integer, minimum: 0, description: Students who have not handed in. }
@@ -7433,33 +7543,57 @@ components:
           type: array
           maxItems: 5
           items: { type: string, minLength: 1, maxLength: 200 }
-          description: At most five names; `count` holds how many classes there are.
+          description: At most five names. For `join_codes.rotated`, `count` holds how many classes there are; for `summary.weekly`, they are the classes the week's figures cover.
         closesAt: { $ref: '#/components/schemas/Timestamp' }
         used: { type: integer, minimum: 0, description: AI credits the teacher has used this month. }
         allowance: { type: integer, minimum: 0, description: "The teacher's AI allowance this month, in credits." }
         credits: { type: integer, minimum: 0, description: AI credits a request asks for. }
         teacherName: { type: string, minLength: 1, maxLength: 200, description: 'The teacher who asked for credits (`ai.credit_request`), whose content was given to the reader (`content.transferred`), or who now teaches a class the reader taught (`class.teacher_changed`, on the previous teacher''s item only: the new teacher''s item has no `teacherName`).' }
         decision: { type: string, enum: [approved, declined], description: How an Admin decided a request for credits. }
+        sharerName: { type: string, minLength: 1, maxLength: 200, description: The teacher who shared (`content.shared`). }
+        contentKind: { $ref: '#/components/schemas/ShareKind' }
+        name: { type: string, minLength: 1, maxLength: 300, description: The shared test's title or set's name (`content.shared`). }
+        access: { $ref: '#/components/schemas/ShareAccess' }
+        message: { type: string, minLength: 1, maxLength: 500, description: 'The sharer''s own words, as they wrote them (`content.shared`).' }
+        editorName: { type: string, minLength: 1, maxLength: 200, description: The co-editor who published (`test.published_by_collaborator`). }
+        version: { type: integer, minimum: 1, description: The version a co-editor published. }
+        senderName: { type: string, minLength: 1, maxLength: 200, description: Who wrote the newest message (`message.*`). }
+        excerpt: { type: string, minLength: 1, maxLength: 80, description: 'The newest message''s first 80 characters, or its file''s name (`message.*`).' }
+        flagged: { type: integer, minimum: 0, description: Attempts flagged last week (`summary.weekly`). }
 
     NotificationTarget:
       type: object
       description: |
         Where a click on the notification goes: a page the client resolves from
         `route`, never a URL. `assignmentId` is present for `assignment` and
-        `studentAssignment`, and `attemptId` for `attempt` and `result`; either
-        may accompany any other route.
+        `studentAssignment`, `attemptId` for `attempt` and `result`, and
+        `testId` for `test`; any of them may accompany any other route.
       required: [route]
       additionalProperties: false
       properties:
         route:
           type: string
           description: |
-            `assignment`, `attempt`, `grading` and `classes` are pages of the
-            teaching workspace; `result` and `studentAssignment` are the
-            student's result and the student's page of an assignment.
-          enum: [assignment, attempt, grading, classes, result, studentAssignment]
+            `assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`,
+            `test`, `messages` and `dashboard` are pages of the teaching workspace;
+            `result`, `studentAssignment` and `studentMessages` are the
+            student's result, the student's page of an assignment and the
+            student's Messages.
+          enum: [assignment, attempt, grading, classes, result, studentAssignment, sharedWithMe, test, messages, studentMessages, dashboard]
         assignmentId: { $ref: '#/components/schemas/Uuid' }
         attemptId: { $ref: '#/components/schemas/Uuid' }
+        testId:
+          $ref: '#/components/schemas/Uuid'
+          description: Present for `test`.
+        studentId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`messages`: the direct thread with this student.'
+        teacherId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`studentMessages`: the direct thread with this teacher.'
+        classId:
+          $ref: '#/components/schemas/Uuid'
+          description: '`studentMessages`: the channel of this class.'
 
     Notification:
       type: object
@@ -7488,22 +7622,622 @@ components:
       properties:
         event: { $ref: '#/components/schemas/NotificationEvent' }
         inApp: { type: boolean, description: 'While false, no notification this switch governs is written for the caller.' }
-        email: { type: boolean, description: Stored and returned. Nothing is sent by email yet. }
+        email:
+          type: boolean
+          description: |
+            While false, no email this switch governs is sent to the caller.
+            A student's write stores it equal to `inApp`, whatever it says
+            (DG-82). An email never carries a message's body, a join code, a
+            password or a score the review policy does not yet show.
 
     NotificationPreferences:
       type: array
       description: Every `NotificationEvent` once. The server answers them in the enum's order.
-      minItems: 5
-      maxItems: 5
+      minItems: 7
+      maxItems: 7
       items: { $ref: '#/components/schemas/NotificationPreference' }
 
     MySummary:
       type: object
       description: What the caller's shell shows before any page is open.
-      required: [unreadNotifications]
+      required: [unreadNotifications, unreadMessages]
       additionalProperties: false
       properties:
         unreadNotifications: { type: integer, minimum: 0 }
+        unreadMessages:
+          type: integer
+          minimum: 0
+          description: A student's unread messages over their threads (the top bar's Messages button); 0 for staff, whose count is `TeacherSummary.unreadMessages`.
+
+    # --------------------------------------------------------------- messages
+
+    MessageAttachment:
+      type: object
+      description: |
+        A file a staff member attached (D17): PDF, Word (DOCX or DOC), PNG,
+        JPEG, MP3 or M4A, at most 20 MiB, typed by sniffing its content. It is
+        fetched through a five-minute signed URL that downloads it under
+        `filename`.
+      required: [id, filename, bytes, mimeType]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        filename: { type: string, minLength: 1, maxLength: 200 }
+        bytes: { type: integer, minimum: 1, maximum: 20971520 }
+        mimeType:
+          type: string
+          enum:
+            - application/pdf
+            - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+            - application/msword
+            - image/png
+            - image/jpeg
+            - audio/mpeg
+            - audio/mp4
+
+    AttachmentUrl:
+      type: object
+      required: [url, expiresAt]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          description: A presigned GET valid five minutes that downloads the file as an attachment under its filename, with its sniffed type.
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    MessagePreview:
+      type: object
+      description: |
+        The newest message of a thread, as a row of the list shows it. The
+        client words "Attachment · {filename}" from `attachmentName` when
+        `text` is null.
+      required: [text, attachmentName, mine]
+      additionalProperties: false
+      properties:
+        text: { type: [string, 'null'], maxLength: 120, description: "The body's first 120 characters, on one line." }
+        attachmentName: { type: [string, 'null'] }
+        mine: { type: boolean, description: The caller sent it. }
+
+    StaffThreadRef:
+      type: object
+      description: Which thread a row opens. A class channel names its class, a direct thread its student.
+      required: [kind, classId, studentId]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [class, direct] }
+        classId: { type: [string, 'null'], format: uuid }
+        studentId: { type: [string, 'null'], format: uuid }
+
+    StaffThread:
+      type: object
+      description: |
+        A row of the staff Messages list. A class row's `title` is the class's
+        name and `studentCount` its active students. A direct row's `title` is
+        the student's name and `classNames` the caller's classes the student
+        is in: empty, with `former`, when the student was in one of the
+        caller's classes and is in none now ("Former student"). A `candidate`
+        is a student the caller may write to and has no thread with yet,
+        listed only for a search: nothing exists until the first post.
+      required: [thread, title, avatarUrl, classNames, studentCount, former, candidate, disabled, lastMessageAt, preview, unread]
+      additionalProperties: false
+      properties:
+        thread: { $ref: '#/components/schemas/StaffThreadRef' }
+        title: { type: string }
+        avatarUrl: { type: [string, 'null'], description: "A direct row's student photo, a presigned GET valid 24 hours; `null` for a class or when there is none." }
+        classNames: { type: array, items: { type: string } }
+        studentCount: { type: [integer, 'null'], minimum: 0, description: A class row's active students; `null` on a direct row. }
+        former: { type: boolean }
+        candidate: { type: boolean }
+        disabled: { type: boolean, description: A direct row's student account is disabled. }
+        lastMessageAt: { type: [string, 'null'], format: date-time, description: '`null` for a class channel nobody has posted in, and for a candidate.' }
+        preview:
+          oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }]
+        unread: { type: integer, minimum: 0, description: "Messages past the caller's read pointer, not counting their own." }
+
+    MessageSender:
+      type: object
+      required: [id, name, avatarUrl]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+
+    StaffMessageSender:
+      type: object
+      required: [id, name, avatarUrl, side]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        side: { type: string, enum: [staff, student] }
+
+    SeenBy:
+      type: object
+      description: 'An announcement''s "Seen by {seen} of {of}": `of` counts the class''s active students now, and `seen` those whose read pointer has passed the post.'
+      required: [seen, of]
+      additionalProperties: false
+      properties:
+        seen: { type: integer, minimum: 0 }
+        of: { type: integer, minimum: 0 }
+
+    StaffMessage:
+      type: object
+      description: A message as staff read it. Messages are never edited or deleted.
+      required: [id, sender, body, attachment, createdAt, mine]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        sender: { $ref: '#/components/schemas/StaffMessageSender' }
+        body: { type: [string, 'null'], description: Plain text. A client renders it as text and links http(s) addresses; never HTML. }
+        attachment:
+          oneOf: [{ $ref: '#/components/schemas/MessageAttachment' }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        mine: { type: boolean }
+        seenBy:
+          $ref: '#/components/schemas/SeenBy'
+          description: Present on a class channel's posts only.
+
+    StudentMessage:
+      type: object
+      description: |
+        A message as a student reads it: its own schema, never a projection
+        of `StaffMessage` (D17, DG-91). It carries no read receipts, no member
+        count and no attempt events.
+      required: [id, sender, body, attachment, createdAt, mine]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        sender: { $ref: '#/components/schemas/MessageSender' }
+        body: { type: [string, 'null'] }
+        attachment:
+          oneOf: [{ $ref: '#/components/schemas/MessageAttachment' }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        mine: { type: boolean }
+
+    ContextEvent:
+      type: object
+      description: |
+        A flagged attempt of the thread's student on an assignment the reader
+        can read, shown in the stream as a card at `at`. Computed when the
+        thread is read, never stored as a message, and never unread.
+      required: [attemptId, assignmentId, title, focusLost, at]
+      additionalProperties: false
+      properties:
+        attemptId: { $ref: '#/components/schemas/Uuid' }
+        assignmentId: { $ref: '#/components/schemas/Uuid' }
+        title: { type: string, description: The test's title. }
+        focusLost: { type: integer, minimum: 0 }
+        at: { $ref: '#/components/schemas/Timestamp' }
+
+    StaffDirectThreadPeer:
+      type: object
+      required: [id, name, avatarUrl, classes, former, disabled, canPost]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classes:
+          type: array
+          description: The caller's classes the student is in now, for Details.
+          items: { $ref: '#/components/schemas/PersonRef' }
+        former: { type: boolean, description: The student was in a class of the caller's and is in none now. }
+        disabled: { type: boolean }
+        canPost:
+          type: boolean
+          description: A post would be accepted. False when the account is disabled or no longer a student; the composer then gives way to a sentence.
+
+    StaffDirectThread:
+      type: object
+      required: [student, messages, contextEvents, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        student: { $ref: '#/components/schemas/StaffDirectThreadPeer' }
+        messages:
+          type: array
+          description: Oldest first.
+          items: { $ref: '#/components/schemas/StaffMessage' }
+        contextEvents:
+          type: array
+          description: The student's flagged attempts from 24 hours before the thread's first message, oldest first. Empty while the thread has no message.
+          items: { $ref: '#/components/schemas/ContextEvent' }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StaffClassThreadClass:
+      type: object
+      required: [id, name, archived, studentCount]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        archived: { type: boolean, description: An archived class's channel stays readable and takes no post. }
+        studentCount: { type: integer, minimum: 0, description: 'Active students, "Sent to all {n} students".' }
+
+    StaffClassThread:
+      type: object
+      required: [class, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        class: { $ref: '#/components/schemas/StaffClassThreadClass' }
+        messages:
+          type: array
+          description: Oldest first, each with `seenBy`.
+          items: { $ref: '#/components/schemas/StaffMessage' }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StaffMessagePost:
+      type: object
+      description: A message is text, a file, or both; one of the two is required.
+      required: [clientId]
+      additionalProperties: false
+      properties:
+        clientId:
+          $ref: '#/components/schemas/Uuid'
+          description: Made by the client for this message. Sending it again returns the message it made, so a retried send never posts twice.
+        body: { type: [string, 'null'], minLength: 1, maxLength: 4000, description: Trimmed; empty is none. }
+        attachmentId:
+          type: [string, 'null']
+          format: uuid
+          description: A file the caller uploaded with `uploadMessageAttachment` and has not sent.
+
+    StudentMessagePost:
+      type: object
+      required: [clientId, body]
+      additionalProperties: false
+      properties:
+        clientId: { $ref: '#/components/schemas/Uuid' }
+        body: { type: string, minLength: 1, maxLength: 4000, description: Trimmed. Students send text only. }
+
+    MessageReadPointer:
+      type: object
+      required: [lastReadMessageId]
+      additionalProperties: false
+      properties:
+        lastReadMessageId:
+          $ref: '#/components/schemas/Uuid'
+          description: The newest message on the reader's screen. The pointer only moves forward; an older id is a no-op.
+
+    StudentThreadRef:
+      type: object
+      required: [kind, classId, teacherId]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [class, direct] }
+        classId: { type: [string, 'null'], format: uuid }
+        teacherId: { type: [string, 'null'], format: uuid }
+
+    StudentThread:
+      type: object
+      description: |
+        A row of the student's Messages. A direct row's `title` is the
+        teacher's name and `classNames` the student's classes they teach that
+        are not archived ("Your teacher · {classes}"). It is empty with
+        `former` when the teacher taught the student and teaches them in no
+        such class now, having left them all or seen them archived ("Former
+        teacher"). It is empty without `former` when the staff member never
+        taught the student (one who created the student's account and wrote
+        first): the subtitle is then "Your teacher" alone, with no " · " and
+        nothing after it. A class row is a channel with at least one post
+        ("Class announcements"), titled with the class's name.
+      required: [thread, title, avatarUrl, classNames, former, lastMessageAt, preview, unread]
+      additionalProperties: false
+      properties:
+        thread: { $ref: '#/components/schemas/StudentThreadRef' }
+        title: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classNames: { type: array, items: { type: string } }
+        former: { type: boolean }
+        lastMessageAt: { type: [string, 'null'], format: date-time }
+        preview:
+          oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }]
+        unread: { type: integer, minimum: 0 }
+
+    StudentDirectThreadTeacher:
+      type: object
+      description: |
+        The thread's header. `classNames` and `former` read as they do on the
+        thread's `StudentThread` row: "Your teacher · {classes}", "Former
+        teacher", or "Your teacher" alone when both are empty and false.
+      required: [id, name, avatarUrl, classNames, former, canPost]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        classNames: { type: array, items: { type: string } }
+        former: { type: boolean }
+        canPost: { type: boolean, description: A post would be accepted. }
+
+    StudentDirectThread:
+      type: object
+      required: [teacher, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        teacher: { $ref: '#/components/schemas/StudentDirectThreadTeacher' }
+        messages: { type: array, description: Oldest first., items: { $ref: '#/components/schemas/StudentMessage' } }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    StudentClassThread:
+      type: object
+      description: 'A class channel, read-only for students: "Only your teacher can post here. Reply to {teacher} directly."'
+      required: [readOnly, class, teacher, messages, nextBefore, latestId]
+      additionalProperties: false
+      properties:
+        readOnly: { type: boolean, const: true }
+        class: { $ref: '#/components/schemas/PersonRef' }
+        teacher: { $ref: '#/components/schemas/MessageSender' }
+        messages: { type: array, description: Oldest first., items: { $ref: '#/components/schemas/StudentMessage' } }
+        nextBefore: { type: [string, 'null'], format: uuid }
+        latestId: { type: [string, 'null'], format: uuid }
+
+    # ---------------------------------------------------------------- sharing
+
+    ContentAccess:
+      type: string
+      enum: [owner, edit, use]
+      description: |
+        What the caller may do with a test or a question set (D4). `owner` is
+        the content's owner, and anyone holding `scope.all`; `edit` and `use`
+        are a share's two levels, Can edit and Can use. A client tells the
+        owner from `owner.id`, never from this, because `scope.all` reads as
+        `owner`.
+
+        | Action | `owner` | `edit` | `use` |
+        |---|---|---|---|
+        | Read: detail, builder, versions, preview, diff | ✓ | ✓ | ✓ |
+        | Assign a published version to one's own classes | ✓ | ✓ | ✓ |
+        | Make a copy | ✓ | ✓ | ✓ |
+        | Autosave, change questions and groups, restore as draft, make default | ✓ | ✓ | |
+        | Publish (also needs `content.tests.publish`) | ✓ | ✓ | |
+        | Delete, archive, share, duplicate, delete a version | ✓ | | |
+
+        A caller who cannot read the content gets `404`. A reader without the
+        right gets `403` with `SHARE_READ_ONLY` (a use grant writing) or
+        `SHARE_OWNER_ONLY` (an owner's action).
+
+    PersonRef:
+      type: object
+      description: A person named by an id and a display name, as a line of a page shows them.
+      required: [id, name]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, description: The display name. }
+
+    ShareKind:
+      type: string
+      enum: [test, question_set]
+      description: What a share gives. Later releases add values; a client treats an unknown one as a row it cannot open.
+
+    ShareAccess:
+      type: string
+      enum: [use, edit]
+      description: Can use (read, assign, copy) or Can edit (also change and publish). See `ContentAccess`.
+
+    ShareTeacher:
+      type: object
+      description: A colleague as the share dialog lists them. Never a student.
+      required: [id, fullName, displayName, email, avatarUrl, disabled]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        fullName: { type: string }
+        displayName: { type: string }
+        email: { type: string }
+        avatarUrl:
+          type: [string, 'null']
+          description: The profile photo, a presigned GET valid 24 hours; `null` when there is none or no store is configured.
+        disabled: { type: boolean, description: The account is disabled. It cannot be picked as a new recipient. }
+
+    ShareGrant:
+      type: object
+      required: [id, grantee, access, grantedAt, grantedBy]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        grantee: { $ref: '#/components/schemas/ShareTeacher' }
+        access: { $ref: '#/components/schemas/ShareAccess' }
+        grantedAt: { $ref: '#/components/schemas/Timestamp' }
+        grantedBy: { $ref: '#/components/schemas/PersonRef' }
+
+    ShareOwner:
+      type: object
+      required: [id, name, email, avatarUrl]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        email: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+
+    ShareList:
+      type: object
+      description: The share dialog's "People with access", the owner first.
+      required: [owner, grants]
+      additionalProperties: false
+      properties:
+        owner: { $ref: '#/components/schemas/ShareOwner' }
+        grants:
+          type: array
+          description: Oldest grant first.
+          items: { $ref: '#/components/schemas/ShareGrant' }
+
+    ShareCreate:
+      type: object
+      required: [kind, resourceId, granteeIds, access, notify]
+      additionalProperties: false
+      properties:
+        kind: { $ref: '#/components/schemas/ShareKind' }
+        resourceId:
+          $ref: '#/components/schemas/Uuid'
+          description: The test or the question set, as `kind` says.
+        granteeIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Uuid' }
+        access: { $ref: '#/components/schemas/ShareAccess' }
+        notify:
+          type: boolean
+          description: |
+            "Send a notification". Each new recipient then gets
+            `content.shared` in app and by email. There is no recipient
+            switch: the sharer decides.
+        message:
+          type: [string, 'null']
+          maxLength: 500
+          description: '"Add a message (optional)": trimmed, empty is none. Carried by the notification and the email, marked as the sharer''s words.'
+
+    ShareSkipCode:
+      type: string
+      enum: [SELF, ALREADY_SHARED, NOT_A_TEACHER, DISABLED]
+      description: |
+        Why a recipient got no grant. `SELF` is the content's owner,
+        `ALREADY_SHARED` already holds a grant (change it with `updateShare`),
+        `NOT_A_TEACHER` lacks the teaching workspace or is no account at all,
+        and `DISABLED` is a disabled account.
+
+    ShareCreateResult:
+      type: object
+      required: [grants, skipped]
+      additionalProperties: false
+      properties:
+        grants:
+          type: array
+          description: The grants made, in the order of `granteeIds`.
+          items: { $ref: '#/components/schemas/ShareGrant' }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [userId, code]
+            additionalProperties: false
+            properties:
+              userId: { $ref: '#/components/schemas/Uuid' }
+              code: { $ref: '#/components/schemas/ShareSkipCode' }
+
+    SharedWithMeOwner:
+      type: object
+      required: [id, name, avatarUrl, disabled]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'] }
+        disabled:
+          type: boolean
+          description: The owner's account is disabled ("Account disabled"). The grant still works.
+
+    SharedWithMeItem:
+      type: object
+      required: [shareId, kind, resourceId, name, owner, access, sharedAt, questionCount]
+      additionalProperties: false
+      properties:
+        shareId: { $ref: '#/components/schemas/Uuid' }
+        kind: { $ref: '#/components/schemas/ShareKind' }
+        resourceId: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, description: "The test's title or the set's name, read now." }
+        owner: { $ref: '#/components/schemas/SharedWithMeOwner' }
+        access: { $ref: '#/components/schemas/ShareAccess' }
+        sharedAt: { $ref: '#/components/schemas/Timestamp' }
+        questionCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: A question set's live questions; `null` for a test.
+
+    SharedWithMeCounts:
+      type: object
+      description: Live grants to the caller per tab, before `kind` and with `q`.
+      required: [all, test, questionSet]
+      additionalProperties: false
+      properties:
+        all: { type: integer, minimum: 0 }
+        test: { type: integer, minimum: 0 }
+        questionSet: { type: integer, minimum: 0 }
+
+    # ---------------------------------------------------------- question sets
+
+    QuestionSetSummary:
+      type: object
+      required: [id, name, description, questionCount, sharedWith, updatedAt]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        questionCount: { type: integer, minimum: 0, description: Live questions in the set. }
+        sharedWith: { type: integer, minimum: 0, description: Teachers holding a grant to the set. }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    QuestionSet:
+      type: object
+      description: |
+        A named, ordered selection of its owner's standalone bank questions
+        (DG-90, interim). It holds references, not copies: a question edited
+        in the bank is edited in the set. Passage and cloze groups are not
+        set members. Its questions are read with `listQuestions?setId=`.
+      required: [id, name, description, owner, access, questionCount, sharedWith, createdAt, updatedAt]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 500 }
+        owner: { $ref: '#/components/schemas/PersonRef' }
+        access: { $ref: '#/components/schemas/ContentAccess' }
+        questionCount: { type: integer, minimum: 0 }
+        sharedWith:
+          type: integer
+          minimum: 0
+          description: Teachers holding a grant to the set; 0 for a caller who is not its owner and holds no `scope.all`.
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    QuestionSetIds:
+      type: object
+      required: [questionIds]
+      additionalProperties: false
+      properties:
+        questionIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Uuid' }
+
+    QuestionCopyResult:
+      type: object
+      description: The new bank questions, in the order of the questions they copy.
+      required: [questionIds]
+      additionalProperties: false
+      properties:
+        questionIds:
+          type: array
+          items: { $ref: '#/components/schemas/Uuid' }
+
+    TestQuestionEdit:
+      type: object
+      description: The answer of `editTestQuestion`.
+      required: [question, forked, testUpdatedAt]
+      additionalProperties: false
+      properties:
+        question:
+          $ref: '#/components/schemas/AdminQuestion'
+          description: The question as saved, the fork when `forked`.
+        forked:
+          type: boolean
+          description: |
+            True when the edit made a new question (copy-on-write): the
+            original is used elsewhere, so this test now uses the copy, owned
+            by the original's owner, and nothing else changed.
+        testUpdatedAt:
+          $ref: '#/components/schemas/Timestamp'
+          description: The test's `updatedAt` after the edit, which the edit moves. The builder sends it as its next `expectedUpdatedAt`.
 
     # ----------------------------------------------------------- write shapes
 
@@ -7612,6 +8346,14 @@ components:
           items: { $ref: '#/components/schemas/RubricCriterionInput' }
           description: '`essay` only. Order in the array is the stored ordinal; an empty list means the teacher sets the band directly.'
         tags: { type: array, items: { type: string, minLength: 1 } }
+        expectedUpdatedAt:
+          $ref: '#/components/schemas/Timestamp'
+          description: |
+            `updateQuestion` and `editTestQuestion`: the question's
+            `updatedAt` the editor last read. When the question has changed
+            since, the write answers `409 STALE_WRITE` naming who changed it,
+            and nothing is saved. Optional until R8, which makes it required;
+            every other operation that takes a `QuestionInput` ignores it.
 
     MatchItemInput:
       type: object
@@ -8117,6 +8859,65 @@ paths:
       x-max-body-bytes: 4096
       x-rate-limit:
         perIp: { perMinute: 3, perHour: 10 }
+
+  /public/email-events:
+    post:
+      operationId: receiveEmailEvents
+      tags: [public]
+      security: []
+      summary: Resend's delivery events (bounces and complaints)
+      description: |
+        The webhook Resend calls (O-R5.2, T-R7.15). It accepts only Resend's
+        signed deliveries: the Svix signature in `svix-id`, `svix-timestamp`
+        and `svix-signature`, an HMAC-SHA256 over `{id}.{timestamp}.{body}`
+        with the decoded `RESEND_WEBHOOK_SECRET`, within five minutes of the
+        timestamp. A hard bounce (`email.bounced`) or a complaint
+        (`email.complained`) puts the recipient's address on the suppression
+        list, and no more mail goes to it; every other event type is accepted
+        and ignored. A replayed `svix-id` changes nothing.
+
+        The three headers are optional in the schema so that a request
+        without them is refused by the signature check, `401`, after the
+        rate limit has counted it, and not by parameter binding.
+
+        **Leak review (§6.5).** A body that is not a JSON object, or a header
+        over its length, is refused with `400` by request validation before
+        the signature is read, as on every operation. Past that, the answer
+        is `204` or `401`, both empty, whatever the body says: nothing tells
+        a caller whether an address is
+        known or already suppressed. A forged request cannot suppress an
+        address, because it cannot sign; the address stored is one Quizzivy
+        already sent to. The limit is per address: 120 a minute.
+      parameters:
+        - { name: svix-id, in: header, required: false, schema: { type: string, maxLength: 200 }, description: 'Resend''s delivery id; without it the answer is `401`.' }
+        - { name: svix-timestamp, in: header, required: false, schema: { type: string, maxLength: 20 }, description: 'Unix seconds; without it the answer is `401`.' }
+        - { name: svix-signature, in: header, required: false, schema: { type: string, maxLength: 2000 }, description: 'One or more `v1,<base64>` signatures; without it the answer is `401`.' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Resend's event, read only for `type` and the recipient. Anything else in it is ignored.
+              additionalProperties: true
+      responses:
+        '204': { description: Received. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: 'The signature is missing, wrong or stale. No body.' }
+        '413':
+          description: The body is over 64 KiB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '501':
+          description: No webhook secret is configured, so no delivery can be verified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+      x-max-body-bytes: 65536
+      x-rate-limit:
+        perIp: { perMinute: 120 }
 
   /auth/login:
     post:
@@ -9206,9 +10007,19 @@ paths:
       operationId: listTests
       x-resource-list: test
       x-permission: workspace.teacher
-      description: Backs the §8 tests list. Soft-deleted tests are excluded; keyset paginated (§13.8).
+      description: |
+        Backs the §8 tests list. Soft-deleted tests are excluded; keyset paginated (§13.8).
+
+        Without `include` it lists the caller's own tests, for everyone,
+        admins included. `include=shared` adds the tests shared with the
+        caller, each with its `access` and `owner`: the assignment wizard's
+        test step.
       tags: [teacher-tests]
       parameters:
+        - name: include
+          in: query
+          required: false
+          schema: { type: string, enum: [shared] }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TestStatus' } }
         # A-03's "Thẻ". Derived from the tags of the questions a test CONTAINS,
         # not from tags of its own: §7 gives Question a `tags` array and Test
@@ -9293,6 +10104,11 @@ paths:
       responses:
         '204': { description: Deleted. }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The resource is still referenced or has not reached its required inactive state.
@@ -9374,9 +10190,14 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: '`STALE_WRITE` — edited elsewhere since `expectedUpdatedAt`; `GROUP_OUTLINE_REQUIRED` — a legacy question-only outline cannot replace a draft containing shared groups. Metadata-only updates remain supported. `TEST_ARCHIVED` — restore the test before a mixed-outline edit.'
+          description: '`STALE_WRITE` — edited elsewhere since `expectedUpdatedAt`, with `details.updatedBy` (`PersonRef` or `null`, who saved last) and `details.updatedAt`; `GROUP_OUTLINE_REQUIRED` — a legacy question-only outline cannot replace a draft containing shared groups. Metadata-only updates remain supported. `TEST_ARCHIVED` — restore the test before a mixed-outline edit.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9548,6 +10369,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TestVersion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test. `FORBIDDEN` — the caller lacks `content.tests.publish`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -9580,7 +10406,148 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test; a recipient uses `copyTest`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/tests/{id}/copy:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: copyTest
+      x-resource:
+        - { in: path, name: id, kind: test }
+      x-permission: content.tests.write
+      tags: [teacher-tests]
+      summary: Make a copy of a test the caller can read
+      description: |
+        "Make a copy" (D4): copies the current draft into the caller's
+        ownership, with its sections, instructions and the test's own
+        groups. Every standalone question becomes a new bank question of the
+        caller's, with its options, gaps, match items and rubric, so the copy
+        is independent of the original. Versions, assignments and grants are
+        not copied. The copy is named as `duplicateTest` names its copies.
+        For the owner `duplicateTest` keeps its reference semantics; this
+        operation always copies. Audited as `share.copied`.
+      responses:
+        '201':
+          description: Copied, as a draft of the caller's.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Test' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/tests/{id}/question-copies:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: copyQuestionsForTest
+      x-resource:
+        - { in: path, name: id, kind: test }
+        - { in: body, name: /questionIds/-, kind: question }
+      x-permission: content.tests.write
+      tags: [teacher-tests]
+      summary: Copy questions into the bank of a test's owner
+      description: |
+        "From question bank" for a caller who is not the test's owner: a
+        draft holds only questions its test's owner owns, so the builder adds
+        copies of the chosen questions, made in the owner's bank with
+        `createdBy` the caller. The caller needs edit access to the test and
+        read access to each question. The builder then puts the returned ids
+        into the outline with its next autosave.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionIds]
+              additionalProperties: false
+              properties:
+                questionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '201':
+          description: Copied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionCopyResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: '`NOT_FOUND` — no such test for the caller, or a question the caller cannot read (`details.questionIds`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/tests/{id}/questions/{questionId}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: questionId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    patch:
+      operationId: editTestQuestion
+      x-resource:
+        - { in: path, name: id, kind: test }
+        - { in: path, name: questionId, kind: question }
+        - { in: body, name: /mediaAssetId, kind: media }
+        - { in: body, name: /promptContent/blocks/-/assetId, kind: media }
+        - { in: body, name: /explanationContent/blocks/-/assetId, kind: media }
+        - { in: body, name: /options/-/id, kind: none }
+        - { in: body, name: /blanks/-/id, kind: none }
+        - { in: body, name: /matchItems/-/id, kind: none }
+        - { in: body, name: /rubric/-/id, kind: none }
+      x-permission: content.tests.write
+      tags: [teacher-tests]
+      summary: Edit a question in the context of a test
+      description: |
+        How the builder saves a question when the caller is not the test's
+        owner (copy-on-write, D4). The question must be a standalone question
+        of the test's draft. When anything else uses it, another draft or a
+        question set, the edit makes a copy owned by the question's owner
+        with `createdBy` the caller, and only this test is pointed at the
+        copy (`forked`). Otherwise the question is edited in place. The
+        owner's own edits never fork. The test's `updatedAt` moves either
+        way. Audited as `question.updated`, and `question.forked` on a fork.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionInput' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestQuestionEdit' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `STALE_WRITE` — the question changed since `expectedUpdatedAt`.
+            `details.updatedBy` (`PersonRef` or `null`) and
+            `details.updatedAt` name the last change. `TEST_ARCHIVED` —
+            restore the test first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /teacher/tests/{id}/versions:
     parameters: [{ $ref: '#/components/parameters/IdPath' }]
@@ -9627,6 +10594,11 @@ paths:
       responses:
         '204': { description: Deleted. }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The version is referenced or current. Archiving does not prevent deletion of an unused, non-current version.
@@ -9716,6 +10688,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The test is archived (`TEST_ARCHIVED`) or the expected update time is stale (`STALE_WRITE`).
@@ -9754,6 +10731,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Test' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant to the test.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -9808,11 +10790,25 @@ paths:
   /teacher/questions:
     get:
       operationId: listQuestions
+      x-resource:
+        - { in: query, name: setId, kind: question-set }
       x-resource-list: question
       x-permission: workspace.teacher
-      description: The §8 question bank, with type and tag filters plus search.
+      description: |
+        The §8 question bank, with type and tag filters plus search.
+
+        With `setId`, the list is that set's questions instead of the
+        caller's bank: any set the caller can read, for a caller holding
+        `content.questions.write` (the set operations' own permission; anyone
+        else gets 404), in set order unless a
+        sort is given, each row with the caller's `access` and its `owner`.
+        `bankTotal` is then the set's size.
       tags: [teacher-questions]
       parameters:
+        - name: setId
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Uuid' }
         # Repeatable, because A-06's rail is checkboxes and tag chips, not a
         # radio group. Within a group the values are OR-ed; the groups are
         # AND-ed with each other and with `q` -- the ordinary faceted-search
@@ -9906,9 +10902,15 @@ paths:
                           from. Distinct from `facets.all`, which ignores the
                           type filter so the "Tất cả" row can show a total.
         '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: '`NOT_FOUND` — `setId` names no set the caller can read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     post:
       operationId: createQuestion
       x-resource:
+        - { in: query, name: forTestId, kind: test }
         - { in: body, name: /mediaAssetId, kind: media }
         - { in: body, name: /promptContent/blocks/-/assetId, kind: media }
         - { in: body, name: /explanationContent/blocks/-/assetId, kind: media }
@@ -9917,8 +10919,19 @@ paths:
         - { in: body, name: /matchItems/-/id, kind: none }
         - { in: body, name: /rubric/-/id, kind: none }
       x-permission: [content.questions.write, content.tests.write]
-      description: Adds a question to the bank. Options and blanks are written in the same transaction, with ordinals normalized dense.
+      description: |
+        Adds a question to the bank. Options and blanks are written in the same transaction, with ordinals normalized dense.
+
+        With `forTestId` the question is made for that test's draft: it
+        belongs to the test's owner, with `createdBy` the caller, who needs
+        edit access to the test. A draft holds only questions its test's
+        owner owns, so this is how a co-editor adds a new question.
       tags: [teacher-questions]
+      parameters:
+        - name: forTestId
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Uuid' }
       requestBody:
         required: true
         content:
@@ -9931,6 +10944,16 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdminQuestion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — `forTestId` names a test the caller holds a Can use grant to.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: '`NOT_FOUND` — `forTestId` names no test the caller can read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /teacher/questions/tags:
     post:
@@ -10007,6 +11030,7 @@ paths:
       operationId: updateQuestion
       x-resource:
         - { in: path, name: id, kind: question }
+        - { in: query, name: setId, kind: question-set }
         - { in: body, name: /mediaAssetId, kind: media }
         - { in: body, name: /promptContent/blocks/-/assetId, kind: media }
         - { in: body, name: /explanationContent/blocks/-/assetId, kind: media }
@@ -10015,8 +11039,22 @@ paths:
         - { in: body, name: /matchItems/-/id, kind: none }
         - { in: body, name: /rubric/-/id, kind: none }
       x-permission: [content.questions.write, content.tests.write]
-      description: Edits the bank copy only. Published versions hold their own snapshot and are unaffected (§7).
+      description: |
+        Edits the bank copy only. Published versions hold their own snapshot and are unaffected (§7).
+
+        The question's owner and `scope.all` edit in place, as before.
+        Anyone else edits only in the context of a test or a set they can
+        edit: in a test through `editTestQuestion`, in a set with `setId`.
+        In a set, when anything other than that set uses the question, the
+        edit makes a copy owned by the question's owner, and only that set is
+        pointed at it (copy-on-write); the answer is the copy, whose `id`
+        differs from the path's.
       tags: [teacher-questions]
+      parameters:
+        - name: setId
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Uuid' }
       requestBody:
         required: true
         content:
@@ -10029,7 +11067,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdminQuestion' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller can read the question but not edit it.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `STALE_WRITE` — the question changed since `expectedUpdatedAt`.
+            `details.updatedBy` (`PersonRef` or `null`) and
+            `details.updatedAt` name the last change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: '`EDIT_CONTEXT_REQUIRED` — the caller is not the question''s owner and gave no set; a test''s question is edited with `editTestQuestion`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     delete:
       operationId: deleteQuestion
       x-resource:
@@ -10040,6 +11096,11 @@ paths:
       responses:
         '204': { $ref: '#/components/responses/NoContent' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller can read the question but does not own it.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
@@ -10056,6 +11117,7 @@ paths:
       operationId: duplicateQuestion
       x-resource:
         - { in: path, name: id, kind: question }
+        - { in: query, name: forTestId, kind: test }
       x-permission: [content.questions.write, content.tests.write]
       tags: [teacher-questions]
       description: |
@@ -10063,12 +11125,896 @@ paths:
         tags into a new bank row that no test references yet. A source whose
         media asset has been deleted, or that no longer validates, answers
         `VALIDATION_FAILED` as a create would; nothing is copied.
+
+        With `forTestId` the copy is made in that test's owner's bank, as
+        `createQuestion` does with it.
+      parameters:
+        - name: forTestId
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Uuid' }
       responses:
         '201':
           description: Created.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminQuestion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — without `forTestId`, a question the caller does not own; `SHARE_READ_ONLY` — `forTestId` names a test the caller holds a Can use grant to.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/question-sets:
+    get:
+      operationId: listQuestionSets
+      x-resource-list: question-set
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      summary: The caller's own question sets
+      description: |
+        The sets the caller owns, most recently changed first, for the bank's
+        Sets group and the bulk bar's "Add to set" (DG-90, interim). Sets
+        other teachers shared with the caller are in `listSharedWithMe`. The
+        list is not paged: a teacher keeps tens of sets, not thousands.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                additionalProperties: false
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/QuestionSetSummary' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createQuestionSet
+      x-resource:
+        - { in: body, name: /questionIds/-, kind: question }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      summary: Make a question set from the bank's selection
+      description: |
+        Every id must be a standalone question of the caller's bank that is
+        not deleted (not a member of a passage or cloze group). The set keeps
+        them in the given order. Audited as `question_set.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, questionIds]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120, description: Trimmed; 1 to 120 characters after trimming. }
+                description: { type: [string, 'null'], maxLength: 500, description: Trimmed; empty is none. }
+                questionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NOT_FOUND` — an id is not a live standalone question of the caller''s bank. `details.questionIds` lists those ids, and nothing is created.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/question-sets/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getQuestionSet
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      description: A set its owner, a grantee or `scope.all` can read. Its questions are `listQuestions?setId=`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateQuestionSet
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      description: Renames the set or changes its description, for its owner or an edit grantee. Audited as `question_set.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                description:
+                  type: [string, 'null']
+                  maxLength: 500
+                  description: Trimmed; empty after trimming, or `null`, removes the description.
+                  x-go-type: json.RawMessage
+                  x-go-type-skip-optional-pointer: true
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteQuestionSet
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      description: |
+        Owner only. Deletes the set and every grant to it in one
+        transaction. Its questions stay in the bank, and tests that use them
+        are not affected. Audited as `question_set.deleted`.
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the set.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/question-sets/{id}/items:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: addQuestionSetItems
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+        - { in: body, name: /questionIds/-, kind: question }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      summary: Add bank questions to a set
+      description: |
+        Owner only (O-R7.4: an edit grantee changes and removes a set's
+        questions, but does not add them). Appends in the given order and
+        ignores a question the set already holds. A set holds at most 500
+        questions. Audited as `question_set.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionSetIds' }
+      responses:
+        '200':
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the set.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: '`NOT_FOUND` — no such set for the caller, or an id is not a live standalone question of the set owner''s bank (`details.questionIds`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: '`VALIDATION_FAILED` — the set would hold more than 500 questions.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/question-sets/{id}/items/remove:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: removeQuestionSetItems
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+        - { in: body, name: /questionIds/-, kind: question }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      summary: Take questions out of a set
+      description: |
+        For the owner or an edit grantee. The questions stay in the bank. An
+        id the set does not hold is ignored. Audited as `question_set.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionSetIds' }
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_READ_ONLY` — the caller holds a Can use grant.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/question-sets/{id}/copy:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: copyQuestionSet
+      x-resource:
+        - { in: path, name: id, kind: question-set }
+        - { in: body, name: /questionIds/-, kind: question }
+      x-permission: content.questions.write
+      tags: [teacher-questions]
+      summary: Make a copy of a set, or of some of its questions
+      description: |
+        For anyone who can read the set. Without `questionIds` it copies the
+        whole set into a new set the caller owns, with new questions of the
+        caller's own. With `questionIds`, which must be members of the set,
+        it copies just those questions into the caller's bank and makes no
+        set: "Add to test" from a shared set. A copy is independent: a later
+        edit to either side leaves the other unchanged. Audited as
+        `share.copied`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                questionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '201':
+          description: Copied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [setId, questionIds]
+                additionalProperties: false
+                properties:
+                  setId:
+                    type: [string, 'null']
+                    format: uuid
+                    description: The new set; `null` when `questionIds` was given.
+                  questionIds:
+                    type: array
+                    description: The new questions, in set order.
+                    items: { $ref: '#/components/schemas/Uuid' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: '`NOT_FOUND` — no such set for the caller, or an id is not a member of it (`details.questionIds`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ================================================================ teacher/sharing
+
+  /teacher/directory/teachers:
+    get:
+      operationId: searchTeacherDirectory
+      x-permission: content.share
+      tags: [teacher-sharing]
+      summary: Find colleagues to share with
+      description: |
+        The share dialog's picker. Lists accounts that hold the teaching
+        workspace, active or disabled, never the caller, never a student.
+        `q` matches the full name, the display name and the email,
+        accent-insensitively (`duc` finds `Đức`), best match first. Without
+        `q` (the picker just opened) it lists colleagues by name. At most
+        `limit` rows.
+
+        This is not a list of owned resources, so its rows are under
+        `teachers`, not `items`: a colleague's name and email reach holders
+        of `content.share` by design (the deck draws them), and never a
+        student, whom `x-permission` excludes.
+
+        Limited to 60 a minute per signed-in user.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 10, default: 10 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teachers]
+                additionalProperties: false
+                properties:
+                  teachers: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/ShareTeacher' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/shares:
+    get:
+      operationId: listShares
+      x-resource:
+        - { in: query, name: resourceId, kind: test }
+      x-permission: content.share
+      tags: [teacher-sharing]
+      summary: Who has access to a test or a set
+      description: |
+        The share dialog's "People with access". For the owner and
+        `scope.all`. `resourceId` names a test or a question set, as `kind`
+        says; the isolation suite runs it once per kind.
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ShareKind' }
+        - name: resourceId
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShareList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the content. `FORBIDDEN` — the caller lacks `content.share`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createShares
+      x-resource:
+        - { in: body, name: /resourceId, kind: test }
+        - { in: body, name: /granteeIds/-, kind: none }
+      x-permission: content.share
+      tags: [teacher-sharing]
+      summary: Share a test or a set with colleagues
+      description: |
+        For the owner and `scope.all`; a recipient never shares further (D4).
+        Grants each recipient that qualifies and skips the others with a
+        reason. With `notify`, each new recipient gets `content.shared` in
+        app and by email. Audited as `share.granted`, one row per grant.
+
+        `granteeIds` names no owned resource: any teacher the directory
+        returns is a valid recipient, and `skipped` covers the rest.
+
+        Limited to 30 an hour per signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShareCreate' }
+      responses:
+        '201':
+          description: Shared with everyone in `grants`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShareCreateResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller holds a grant, not the content. `FORBIDDEN` — the caller lacks `content.share`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/shares/{shareId}:
+    parameters:
+      - name: shareId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    patch:
+      operationId: updateShare
+      x-resource:
+        - { in: path, name: shareId, kind: share }
+      x-permission: content.share
+      tags: [teacher-sharing]
+      summary: Change a recipient between Can use and Can edit
+      description: For the owner and `scope.all`. Audited as `share.changed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access]
+              additionalProperties: false
+              properties:
+                access: { $ref: '#/components/schemas/ShareAccess' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShareGrant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller is the grant''s recipient, not the content''s owner.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteShare
+      x-resource:
+        - { in: path, name: shareId, kind: share }
+      x-permission: content.share
+      tags: [teacher-sharing]
+      summary: Stop sharing with one recipient
+      description: |
+        For the owner and `scope.all`. Deletes the grant and nothing else:
+        assignments the recipient already made keep their version, and their
+        students' results stay in the recipient's classes. Audited as
+        `share.revoked`.
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: '`SHARE_OWNER_ONLY` — the caller is the grant''s recipient; they leave with `removeSharedWithMe`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/shared-with-me:
+    get:
+      operationId: listSharedWithMe
+      x-resource-list: share
+      x-permission: workspace.teacher
+      tags: [teacher-sharing]
+      summary: What other teachers shared with the caller
+      description: |
+        Shared with me. Soft-deleted content is left out. `q` matches the
+        name and the owner's name, accent-insensitively. Newest grant first.
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ShareKind' }
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageInfo'
+                  - type: object
+                    required: [items, counts]
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/SharedWithMeItem' } }
+                      counts: { $ref: '#/components/schemas/SharedWithMeCounts' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /teacher/shared-with-me/{shareId}:
+    parameters:
+      - name: shareId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    delete:
+      operationId: removeSharedWithMe
+      x-resource:
+        - { in: path, name: shareId, kind: share }
+      x-permission: workspace.teacher
+      tags: [teacher-sharing]
+      summary: Remove from my list
+      description: |
+        For the grant's recipient only, who needs no `content.share` to leave.
+        Deletes the grant; assignments the caller already made from it keep
+        working. Audited as `share.removed`.
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ================================================================ teacher/messages
+
+  /teacher/messages/threads:
+    get:
+      operationId: listStaffThreads
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: The staff Messages list
+      description: |
+        Every class channel of a class the caller can read and that is not
+        archived, posted in or not, and the caller's direct threads, newest
+        activity first (a channel nobody has posted in sorts last, by name).
+        A direct thread is readable by its two participants only; `scope.all`
+        opens none (D17, DG-08).
+
+        `q` matches the student's and the class's names, accent-insensitively.
+        With `q`, the answer also lists, after the threads, up to 20 students
+        the caller may start a thread with and has none with, as
+        `candidate` rows.
+
+        The rows are under `threads`, not `items`: they mix two kinds, and a
+        student two teachers teach is rightly in both teachers' lists.
+      parameters:
+        - name: tab
+          in: query
+          required: false
+          schema: { type: string, enum: [all, direct, classes], default: all }
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [threads]
+                additionalProperties: false
+                properties:
+                  threads: { type: array, items: { $ref: '#/components/schemas/StaffThread' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /teacher/messages/students/{studentId}:
+    parameters:
+      - { name: studentId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStaffDirectThread
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      description: |
+        The caller's direct thread with a student, empty until the first
+        post. `studentId` is a `messaging-peer`: a student the caller has a
+        thread with, has taught (now or before), or created. Any other id
+        answers 404, an admin's included, and so does the thread of another
+        staff member with the same student.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffDirectThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postStaffDirectMessage
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: body, name: /clientId, kind: none }
+        - { in: body, name: /attachmentId, kind: attachment }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Write to a student
+      description: |
+        The first post makes the thread. A thread that exists stays open to
+        both of its participants after the student leaves the caller's
+        classes. Writing first needs a tie: the student is, or was, in a
+        class of the caller's, or the caller created the account; and the
+        student must be enabled and still a student. Not audited (D17).
+
+        Limited to 30 a minute and 500 a day per staff member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `MESSAGING_NOT_ALLOWED` — a messaging peer whose account is disabled or no longer a student. The thread stays readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/students/{studentId}/read:
+    parameters:
+      - { name: studentId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStaffDirectThreadRead
+      x-resource:
+        - { in: path, name: studentId, kind: messaging-peer }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Move the caller's read pointer in a direct thread
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/messages/classes/{classId}:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStaffClassThread
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      description: |
+        A class's announcement channel, for anyone who can read the class
+        (its teacher, or `scope.all`). Each post carries `seenBy`.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffClassThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postClassAnnouncement
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /clientId, kind: none }
+        - { in: body, name: /attachmentId, kind: attachment }
+      x-permission: teaching.classes.write
+      tags: [teacher-messages]
+      summary: Post an announcement to a class
+      description: |
+        Reaches every active student of the class; replies come back as
+        direct messages. An announcement can be neither edited nor deleted.
+        Not audited (D17).
+
+        Limited to 30 a minute and 500 a day per staff member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '201':
+          description: Posted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `CLASS_ARCHIVED` — restore the class first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — neither a body nor a file, or `clientId` already made a message in another thread (`details.clientId`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/classes/{classId}/read:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStaffClassThreadRead
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Move the caller's read pointer in a class channel
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/messages/attachments:
+    post:
+      operationId: uploadMessageAttachment
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Upload a file to send in a message
+      description: |
+        The file waits, unsent, until a post names it; one left unsent for 24
+        hours is removed. The type comes from sniffing the content, never
+        from the part's `Content-Type` or the extension: PDF, Word (DOCX or
+        DOC), PNG, JPEG, MP3 or M4A. WebP is refused. An image's header must
+        declare at most 10000 × 10000 pixels; nothing is decoded further, and
+        the file is kept as it came. A Word file is never opened or
+        converted on the server, and one that carries macros is refused.
+        `filename` is the part's name with any path dropped, at most 200
+        characters, and ending in an extension of the sniffed type:
+        `report` that holds a PDF is stored as `report.pdf`, and
+        `bai-tap.exe` as `bai-tap.exe.pdf`, so a downloaded file opens as
+        what it is.
+
+        Limited to 20 an hour per staff member.
+      x-max-body-bytes: 21037056
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored, not yet sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageAttachment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: >-
+            `MEDIA_TOO_LARGE` — over 20 MB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '415':
+          description: |
+            `MEDIA_TYPE_UNSUPPORTED` — not one of the accepted types (a WebP,
+            a spreadsheet, a ZIP named `.docx`). `IMAGE_DIMENSIONS` — an image
+            larger than 10000 × 10000. `ATTACHMENT_HAS_MACROS` — a Word file
+            with macros (a DOCM, or a DOC with a `Macros` storage): save it
+            without them and attach it again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /teacher/messages/attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getStaffMessageAttachmentUrl
+      x-resource:
+        - { in: path, name: id, kind: attachment }
+      x-permission: workspace.teacher
+      tags: [teacher-messages]
+      summary: Mint the download URL of a message's file
+      description: |
+        For the participants of the thread whose message holds the file (a
+        direct thread's staff member and student, and a class channel's
+        readers: staff whose class scope reaches the class, and its
+        current members), and its uploader before it is sent. Anyone
+        else gets 404, as for a missing id: an admin on a direct
+        message's file included, whom `scope.all` does not let into the
+        thread. The URL is a credential, so the answer is not stored.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentUrl' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -10932,6 +12878,9 @@ paths:
             `details.tests` names those versions as `ReferencingTest[]`,
             sorted by title then version (A-07). `details.groups` names protected
             draft/bank context as `ReferencingGroup[]`, sorted by title then ID.
+            `MEDIA_IN_USE_ELSEWHERE` — a live bank question or draft group of
+            another teacher uses it, through a copy or a share.
+            `details.count` says how many; nothing of theirs is named.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -12615,7 +14564,8 @@ paths:
             created), `attempts`, `audit` (audit history it acted in),
             `owned_content` (tests, questions, question groups, media, classes,
             join codes, published versions or Word imports it owns or created),
-            or `other`.
+            `messages` (a message it sent, a thread it is in, a file it
+            uploaded), or `other`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -13999,7 +15949,10 @@ paths:
         Queues one export for the worker and answers at once. It builds a ZIP
         of `users.csv` (no password hashes or tokens), `roles.csv`,
         `classes.csv` (no join codes), `class_members.csv`, `tests.csv`,
-        `test_versions.csv`, `assignments.csv`, `attempts.csv`, with
+        `test_versions.csv`, `assignments.csv`, `attempts.csv`, `leads.csv`,
+        `messages_summary.csv` (one row per conversation: its kind, class or
+        two participants, message count and first and last message times,
+        never a message's text, a file's name or an attachment), with
         `answers.csv` when `includeAnswers` is true, and a `README.txt` in
         Vietnamese and English that describes each file. Every CSV is UTF-8
         with a byte-order mark and CRLF line ends, and a cell that a
@@ -14586,7 +16539,7 @@ paths:
             `details.referencedBy` (`ReferencedBy`) always names what:
             `assignments` (an assignment targets the class), `members` (a
             membership in another class came through one of its join codes),
-            or `other`.
+            `messages` (its announcement channel has posts), or `other`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -15899,6 +17852,248 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ======================================================================== me
+
+  /app/messages/threads:
+    get:
+      operationId: listStudentThreads
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: The student's Messages list
+      description: |
+        The student's direct threads, and the channels of the classes they
+        are in, not archived, that have at least one post, newest first. An
+        archived class's channel stays readable by its members
+        (`getStudentClassThread`) and is not listed.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [threads]
+                additionalProperties: false
+                properties:
+                  threads: { type: array, items: { $ref: '#/components/schemas/StudentThread' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /app/messages/teachers/{teacherId}:
+    parameters:
+      - { name: teacherId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStudentDirectThread
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      description: |
+        The student's thread with a teacher: one who teaches a class the
+        student is in that is not archived, or one they already have a
+        thread with. `teacherId`
+        is a user id whose eligibility the operation checks (not an owned
+        resource); any other id answers 404.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentDirectThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postStudentDirectMessage
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: body, name: /clientId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Write to a teacher
+      description: |
+        Text only. A student may write first to the teacher of a class they
+        are in that is not archived, and goes on writing in a thread that
+        exists after leaving the class or after the class is archived; they
+        cannot write first to a teacher of a class they left, or of a class
+        that is archived.
+
+        Limited to 10 a minute and 200 a day per student.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudentMessagePost' }
+      responses:
+        '200':
+          description: '`clientId` repeats: the message it made.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentMessage' }
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            `MESSAGING_NOT_ALLOWED` — the teacher's account is disabled or no longer staff, or the caller's is no longer a student. The thread stays readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the body is blank once trimmed (`details.body`), or `clientId` already made a message in another thread (`details.clientId`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /app/messages/teachers/{teacherId}/read:
+    parameters:
+      - { name: teacherId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStudentDirectThreadRead
+      x-resource:
+        - { in: path, name: teacherId, kind: none }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Move the caller's read pointer in a direct thread
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /app/messages/classes/{classId}:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    get:
+      operationId: getStudentClassThread
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: query, name: before, kind: none }
+        - { in: query, name: after, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      description: |
+        The announcements of a class the student is in, archived or not.
+        Read-only: there is no post operation on this path, so a `POST`
+        answers 405, and the channel's post operation,
+        `postClassAnnouncement`, answers a student 403.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Older than this message, the page `nextBefore` gave.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: after
+          in: query
+          required: false
+          description: Newer than this message, for the open thread's poll. Not with `before`.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentClassThread' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /app/messages/classes/{classId}/read:
+    parameters:
+      - { name: classId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: markStudentClassThreadRead
+      x-resource:
+        - { in: path, name: classId, kind: class }
+        - { in: body, name: /lastReadMessageId, kind: none }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Move the caller's read pointer in a class channel
+      description: |
+        The pointer only moves forward. `lastReadMessageId` is checked
+        against the thread, so it names no resource of its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReadPointer' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: >-
+            `VALIDATION_FAILED` — the message is not in this thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /app/messages/attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    get:
+      operationId: getStudentMessageAttachmentUrl
+      x-resource:
+        - { in: path, name: id, kind: attachment }
+      x-permission: learning.take_tests
+      tags: [student-messages]
+      summary: Mint the download URL of a message's file
+      description: |
+        For the participants of the thread whose message holds the file (a
+        direct thread's staff member and student, and a class channel's
+        readers: staff whose class scope reaches the class, and its
+        current members), and its uploader before it is sent. Anyone
+        else gets 404, as for a missing id: an admin on a direct
+        message's file included, whom `scope.all` does not let into the
+        thread. The URL is a credential, so the answer is not stored.
+      responses:
+        '200':
+          description: OK
+          headers:
+            Cache-Control:
+              required: true
+              description: '`private, no-store`.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentUrl' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /me/notifications:
     get:

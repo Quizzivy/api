@@ -1,12 +1,13 @@
--- R2 (v0.8.0) migration rehearsal on a Neon branch of production.
+-- R2 (v0.8.0) migration rehearsal on a copy of production, never production
+-- itself.
 --
 -- Run as quizzivy_migrate, twice:
---   psql "$BRANCH_DSN" -v before=1 -f docs/setup/rehearsals/r2.sql > before.txt
+--   psql "$COPY_DSN" -v before=1 -f docs/setup/rehearsals/r2.sql > before.txt
 --   goose up (time it)
---   psql "$BRANCH_DSN" -f docs/setup/rehearsals/r2.sql > after.txt
+--   psql "$COPY_DSN" -f docs/setup/rehearsals/r2.sql > after.txt
 -- Section A must print the same in both files. Section B runs only after
 -- goose up; every "must be 0" line must print 0. Record the timings and the
--- legacy join-code count in the release PR, then delete the branch.
+-- legacy join-code count in the release PR, then drop the copy.
 -- Read-only: nothing here writes.
 
 \set ON_ERROR_STOP on

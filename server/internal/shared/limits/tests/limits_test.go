@@ -22,7 +22,7 @@ func TestAStoredValueWinsOverTheDeployAndTheDeployOverTheHostingPlan(t *testing.
 		{limits.MediaPerTeacherBytes, 2 * limits.GiB, false, limits.SourceDeploy},
 		{limits.EmailsPerMonth, limits.ResendFreeEmailsPerMonth, false, limits.SourceResendFree},
 		{limits.StorageBytes, limits.R2FreeStorageBytes, false, limits.SourceR2Free},
-		{limits.DatabaseBytes, limits.NeonLaunchDatabaseBytes, false, limits.SourceNeonLaunch},
+		{limits.DatabaseBytes, limits.VPSDiskDatabaseBytes, false, limits.SourceVPSDisk},
 		{limits.ImportBytes, limits.AppImportBytes, false, limits.SourceApp},
 		{limits.WarnAtPercent, limits.AppWarnAtPercent, false, limits.SourceApp},
 	}

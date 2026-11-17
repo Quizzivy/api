@@ -13,7 +13,7 @@ func (s *Postgres) TransferOwnership(ctx context.Context, from, to string) (doma
 	WITH locked AS (
 		SELECT x.id FROM app.tests x WHERE x.owner_id = $1::uuid ORDER BY x.id FOR NO KEY UPDATE
 	), moved AS (
-		UPDATE app.tests x SET owner_id = $2::uuid FROM locked WHERE x.id = locked.id RETURNING x.deleted_at IS NULL AS live
+		UPDATE app.tests x SET owner_id = $2::uuid, updated_by = NULL FROM locked WHERE x.id = locked.id RETURNING x.deleted_at IS NULL AS live
 	)
 	SELECT count(*) FILTER (WHERE live)::int FROM moved`, from, to).Scan(&moved.Tests); err != nil {
 		return domain.Transferred{}, fmt.Errorf("tests: transfer ownership: %w", err)

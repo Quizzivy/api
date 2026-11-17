@@ -74,7 +74,7 @@ func TestTheTableRefusesWhatNoReaderCouldBeSent(t *testing.T) {
 	}
 }
 
-func TestASwitchIsOneOfTheFiveEvents(t *testing.T) {
+func TestASwitchIsOneOfTheSevenEvents(t *testing.T) {
 	pool := newPool(t)
 	userID := newUser(t, pool, "teacher")
 	insert := func(event string) error {
@@ -82,7 +82,7 @@ func TestASwitchIsOneOfTheFiveEvents(t *testing.T) {
 			INSERT INTO app.notification_preferences (user_id, event, in_app) VALUES ($1::uuid, $2, true)`, userID, event)
 		return err
 	}
-	for _, event := range []string{"class.joined", "assignment.opened", "summary.weekly", ""} {
+	for _, event := range []string{"class.joined", "assignment.opened", "message.from_teacher", "summary.monthly", ""} {
 		if err := insert(event); !db.IsCheckViolation(err, "notification_preferences_event_check") {
 			t.Errorf("event %q: err = %v, want notification_preferences_event_check to refuse it", event, err)
 		}
@@ -115,7 +115,7 @@ func TestAUsersNotificationsAndSwitchesGoWithTheUser(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM app.users WHERE id = $1::uuid`, userID) })
 	fill(t, app, userID, 2)
-	save(t, app, userID, domain.WithDefaults(nil))
+	save(t, app, userID, domain.WithDefaults(nil, domain.Staff))
 	if _, err := pool.Exec(ctx, `DELETE FROM app.users WHERE id = $1::uuid`, userID); err != nil {
 		t.Fatalf("deleting a user who holds notifications and switches: %v", err)
 	}

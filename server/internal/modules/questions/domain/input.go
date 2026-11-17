@@ -61,16 +61,25 @@ type RubricCriterionInput struct {
 // WriteRequest is a write to the bank by ActorID. It reaches only ActorID's own
 // questions and binds only assets ActorID may read, unless All, the actor's
 // scope.all, is set; anything else answers exactly as a missing id does. On a
-// create, OwnerID owns the new question instead of ActorID; only a Word-import
-// commit sets it, and a group member still follows its group.
+// create, OwnerID owns the new question instead of ActorID; a Word-import
+// commit sets it, and so does a question made for a test (forTestId), whose
+// owner it is. A group member still follows its group. SourceMedia marks an
+// Input whose media are those of a question the actor has just read, as a
+// duplicate copies them: reading the source authorized them, so they bind as
+// any live asset does. ExpectedUpdatedAt, on an update, is the question's
+// updatedAt the editor last read: when the question has changed since, the
+// update is ErrStaleWrite and nothing is written. Without it the update is
+// not checked, as v0.13 clients send it (optional until R8).
 type WriteRequest struct {
-	ID        string
-	Input     Input
-	ActorID   string
-	OwnerID   string
-	All       bool
-	IP        string
-	UserAgent string
+	ID                string
+	Input             Input
+	ActorID           string
+	OwnerID           string
+	All               bool
+	SourceMedia       bool
+	ExpectedUpdatedAt *time.Time
+	IP                string
+	UserAgent         string
 }
 
 // Scope is the scope the request reads and binds under: ActorID's own, or
@@ -79,20 +88,39 @@ func (r WriteRequest) Scope() access.Scope {
 	return access.Scope{UserID: r.ActorID, All: r.All}
 }
 
+// MediaScope is the scope the request's media bind under: everyone's live
+// assets for SourceMedia, otherwise Scope.
+func (r WriteRequest) MediaScope() access.Scope {
+	if r.SourceMedia {
+		return access.Scope{All: true}
+	}
+	return r.Scope()
+}
+
 // WriteInput is a create or an update, depending on whether ID is set. An
 // update or delete of a bank question needs ActorID to own it unless All is
 // set; a group member's write is authorized by its group and ignores both.
-// OwnerID applies to a create only, as on WriteRequest.
+// OwnerID, SourceMedia and ExpectedUpdatedAt apply as on WriteRequest. Every
+// write records ActorID as the question's last writer (updated_by). InContext
+// marks an update the edit's test or set context has authorized (T-R7.6): the
+// caller locked that context, found the question in it and may edit it, so
+// the update needs no ownership. KeptMedia are the assets the question
+// already binds, which such an edit may keep whoever makes it
+// (QuestionUse.Keeps); every other asset binds under the actor's scope.
 type WriteInput struct {
-	ID             string
-	Input          Input
-	MediaAssetKind *string
-	ActorID        string
-	OwnerID        string
-	All            bool
-	Now            time.Time
-	IP             string
-	UserAgent      string
+	ID                string
+	Input             Input
+	MediaAssetKind    *string
+	ActorID           string
+	OwnerID           string
+	All               bool
+	SourceMedia       bool
+	InContext         bool
+	KeptMedia         []string
+	ExpectedUpdatedAt *time.Time
+	Now               time.Time
+	IP                string
+	UserAgent         string
 }
 
 type OptionInput struct {
@@ -113,6 +141,9 @@ type BlankInput struct {
 // ListInput selects a page of the bank. Scope limits it to the caller's own
 // questions, or every teacher's under scope.all; a zero Scope matches nothing.
 type ListInput struct {
+	// SetID lists that question set's questions, in set order, instead of the
+	// scope's bank. The caller checks the set is readable first.
+	SetID    string
 	Types    []Type
 	Levels   []Level
 	Skills   []Skill

@@ -2,14 +2,15 @@
 
 > **Since the repository split.** This repository deploys the API only, and it
 > deploys production: since 2026-11-12 the repository variable `API_HOST` is
-> `vps`, and a merge into `main` goes to the VPS through the `api-vps` job
-> ("Choosing where the API runs"). The `api` job is the Fly deploy the variable
-> can switch back to. The web deploys from `Quizzivy/web`, after this one
-> (`docs/deploy.md` there). After the API job, the `sdk` job asks
+> `vps`, and a merge into `main` goes to the VPS through the `api` job
+> ("Choosing where the API runs"). The web deploys from `Quizzivy/web`, after
+> this one (`docs/deploy.md` there). After the API job, the `sdk` job asks
 > `Quizzivy/sdk` to make the pinned release `latest` (D-081, D-082 (iv)); it
 > needs the secret `SDK_DISPATCH_TOKEN`. Where a section below speaks of a
 > `web` job or of Pages deploying second, it describes the workflow before the
 > split and the releases made with it: this workflow has no `web` job any more.
+> Releases before 2026-11-12 ran on the previous host and database, both
+> retired on 2026-11-16; their sections keep what still explains the schema.
 
 Merging `release/*` into `main` ships. Nothing else does, and nothing deploys
 from `develop`.
@@ -35,8 +36,7 @@ the tip check is what keeps that from putting an earlier release back.
 
 | Job | Target | How |
 |---|---|---|
-| `api` | Fly.io `quizzivy-api` | `flyctl deploy --remote-only` |
-| `api-vps` | the VPS, instead of `api` | build and push the image to `ghcr.io`, then `ssh deploy@host deploy <sha>` |
+| `api` | the VPS | build and push the image to `ghcr.io`, then `ssh deploy@host deploy <sha>` |
 | `sdk` | `Quizzivy/sdk` | after the API job that ran, asks for the pinned release to become `latest` |
 
 The web is no longer deployed from here: `Quizzivy/web` builds and deploys it
@@ -50,9 +50,12 @@ can show as it is, and a line in the release notes for tabs loaded before the
 deploy. The reverse is never safe: a new SPA calling an endpoint that has not
 shipped yet is a broken screen.
 
-Migrations ride along with the API. `fly.toml`'s `release_command` applies them
-before the new version takes traffic and rolls the deploy back if they fail,
-which is why a schema change and the code that needs it must ship as one merge.
+Migrations ride along with the API. The box runs them as a one-shot container
+before it replaces the API and the worker, and a failed migration leaves the
+running version alone, which is why a schema change and the code that needs it
+must ship as one merge. A failed health check after that puts the previous image
+back but keeps the migration, so a release must keep the previous build working
+on the new schema.
 
 ## What you have to set up once
 
@@ -60,9 +63,10 @@ The workflow fails with a named error before touching production if any of these
 is missing, rather than half way through.
 
 ```bash
-# Fly — a deploy-scoped token, not your personal one
-fly tokens create deploy -a quizzivy-api
-gh secret set FLY_API_TOKEN
+# The VPS ("Choosing where the API runs")
+gh secret set VPS_HOST          # the box's address, as DNS-only or its IP
+gh secret set VPS_SSH_KEY       # private half of the deploy key (ed25519)
+gh secret set VPS_KNOWN_HOSTS   # ssh-keyscan -t ed25519 <host>, checked against the box's console
 
 # Cloudflare — an API token with "Cloudflare Pages: Edit" on this account
 gh secret set CLOUDFLARE_API_TOKEN
@@ -85,25 +89,17 @@ gh secret list && gh variable list
 
 ## Choosing where the API runs
 
-The repository variable `API_HOST` picks one of the two API jobs: `fly` or
-`vps`, which is what it is set to since 2026-11-12. Unset, the run deploys
+The repository variable `API_HOST` says where the API deploys. It is `vps`
+since 2026-11-12, and `vps` is the only value it takes. Unset, the run deploys
 nothing and says so; any other value stops the run before anything deploys.
-`sdk` waits for whichever job ran. Switching is therefore a variable, not a
-code change, and so is switching back:
+`sdk` waits for the `api` job.
 
 ```bash
-gh variable set API_HOST --body vps    # or: fly
+gh variable set API_HOST --body vps
 ```
 
-`api-vps` needs three secrets and nothing else on the GitHub side:
-
-```bash
-gh secret set VPS_HOST          # the box's address, as DNS-only or its IP
-gh secret set VPS_SSH_KEY       # private half of the deploy key (ed25519)
-gh secret set VPS_KNOWN_HOSTS   # ssh-keyscan -t ed25519 <host>, checked against the box's console
-```
-
-The public half of the key goes to the box as `QUIZZIVY_DEPLOY_PUBKEY` when
+`api` needs the three `VPS_*` secrets above and nothing else on the GitHub
+side. The public half of the key goes to the box as `QUIZZIVY_DEPLOY_PUBKEY` when
 `bootstrap.sh` runs; the box then forces that key's command to `deploy.sh`, so
 the key can deploy a commit and do nothing else. The job builds and pushes
 with `scripts/ci/push-image.sh` (`ci.md`, "Pushing an image") and tags the image
@@ -112,32 +108,23 @@ repository in `API_IMAGE_REPO`, and `docker login ghcr.io` there needs a token
 with `read:packages` only. Everything on the box side (PostgreSQL, Caddy,
 backups, rollback) is in `github.com/Quizzivy/infra`, `docs/vps.md`.
 
-Migrations run on the box before the new API starts, as `fly.toml`'s
-`release_command` does on Fly, and a failed health check puts the previous image
-back. The `Fly-Client-IP` setting in `fly.toml` does not apply there: the box
-reads `CF-Connecting-IP`, which only Cloudflare can set.
+Caddy on the box sets `X-Real-IP` on every request, and the API reads only that
+(`CLIENT_IP_HEADER=X-Real-IP`).
 
-The preflight below is Fly-only. The box checks its own `app.secrets.env` when
-the API starts, and the log says which name is wrong.
+The production settings that are not secret are committed as
+`deploy/production.env`. The box reads its own copy, `vps/app.env` in
+`Quizzivy/infra`, and the two must say the same: a change to one is a change to
+both. `server/internal/platform/config/tests/deployment_test.go` boots the
+configuration from this file with placeholder secrets, and the **Production
+image** job runs the image with it (`ci.md`). The secrets are in
+`/opt/quizzivy/app.secrets.env` on the box.
 
-## The preflight
-
-Before anything is built, the API job unions `fly.toml`'s `[env]` with
-`flyctl secrets list` and checks that the result is a configuration the app
-accepts. It reports missing names in seconds instead of after a build, a
-migration, a rollout and a health check.
-
-It exists because `config.Load` has all-or-nothing groups — Google sign-in,
-object storage, from v0.12.0 email (`RESEND_API_KEY` and `EMAIL_FROM`, both
-required in production, with `SECRETS_KEY`), and the two web hosts
-(`STUDENT_APP_URL` and `STAFF_APP_URL`, which took the place of `APP_URL` with
-spec §5.8) — and each exits 1 on a partial set. Both shipped partial,
-one after the other, and the cause was legible only in the app's own stderr:
-Fly reports it as "the app appears to be crashing" and prints an empty log tail,
-because the machine is gone before it attaches.
-
-Names only. A secret set to the wrong *value* passes here; that is a different
-failure with a different symptom.
+`config.Load` has all-or-nothing groups — Google sign-in, object storage, email
+(`RESEND_API_KEY` and `EMAIL_FROM`, both required in production, with
+`SECRETS_KEY`), and the two web hosts (`STUDENT_APP_URL` and `STAFF_APP_URL`) —
+and the API exits 1 on a partial set. The box's deploy then fails its health
+check and puts the previous image back, and the API's log says which name is
+wrong.
 
 ## The build-time trap this guards against
 
@@ -151,13 +138,13 @@ it is absent. Do not remove that step.
 
 ## Running it by hand
 
-Actions → **Deploy** → *Run workflow*, with a target of `all`, `api` or `web`.
+Actions → **Deploy** → *Run workflow*.
 
 Two reasons this exists:
 
-- **A failed deploy can be retried on its own.** An expired token or a Fly
-  region hiccup should not cost twenty minutes of tests that already passed on
-  the same commit.
+- **A failed deploy can be retried on its own.** An expired key or the box
+  unreachable for a minute should not cost twenty minutes of tests that already
+  passed on the same commit.
 - **The very first merge may not trigger it.** `workflow_run` reads the workflow
   definition from the default branch, so `deploy.yml` has to already be on
   `main` for a run to fire. It arrives there in the same merge it would fire on.
@@ -188,9 +175,9 @@ the next one. `main` and `develop` take changes only by pull request
 
 ## Verifying afterwards
 
-The workflow checks `/healthz` reports `database:ok` before it calls the API
-deploy done. Fly's routing check uses `/livez` instead, which does not query the
-database (see `operations.md`). The rest is by hand:
+The box waits for `/healthz` before it keeps the new image, and the workflow
+then checks from outside that `/healthz` reports `database:ok` before it calls
+the API deploy done. The rest is by hand:
 
 ```bash
 curl -s https://api.quizzivy.com/healthz
@@ -207,26 +194,19 @@ dropped from the build output.
 
 Both need dashboard access the project's tokens do not have. See `dns.md`:
 
-1. `api` — add the A/AAAA records **DNS only**, wait for
-   `fly certs check api.quizzivy.com`, then switch to proxied.
+1. `api` — an A record pointing at the box, **DNS only**. Caddy on the box
+   gets the certificate itself (`Quizzivy/infra`, `docs/vps.md`, "Ingress").
 2. `my` and `portal` — Pages project → Custom domains → add `my.quizzivy.com`
    and `portal.quizzivy.com`. Cloudflare creates each record itself; making one
    by hand returns 522.
 
 ## Word and PDF import
 
-The deploy runs two process groups from one image: `app` (the API, the only one
-with an HTTP service) and `worker` (`/app/import-worker`, on its own 1 GB
-Machine). The API wakes the worker over Fly's private network. The first deploy
-that declares the group creates the worker Machine, so `flyctl machines list`
-shows one of each afterwards. Before that deploy, the R2 token must reach
+The box runs two containers from one image: `api` (the only one Caddy sends
+requests to) and `worker` (`/app/import-worker`). The API wakes the worker at
+`http://worker:8091/wake`, on the stack's own network. The R2 token must reach
 `quizzivy-imports` and `make verify-r2-imports` must pass. The steps, and how to
 turn import off again, are in `word-import-worker.md` § Production.
-
-The deploy runs `flyctl deploy --ha=false`. Without the flag, flyctl gives a
-group that has no machine yet a stopped standby, and the next step would start
-it as a second worker. That step now starts only non-standby machines, and fails
-unless every group in `[processes]` has a started machine.
 
 ## Rolling back from v0.6.0: roll forward instead
 
@@ -262,11 +242,10 @@ ACCESS EXCLUSIVE locks on test-version tables while they validate new CHECKs.
 
 Before merging `release/0.8.0` into `main`:
 
-- Set `JOIN_CODE_KEY` as a Fly secret and keep its offline copy
-  (`operations.md` § Join-code key). The preflight fails the deploy without it,
-  and v0.8.0 refuses to start without it. Leave `JOIN_CODE_KEY_PREVIOUS`
-  unset.
-- Rehearse the migrations on a Neon branch of production
+- Set the secret `JOIN_CODE_KEY` and keep its offline copy
+  (`operations.md` § Join-code key). v0.8.0 refuses to start without it. Leave
+  `JOIN_CODE_KEY_PREVIOUS` unset.
+- Rehearse the migrations on a copy of production
   (`docs/plan/72-r2.md` § Release checklist).
 
 Deploy only when no assignment window has attempts in progress: scoping
@@ -274,15 +253,15 @@ changes the attempt queries, and the files that add and backfill a column
 (`00056`, `00060`–`00063`, `00065`) hold ACCESS EXCLUSIVE on their table until
 they commit.
 
-While v0.7.0 and v0.8.0 machines overlap:
+While v0.7.0 and v0.8.0 instances overlap:
 
 - **Do not rotate join codes.** A code v0.8.0 issues is sealed and found by a
-  keyed hash, which a v0.7.0 machine cannot look up. Codes issued before the
+  keyed hash, which a v0.7.0 instance cannot look up. Codes issued before the
   deploy redeem on both.
 - **Do not reset student passwords or disable students.** Either moves the
   student's session epoch, and v0.8.0 refuses a token older than it. A v0.7.0
-  machine issues tokens with no epoch, so a student it signs in stays signed
-  out until the old machine is gone.
+  instance issues tokens with no epoch, so a student it signs in stays signed
+  out until the old instance is gone.
 
 Tabs still open on v0.7.0 kept working through an `/admin` alias that served
 the old teaching paths and logged `legacy_admin_path`. v0.12.0 removes it
@@ -314,7 +293,7 @@ not send, and a graded result would not open. Prefer a hotfix.
 
 ## Rolling out v0.10.0 (R4)
 
-R2's contract steps ship inside this release (`docs/plan/74-r4.md` T-R4.49). `release_command` runs
+R2's contract steps ship inside this release (`docs/plan/74-r4.md` T-R4.49). The migration step runs
 `migrate up` before the new version takes traffic, so v0.9.0 keeps serving while a migration
 applies, and keeps serving if the deploy stops after one.
 
@@ -326,20 +305,19 @@ token's claim).
 `owner_id` on `tests`, `questions`, `question_groups` and `media_assets`) and drops the five
 `BEFORE INSERT` fill triggers with their three functions (`docs/plan/20-data-model.md` §43).
 
-- Before the merge, read the machine versions: `fly status -a quizzivy-api` lists each machine with
-  its release, and `fly releases -a quizzivy-api` dates the releases. No machine may be older than
-  the release that deployed v0.8.0 (2026-10-03), in either process group, for at least seven days.
+- Before the merge, every instance of the API and of the worker must have run the release that
+  deployed v0.8.0 (2026-10-03), or a later one, for at least seven days.
   v0.8.0 and v0.9.0 never name `users.role` and name the owner in every insert, so they keep working
   on the new schema; v0.7.0 does neither, and its inserts into the four content tables and `classes`
   would fail.
-- Rehearse on a Neon branch of production, both scripts in one run. Before the migrations, `psql
-  "$BRANCH_DSN" -v before=1 -f docs/setup/rehearsals/r4-legacy-role.sql > legacy-before.txt` and the
+- Rehearse on a copy of production, both scripts in one run. Before the migrations, `psql
+  "$COPY_DSN" -v before=1 -f docs/setup/rehearsals/r4-legacy-role.sql > legacy-before.txt` and the
   same with `r4-ownership.sql > ownership-before.txt`; then `goose up` as `quizzivy_migrate` (time
   each migration); then both scripts again without `-v before=1` into `legacy-after.txt` and
   `ownership-after.txt`. In each script, section A must read the same before and after, and every
   "must be" line of section B must print what it says. Section P of `ownership-before.txt` must
   show 0 rows without an owner on every line. Add `-v scan=1` to the first `r4-ownership.sql` run
-  for the cost of each table's validation scan, which the PR records per table. Delete the branch.
+  for the cost of each table's validation scan, which the PR records per table. Drop the copy.
 - 00105 holds ACCESS EXCLUSIVE on `app.users` for milliseconds. 00106's validations hold SHARE UPDATE
   EXCLUSIVE and block neither a read nor a write; its drops hold ACCESS EXCLUSIVE on the five owner
   tables for milliseconds, last, to commit. Each migration gives up on a lock after five seconds.
@@ -372,16 +350,14 @@ token's claim).
   within the two-minute budget waits for the next start-up.
 - **No import run should be queued or running at the deploy.** The v3 worker retires a v2 run that is
   ten minutes past due (`PIPELINE_RETIRED`), and its teacher starts it again.
-- **v0.10.0 shipped without the production-branch rehearsal**, by the owner's decision of 2026-10-12,
-  as v0.9.0 did: every migration passed up, down to 00079 and up again on a seeded scratch database
-  (0.17 s in all), and none rewrites a table. The runbook for the rehearsal is
-  `docs/setup/rehearsals/r4-neon-rehearsal.md`, for the day it is run.
+- **v0.10.0 shipped without the rehearsal on a copy of production**, by the owner's decision of
+  2026-10-12, as v0.9.0 did: every migration passed up, down to 00079 and up again on a seeded scratch
+  database (0.17 s in all), and none rewrites a table.
 
 ### Rolling v0.10.0 back
 
-Prefer a hotfix. If the API must go back to v0.9.0, redeploy the v0.9.0 image (`fly releases -a
-quizzivy-api`, then `fly deploy --image <v0.9.0 image> -a quizzivy-api`) and roll Pages back to its
-previous deployment **in the same hour**: the v0.10.0 bundle calls 25 operations v0.9.0 does not
+Prefer a hotfix. If the API must go back to v0.9.0, redeploy the v0.9.0 build and roll Pages back to
+its previous deployment **in the same hour**: the v0.10.0 bundle calls 25 operations v0.9.0 does not
 serve (`getTeacherSummary`, `listNotifications`, `listSessions`, `setStudentOverrides`,
 `pasteImportSource`, `replaceMedia` and others), so the teacher dashboard, the bell, Settings →
 Devices, per-student extensions, text import, media rename and replace and the version diff would
@@ -413,7 +389,7 @@ fills one section or the whole test, from a plan of up to 40 questions and 5 cal
 own ceiling (spec 0.115, "Changes since v0.114"). It changes no schema and no configuration; the contract's
 `count` on `generateAiQuestions` becomes any whole number from 1 to 8 (it was 3, 5 or 8).
 
-- **No migration.** `release_command` runs `migrate up` and finds nothing to do.
+- **No migration.** The migration step runs `migrate up` and finds nothing to do.
 - **Deploy the API first.** The old API refuses a count of 1, 2, 4, 6 or 7 (`400`), which the new web sends
   whenever the teacher chooses one; the old web on the new API sends 3, 5 or 8, as before.
 - **Live smoke** with the key before the merge to `main` (`aismoke`, `docs/setup/operations.md`): a
@@ -429,7 +405,7 @@ open test (spec 0.114, "Changes since v0.113"; change request CR-001). It change
 configuration; the contract gains two optional fields on `generateAiQuestions` (`standalone`, `sectionId`)
 and lowers the schema's minimum for `source` to 3 characters.
 
-- **No migration.** `release_command` runs `migrate up` and finds nothing to do.
+- **No migration.** The migration step runs `migrate up` and finds nothing to do.
 - **Deploy the API first.** The old API refuses the new web's standalone request (`400`, an unknown field),
   while the old web on the new API sends what it always did and is answered as before.
 - **Live smoke** with the key before the merge to `main` (`aismoke`, `docs/setup/operations.md`): one
@@ -448,7 +424,7 @@ answer "There is nothing for the assistant to read yet." It also asks about 8 qu
 at a time, within 45 seconds, under one reservation, where one call for a long test timed out with
 `503 AI_UNAVAILABLE`.
 
-- **No migration.** `release_command` runs `migrate up` and finds nothing to do. The web build and the API
+- **No migration.** The migration step runs `migrate up` and finds nothing to do. The web build and the API
   can deploy in either order. The new web on the old API varies the standalone questions, as before; the old
   web on the new API stops on its first read of a member's change (`404`) before it writes anything.
 - **What to watch.** Each variant logs one `ai variant` line (`docs/setup/operations.md`) with its calls, how
@@ -464,7 +440,7 @@ in a toast when a run finishes behind a closed drawer (web only). The contract's
 address the API cannot print back, such as `"qc tp"@example.com`. And `POST /auth/login` counts one account
 once, however its address is written.
 
-- **No migration.** `release_command` runs `migrate up` and finds nothing to do. The web build and the API
+- **No migration.** The migration step runs `migrate up` and finds nothing to do. The web build and the API
   can deploy in either order: no contract shape changed.
 - **Run the email query before and after.** `docs/setup/operations.md`, "Stored emails the API cannot
   print", has a read-only query that lists accounts the previous API could have stored with a quoted
@@ -492,7 +468,7 @@ group makes now remembers the bank question it came from, so dragging it straigh
 original back instead of leaving a second bank question. `moveTestQuestion` answers two more booleans,
 `restored` and `editedCopy`; nothing else in the contract changes.
 
-- **Two migrations, both before traffic.** `release_command` runs `migrate up`, and the new version takes
+- **Two migrations, both before traffic.** The migration step runs `migrate up`, and the new version takes
   traffic only after it. **00126** adds `app.questions.copied_from_id`, nullable with no default and
   no backfill, referencing `app.questions (id)` with `ON DELETE SET NULL`. The foreign key is part of
   the `ADD COLUMN`, and PostgreSQL does not scan the table to validate the column it is adding: on a
@@ -555,12 +531,12 @@ v0.11.1 changes no schema and no contract. It fixes the AI assistant, which answ
   (`docs/setup/operations.md`).
 - **The start-up lesson from v0.11.0.** With `ANTHROPIC_API_KEY` set and the tier variables missing,
   the API and the worker refuse to start. Set the key and all eight `AI_TIER_*` variables in one
-  `fly secrets set`, before the deploy, or set none of them.
+  change of the secrets, before the deploy, or set none of them.
 
 ## Rolling out v0.11.0 (D4)
 
 D4 adds twelve migrations and changes no existing column (`docs/plan/74d-d4-deck-update.md`, the
-release checklist). `release_command` runs `migrate up` before the new version takes traffic, so
+release checklist). The migration step runs `migrate up` before the new version takes traffic, so
 v0.10.1 keeps serving while they apply.
 
 - **00114 to 00117** add `allowPause` ("Students can pause") to a question's audio and a group's
@@ -574,13 +550,13 @@ v0.10.1 keeps serving while they apply.
   constraints, so the database refuses a call that would overspend.
 - **00124** adds `ai.use` (to the Teacher role) and `ai.credits.manage`. **00125** adds
   `word_imports.read_with_ai`.
-- **Rehearsed on a Neon branch of production on 2026-10-13.** The branch was at 00113, with 205
+- **Rehearsed on a copy of production on 2026-10-13.** The copy was at 00113, with 205
   questions, 257 frozen questions, 12 attempts and 7 assignments. Every migration went up, down to
   00113 and up again, each in one transaction with its version row, in about 0.8 s, which was almost
   all the round trip from where it ran. `ai_settings` read 200000 and 20000. A reservation past the
   pool was refused with `23514` (`ai_credit_periods_within_pool`), and nothing was written. The app
-  role holds only INSERT and SELECT on the ledger. The branch was deleted.
-- **The AI is off until `ANTHROPIC_API_KEY` and the tier variables are set** as Fly secrets
+  role holds only INSERT and SELECT on the ledger. The copy was deleted.
+- **The AI is off until `ANTHROPIC_API_KEY` and the tier variables are set** as secrets
   (`.env.example`, `docs/setup/operations.md`). Without them every AI operation answers `501 AI_OFF`,
   no AI control is drawn, and the release is still complete.
 - The API deploys first, then Pages. The v0.10.1 bundle meets an API whose student payloads carry
@@ -669,14 +645,13 @@ API redeploys with the same code and its release command finds nothing to migrat
 v0.13.0 adds the question types True / False / Not given, matching and the essay, "Choose N",
 the word limit, essay bands with rubric criteria, and images and audio inside a prompt or an
 explanation, with migrations `00145` to `00154` (`docs/plan/76-r6.md`, the release checklist).
-It needs no new environment variable and no new secret: `fly.toml`, `.env.example` and
-`server/internal/platform/config` are the same on `release/0.13.0` as on `main` (v0.12.2).
+It needs no new environment variable and no new secret: the production settings, `.env.example`
+and `server/internal/platform/config` are the same on `release/0.13.0` as on `main` (v0.12.2).
 
-**The order.** Merging `release/0.13.0` to `main` deploys the API first: Fly's
-`release_command` (`fly.toml`, `/app/migrate -dir /app/migrations up`) runs `00145` to
-`00154` before the new version takes traffic, and v0.12.2 keeps serving while they apply.
-The rolling strategy then replaces the `app` and `worker` machines, and Pages deploys second
-(the `web` job runs only once `api` has succeeded). Every change is additive: three enum
+**The order.** Merging `release/0.13.0` to `main` deploys the API first: the migration step
+(`/app/migrate -dir /app/migrations up`) runs `00145` to `00154` before the new version takes
+traffic, and v0.12.2 keeps serving while they apply. The API and the worker are then replaced,
+and Pages deploys second (the `web` job runs only once `api` has succeeded). Every change is additive: three enum
 values, nullable columns, widened CHECKs and new tables. v0.12.2's writes satisfy every new
 CHECK: QC ran v0.12's `questions`, `tests` and `imports` integration suites, the isolation suite
 and the `events` canary on the schema of `00145` to `00149` with no failure (#767), and `00150`
@@ -688,11 +663,11 @@ Each file commits on its own. Every transactional file but `00145` sets
 `lock_timeout = '5s'`, so a file that cannot take its lock within five seconds fails at once
 rather than queue every writer behind it. When that happens the release command stops, the
 deploy is rolled back, the files before it stay applied (v0.12.2 runs on them, as above), and
-v0.12.2 keeps serving. Re-run it from Actions → **Deploy** → *Run workflow* (target `all`):
-goose starts at the first file not yet recorded. The release command as a whole is bounded by
-Fly's `release_command_timeout`, five minutes by default (`fly.toml` sets none): a file still
-running then is killed, which rolls back a transactional file and leaves `00151`'s index as
-"Interrupted index build in v0.13.0" below describes.
+v0.12.2 keeps serving. Re-run it from Actions → **Deploy** → *Run workflow*: goose starts at
+the first file not yet recorded. On the previous host the release command as a whole was
+bounded at five minutes: a file still running then was killed, which rolls back a
+transactional file and leaves `00151`'s index as "Interrupted index build in v0.13.0" below
+describes.
 
 What each file does, and what it locks:
 
@@ -754,10 +729,10 @@ QC-R6B-5). This is one more reason to roll forward rather than back.
 
 **Before the merge** (the owner):
 
-1. **Rehearse `00145` to `00154` on a Neon branch of production** (below) and put the timings
+1. **Rehearse `00145` to `00154` on a copy of production** (below) and put the timings
    in the release PR: `00153` above all, then `00152`, the `VALIDATE`s of `00146` to `00149`,
    and `00151`.
-2. **The exam-window and import check**, on production (read only) or a fresh branch of it,
+2. **The exam-window and import check**, on production (read only) or a fresh copy of it,
    for the planned window:
 
    ```sql
@@ -783,7 +758,8 @@ QC-R6B-5). This is one more reason to roll forward rather than back.
    by one version or the other, never both; an import read by v0.13.0 may hold a `tfng`
    question or a "Choose N" or word-limit field, which only v0.13.0 can commit.
 3. **Just before the merge**, look for a long transaction, which would hold `00151` (and could
-   trip a `lock_timeout`), as a role that can read every session (the Neon project owner):
+   trip a `lock_timeout`), as a role that can read every session (a superuser or a member of
+   `pg_read_all_stats`):
 
    ```sql
    SELECT pid, now() - xact_start AS open_for, state, left(query, 60)
@@ -792,23 +768,21 @@ QC-R6B-5). This is one more reason to roll forward rather than back.
     ORDER BY xact_start;
    ```
 
-### Rehearsing v0.13.0 on a Neon branch
+### Rehearsing v0.13.0 on a copy of production
 
-The rules of `docs/setup/rehearsals/r4-neon-rehearsal.md` hold: a **branch** of production, never the
-production endpoint; `quizzivy_migrate` on the branch's **direct** host (no `-pooler`), port
-5432; the connection string in the shell's environment only; a checkout of `release/0.13.0`;
-the branch deleted at the end. If your shell sets `PGHOST` or `PGPORT` for local development,
-run `psql` and `goose` under `env -u PGPORT -u PGHOST`.
+The rules: a **copy** of production, never production itself; `quizzivy_migrate` on the copy;
+the connection string in the shell's environment only, never in a chat or a file; a checkout of
+`release/0.13.0`; the copy dropped at the end. If your shell sets `PGHOST` or `PGPORT` for local
+development, run `psql` and `goose` under `env -u PGPORT -u PGHOST`.
 
 ```bash
 ls migrations/0014[5-9]*.sql migrations/0015[0-4]*.sql     # ten files
-neon branches create --project-id "$NEON_PROJECT" --name r6-rehearsal-$(date +%Y%m%d) --parent <production branch>
-export BRANCH_DSN='postgres://quizzivy_migrate:<password>@<the BRANCH direct host>:5432/quizzivy?sslmode=require'
-psql "$BRANCH_DSN" -Atc "SELECT max(version_id) FROM goose_db_version"     # 144
+export COPY_DSN='postgres://quizzivy_migrate:<password>@<the copy host>:5432/quizzivy'
+psql "$COPY_DSN" -Atc "SELECT max(version_id) FROM goose_db_version"     # 144
 mkdir -p rehearsal-r6
 
 # sizes before: what each VALIDATE and the CONCURRENTLY builds read
-psql "$BRANCH_DSN" -At > rehearsal-r6/before.txt <<'SQL'
+psql "$COPY_DSN" -At > rehearsal-r6/before.txt <<'SQL'
 SELECT 'questions', count(*) FROM app.questions;
 SELECT 'test_version_questions', count(*) FROM app.test_version_questions;
 SELECT 'question_options', count(*) FROM app.question_options;
@@ -817,10 +791,10 @@ SELECT 'attempt_answers', count(*), pg_size_pretty(pg_total_relation_size('app.a
 SQL
 
 # the ten files, timed: goose prints each file's time on its OK line
-/usr/bin/time -v goose -dir migrations postgres "$BRANCH_DSN" up 2>&1 | tee rehearsal-r6/goose-up.txt   # macOS: -l
+/usr/bin/time -v goose -dir migrations postgres "$COPY_DSN" up 2>&1 | tee rehearsal-r6/goose-up.txt   # macOS: -l
 grep -E "OK |Elapsed" rehearsal-r6/goose-up.txt     # ten OK lines, 00145 … 00154
 
-psql "$BRANCH_DSN" -At > rehearsal-r6/after.txt <<'SQL'
+psql "$COPY_DSN" -At > rehearsal-r6/after.txt <<'SQL'
 SELECT 'version', max(version_id) FROM goose_db_version;                                   -- 154
 SELECT 'enum', array_to_string(enum_range(NULL::app.question_type), ',');                  -- ends tfng,matching,essay
 SELECT 'index', indexrelid::regclass, indisvalid FROM pg_index
@@ -835,16 +809,15 @@ SQL
 
 # down to 144 and up again: production holds no R6 row, so every Down runs,
 # and the second up finds 00145's values present
-goose -dir migrations postgres "$BRANCH_DSN" down-to 144 2>&1 | tee rehearsal-r6/goose-down.txt
-goose -dir migrations postgres "$BRANCH_DSN" up 2>&1 | tee rehearsal-r6/goose-up-again.txt
-psql "$BRANCH_DSN" -Atc "SELECT max(version_id) FROM goose_db_version"     # 154
+goose -dir migrations postgres "$COPY_DSN" down-to 144 2>&1 | tee rehearsal-r6/goose-down.txt
+goose -dir migrations postgres "$COPY_DSN" up 2>&1 | tee rehearsal-r6/goose-up-again.txt
+psql "$COPY_DSN" -Atc "SELECT max(version_id) FROM goose_db_version"     # 154
 
-neon branches delete --project-id "$NEON_PROJECT" r6-rehearsal-$(date +%Y%m%d)
-unset BRANCH_DSN
+unset COPY_DSN
 ```
 
 Put in the release PR the ten per-file times and the total, the counts of `before.txt`, the
-six lines of `after.txt` (the index check prints one per index), and whether the down and second up ran cleanly. A branch has no
+six lines of `after.txt` (the index check prints one per index), and whether the down and second up ran cleanly. A copy has no
 traffic, so its times are the scans alone; on production a file also waits for its locks.
 
 **Smoke** (`76-r6.md`, the release checklist), after Pages has deployed:
@@ -990,7 +963,7 @@ per month, the database's warning line and the warning share, each defaulting to
   `organization_settings`; `00143_add_email_outbox_expires_at.sql` adds a nullable `expires_at` to
   `email_outbox`; `00144_add_user_import_over_limit.sql` adds `over_limit_count` to `user_import_jobs` and
   swaps three checks on the two import tables, both small. None rewrites a large table or backfills.
-- **Configuration.** `fly.toml` no longer sets `MEDIA_OWNER_QUOTA_MIB` (5120) or `EMAIL_DAILY_LIMIT` (100):
+- **Configuration.** The production settings no longer set `MEDIA_OWNER_QUOTA_MIB` (5120) or `EMAIL_DAILY_LIMIT` (100):
   the defaults are the same figures, and an Admin changes them in the app. A deploy variable still wins over
   the hosting plan's figure when someone sets it, so leave them unset. The `PLAN_*` variables are retired;
   one left set is ignored.
@@ -1008,7 +981,7 @@ per month, the database's warning line and the warning share, each defaulting to
   one held by the daily cap, and one whose link expired is failed with code `expired`.
 - **Rolling back to v0.12.0 or v0.12.1** needs no migration down: the old API reads none of the new columns,
   and the limits come back as configuration only. Set `MEDIA_OWNER_QUOTA_MIB` and `EMAIL_DAILY_LIMIT` back in
-  `fly.toml` first if the rollback is long, or the old API runs without those caps.
+  the production settings first if the rollback is long, or the old API runs without those caps.
 
 ## Rolling out v0.12.1 (hotfix)
 
@@ -1021,11 +994,11 @@ so the API need not be redeployed and rolling the web back to v0.12.0 is safe.
 v0.12.0 adds the Admin console, outgoing email and the nightly retention sweep, with
 migrations `00128` to `00141` (`docs/plan/75-r5.md`, the release checklist).
 
-**The order.** Merging `release/0.12.0` to `main` deploys the API first: Fly's
-`release_command` (`fly.toml`, `/app/migrate -dir /app/migrations up`) runs `00128` to
-`00141` before the new version takes traffic, and v0.11.11 keeps serving while they
+**The order.** Merging `release/0.12.0` to `main` deploys the API first: the migration step
+(`/app/migrate -dir /app/migrations up`) runs `00128` to `00141` before the new version takes
+traffic, and v0.11.11 keeps serving while they
 apply, except while `00131` holds `app.users` (below). Each migration commits on its own, so a
-stop at `00139` or `00141` leaves the earlier ones applied, which v0.11.11 tolerates. The rolling strategy then replaces the `app` and `worker` machines. Pages deploys
+stop at `00139` or `00141` leaves the earlier ones applied, which v0.11.11 tolerates. The API and the worker are then replaced. Pages deploys
 second. Every new column on a populated table (`00131`, four on `app.users`) is nullable
 with no default, so v0.11.11's inserts keep working during the roll.
 
@@ -1039,7 +1012,7 @@ with no default, so v0.11.11's inserts keep working during the roll.
   backfill runs in the transaction that adds the columns, so `app.users` is held
   `ACCESS EXCLUSIVE` until it ends, and every request that reads a user (sign-in, refresh,
   any authenticated call) waits for it. `refresh_tokens` has only a partial index on its user,
-  so the backfill scans it per user. Its time on the Neon-branch rehearsal is a go/no-go: if it
+  so the backfill scans it per user. Its time on the rehearsal on a copy of production is a go/no-go: if it
   takes more than a few seconds, deploy outside teaching hours.
 - `00133` and `00138` build their indexes `CONCURRENTLY` (`-- +goose NO TRANSACTION`); see
   "Interrupted index build in v0.12.0" below.
@@ -1051,26 +1024,25 @@ with no default, so v0.11.11's inserts keep working during the roll.
 Three things must exist before the merge to `main`. A missing secret or a missing
 maintenance role stops the deploy on its own; the sending domain has to be checked by hand:
 
-- **Fly secrets `SECRETS_KEY` and `RESEND_API_KEY`** (`dns.md`, "Secrets on Fly").
+- **The secrets `SECRETS_KEY` and `RESEND_API_KEY`** (`dns.md`, "Secrets").
   `EMAIL_FROM`, `APP_URL`, `EMAIL_DAILY_LIMIT`, `EMAIL_SEND_RATE` and `APP_TIMEZONE`
-  are in `fly.toml`'s `[env]`. The preflight fails without any of `SECRETS_KEY`,
-  `RESEND_API_KEY`, `EMAIL_FROM` and `APP_URL`, and fails if `EMAIL_SINK_DIR` is set, before anything is built.
+  are in the production settings. The API refuses to start without any of `SECRETS_KEY`,
+  `RESEND_API_KEY`, `EMAIL_FROM` and `APP_URL`, or with `EMAIL_SINK_DIR` set.
 - **The `quizzivy.com` sending domain verified in Resend**, open and click tracking
   off (`dns.md`, "Email (Resend)"). Without it the API starts and every message
   fails at Resend.
 - **The `quizzivy_maintenance` role**, created by `scripts/provision-db.sh`
-  (`operations.md`, "The nightly workflow", step 1). `00139_grant_maintenance_role.sql`
+  (`operations.md`, "Setting up the sweep", step 1). `00139_grant_maintenance_role.sql`
   fails while the role is missing, so the release command stops and the previous
-  version keeps serving. Create the `production-maintenance` environment as step 2
-  says, and leave `RETENTION_SWEEP_ENABLED` unset until the first dry run on
-  production has been read.
+  version keeps serving. Leave `RETENTION_SWEEP_ENABLED` unset until the first dry
+  run on production has been read.
 
 Two changes need a check rather than a setting:
 
 - **`00141_require_encrypted_join_codes.sql` stops on a live legacy join code.** Run the
-  count in `operations.md`, "Legacy join codes", on a Neon branch of production before the
+  count in `operations.md`, "Legacy join codes", on a copy of production before the
   merge; it should be 0, since every v0.10.0 or later API replaces live legacy codes at
-  start-up. If it is not, start a v0.11.x API once, then count again on a new Neon branch. If the migration stops, the release command fails and the previous
+  start-up. If it is not, start a v0.11.x API once, then count again on a new copy. If the migration stops, the release command fails and the previous
   version keeps serving. It holds `ACCESS EXCLUSIVE` on `class_join_codes`, a small
   table, so a join waits for it briefly.
 - **The v0.7.0 `/admin` alias is gone** (T-R5.36). A script or bookmark that still calls a
@@ -1088,14 +1060,14 @@ temporary password gets `403 PASSWORD_CHANGE_REQUIRED` once and is sent to chang
 the release notes say so. Roll forward rather than back
 (`docs/plan/70-redesign-overview.md` §8).
 
-**Where the prerequisites stand at the release commit (2026-10-20).** `fly.toml`'s `[env]`
-already holds `EMAIL_FROM`, `APP_URL`, `EMAIL_DAILY_LIMIT` (`100`), `EMAIL_SEND_RATE` and
+**Where the prerequisites stand at the release commit (2026-10-20).** The production settings
+already hold `EMAIL_FROM`, `APP_URL`, `EMAIL_DAILY_LIMIT` (`100`), `EMAIL_SEND_RATE` and
 `APP_TIMEZONE`; no `PLAN_*` value is set. Thuong confirmed the Resend DNS records and
-`SECRETS_KEY` on 2026-10-19, and counted the live legacy join codes on a Neon branch of
+`SECRETS_KEY` on 2026-10-19, and counted the live legacy join codes on a copy of
 production: 0. Still owed before the merge, by the owner: Resend's open and click tracking off
 and the `RESEND_API_KEY` secret; `provision-db.sh` for `quizzivy_maintenance` and the
-`production-maintenance` environment's `MAINTENANCE_DATABASE_URL`; the Neon-branch rehearsal of
-`goose up` with its timings (`00131`'s above all), `audit_log_recent_idx` valid and T-R5.12's
+`production-maintenance` environment's `MAINTENANCE_DATABASE_URL`; the rehearsal of `goose up` on a
+copy of production with its timings (`00131`'s above all), `audit_log_recent_idx` valid and T-R5.12's
 `EXPLAIN` of the audit log's first page using it, `has_schema_privilege('quizzivy_maintenance',
 'public', 'USAGE')` true after `00139` with no `WARNING` from its grants in goose's output, and
 the retention sweep's dry run; and the exam-window check.
@@ -1137,9 +1109,10 @@ While v0.11.11 runs on the v0.12.0 schema, either during the rolling deploy or a
   hours). Queued imports and exports wait for the v0.12.0 worker. `last_active_at` and
   `user_activity_days` stop moving, so the Overview's chart has a gap for those days, and the
   daily housekeeping does not run.
-- The nightly retention workflow builds `cmd/maintenance` from the repository in GitHub
-  Actions (`.github/workflows/retention-sweep.yml`), not from the API's image, so a rollback of
-  the API does not change it; it applies only once `RETENTION_SWEEP_ENABLED` is set.
+- The nightly retention sweep runs `/app/maintenance` from the image the API runs, started by
+  the server's systemd timer (`operations.md`, "Where the sweep runs"), so a rollback of the API
+  changes the sweep too, and an image without `/app/maintenance` cannot run it; it applies only while `RETENTION_SWEEP_ENABLED=true` is in the
+  server's `compose.env`.
 
 ## Interrupted index build in v0.12.0 (R5)
 
@@ -1185,7 +1158,6 @@ Then run the query above again: it returns no row.
 
 ## Backups and operational verification
 
-See [operations](operations.md) for the recovery rehearsal, retention commands,
-post-deploy header check and proposed GitHub uptime probe. Neon history settings,
-a production PITR drill and a delivered owner alert remain unverified as of
-2026-09-22 because no Neon/monitor access was configured for this task.
+See [operations](operations.md) for retention commands, the post-deploy header
+check and the GitHub uptime probe. Backups, point-in-time restore and the monthly
+restore drill are in `Quizzivy/infra`, `docs/vps.md`, "Backups and restore".

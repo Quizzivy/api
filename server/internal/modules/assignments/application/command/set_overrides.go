@@ -30,6 +30,7 @@ func (s SetOverridesHandler) Handle(ctx context.Context, cmd SetOverrides) ([]do
 	if err != nil {
 		return written, err
 	}
+	s.Nudge()
 	if cmd.Input.Notify && (cmd.Input.ExtendBy != nil || cmd.Input.ClosesAt != nil) {
 		s.TellGranted(ctx, cmd.Request.ID, cmd.Input.StudentIDs)
 	}

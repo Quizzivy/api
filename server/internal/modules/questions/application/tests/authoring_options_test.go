@@ -61,7 +61,15 @@ func (r *authoringRepository) Update(ctx context.Context, in domain.WriteInput) 
 }
 
 func (r *authoringRepository) Get(_ context.Context, _ access.Scope, _ string) (domain.Question, error) {
-	return r.source, nil
+	source := r.source
+	source.Access = domain.AccessOwner
+	return source, nil
+}
+
+// Access answers that the caller owns every question: these cases are about
+// the content a write carries, not who may make it.
+func (r *authoringRepository) Access(context.Context, access.Scope, string) (domain.Access, error) {
+	return domain.AccessOwner, nil
 }
 
 func TestBodylessDuplicatePreservesStoredNineOptionsAndMetadata(t *testing.T) {

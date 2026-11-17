@@ -20,7 +20,7 @@ import (
 
 const (
 	landingOrigin   = "https://quizzivy.com"
-	clientIPHeader  = "Fly-Client-IP"
+	clientIPHeader  = "X-Real-IP"
 	leadVisitorName = "Trần Thị Mai"
 )
 

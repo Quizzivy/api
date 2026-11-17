@@ -93,6 +93,7 @@ type transferDiff struct {
 	Tests          int       `json:"tests"`
 	Questions      int       `json:"questions"`
 	QuestionGroups int       `json:"questionGroups"`
+	QuestionSets   int       `json:"questionSets"`
 	Media          int       `json:"media"`
 	Assignments    int       `json:"assignments"`
 	ImportsLeft    int       `json:"importsLeft"`
@@ -120,7 +121,7 @@ func (l *TransferLedger) RecordTransfer(ctx context.Context, req domain.WriteReq
 	}
 	diff, err := json.Marshal(transferDiff{
 		Owner: ownerDiff{Old: in.FromID, New: in.ToID}, Classes: moved.Classes, Tests: moved.Tests, Questions: moved.Questions,
-		QuestionGroups: moved.QuestionGroups, Media: moved.Media, Assignments: moved.Assignments, ImportsLeft: left.Imports,
+		QuestionGroups: moved.QuestionGroups, QuestionSets: moved.QuestionSets, Media: moved.Media, Assignments: moved.Assignments, ImportsLeft: left.Imports,
 		StudentsLeft: left.Students,
 	})
 	if err != nil {

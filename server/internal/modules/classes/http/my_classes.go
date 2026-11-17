@@ -28,6 +28,7 @@ func (h Classes) ListMyClasses(ctx context.Context, _ openapi.ListMyClassesReque
 			Id:               httpapi.ParseUUID(c.ID),
 			Name:             c.Name,
 			Description:      c.Description,
+			TeacherId:        new(httpapi.RawUUID(c.TeacherID)),
 			TeacherName:      c.TeacherName,
 			TeacherAvatarUrl: c.TeacherAvatarURL,
 			ScheduleLabel:    c.ScheduleLabel,

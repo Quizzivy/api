@@ -195,6 +195,28 @@ func freshAttempt(x *iso, own *party) *party {
 	return own.with("attempt", attempt)
 }
 
+func freshSet(_ *iso, own *party) *party {
+	return own.with("question-set", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-sets", map[string]any{
+		"name": "Bộ dùng một lần", "questionIds": []any{own.id("question")},
+	})))
+}
+
+func shareBody(kind string) func(*iso, *party, string) any {
+	return func(*iso, *party, string) any {
+		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
+	}
+}
+
+func freshShare(x *iso, own *party) *party {
+	test := freshTest(x, own).id("test")
+	return own.with("share", own.shareWith(own.c, test, own.mateID))
+}
+
+func freshSharedWithMe(x *iso, own *party) *party {
+	test := id(own.mate.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề chia sẻ dùng một lần " + nonce(x.t)}))
+	return own.with("shared-with-me", own.shareWith(own.mate, test, own.userID))
+}
+
 func freshPublishedTest(_ *iso, own *party) *party {
 	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
 	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề đã phát hành dùng một lần"})
@@ -207,6 +229,19 @@ func freshPublishedTest(_ *iso, own *party) *party {
 	return own.with("test", id(test)).with("section", section).with("test-version", version).with("question", question)
 }
 
+// freshDraftQuestion is a question of the caller's in the draft of a test of
+// theirs, both new, so an edit in the test's context (editTestQuestion) never
+// changes the world's question that later cases edit.
+func freshDraftQuestion(_ *iso, own *party) *party {
+	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
+	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề sửa câu dùng một lần"})
+	own.c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+id(test), map[string]any{
+		"expectedUpdatedAt": test["updatedAt"],
+		"sections":          []map[string]any{{"title": "Phần 1", "questionIds": []string{question}}},
+	})
+	return own.with("test", id(test)).with("question", question)
+}
+
 func freshGroupedTest(x *iso, own *party) *party {
 	published := freshPublishedTest(x, own)
 	group := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-groups", map[string]any{
@@ -217,6 +252,12 @@ func freshGroupedTest(x *iso, own *party) *party {
 
 func freshClass(x *iso, own *party) *party {
 	return own.with("class", own.c.class("Lớp dùng một lần "+nonce(x.t)))
+}
+
+// freshAttachment uploads a file the caller has not sent, for a post to
+// name: each post sends the one it names, so every request gets its own.
+func freshAttachment(x *iso, own *party) *party {
+	return own.with("attachment", uploadAttachment(x.t, own.c, "tep-"+nonce(x.t)+".pdf"))
 }
 
 func freshMembership(x *iso, own *party) *party {
@@ -239,11 +280,38 @@ const (
 	outsideAnswer   = "an answer to a question outside the attempt's paper is dropped; the cross-reference scan proves no row names it"
 	ownOnly         = "marks only the caller's own notifications; any other id is skipped"
 
+	clientMade     = "a clientId is made by the client for its own message and names no resource; a repeat answers the message it made, and another sender's clientId is another key (messages_sender_client_key)"
+	inThread       = "a read pointer names a message checked against the thread, so another thread's message answers 422 as a missing one does; the DM case below proves it for another teacher's thread"
+	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
+	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
+
+	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
+
+	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
+
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
 	budgetSpent        = "the third call in a minute is refused 429 (two a minute per user), so the caller's own id cannot be tried here; the bulk reset flow test resets the caller's own students beside another teacher's in one batch"
 )
 
 func isolationCases() map[string]isoCase {
+	messagePost := func(_ *iso, _ *party, slot string) any {
+		post := map[string]any{"clientId": uuid.NewString(), "body": "Chào em, cô gửi lịch học tuần sau."}
+		if slot == "/attachmentId" {
+			post["attachmentId"] = ""
+		}
+		return post
+	}
+	posted := map[string]string{"body /clientId": clientMade}
+	paged := map[string]string{"query before": cursorID, "query after": cursorID}
+	pointed := map[string]string{"body /lastReadMessageId": inThread}
+	with := func(excuses map[string]string, slot, reason string) map[string]string {
+		out := maps.Clone(excuses)
+		out[slot] = reason
+		return out
+	}
+	messageRead := func(*iso, *party, string) any {
+		return map[string]any{"lastReadMessageId": uuid.NewString()}
+	}
 	fixed := func(v map[string]any) func(*iso, *party, string) any {
 		return func(*iso, *party, string) any { return v }
 	}
@@ -346,6 +414,39 @@ func isolationCases() map[string]isoCase {
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},
+
+		"listQuestionSets":    {},
+		"createQuestionSet":   {body: fixed(map[string]any{"name": "Bộ mới", "questionIds": []any{""}})},
+		"getQuestionSet":      {},
+		"updateQuestionSet":   {body: fixed(map[string]any{"name": "Bộ đã đổi tên"})},
+		"deleteQuestionSet":   {fresh: freshSet},
+		"addQuestionSetItems": {body: fixed(map[string]any{"questionIds": []any{""}})},
+		"removeQuestionSetItems": {
+			fresh:  freshSet,
+			excuse: map[string]string{"body /questionIds/-": notInSet},
+			body:   fixed(map[string]any{"questionIds": []any{""}}),
+		},
+		"copyQuestionSet": {body: fixed(map[string]any{"questionIds": []any{""}})},
+
+		"searchTeacherDirectory": {query: map[string]string{"q": "lan"}},
+		"listShares": {each: []isoCase{
+			{query: map[string]string{"kind": "test"}},
+			{query: map[string]string{"kind": "question_set"}, as: map[string]string{"query resourceId": "question-set"}},
+		}},
+		"createShares": {each: []isoCase{
+			{body: shareBody("test"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}},
+			{body: shareBody("question_set"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}, as: map[string]string{"body /resourceId": "question-set"}},
+		}},
+		"updateShare":        {body: fixed(map[string]any{"access": "edit"})},
+		"deleteShare":        {fresh: freshShare},
+		"listSharedWithMe":   {},
+		"removeSharedWithMe": {as: map[string]string{"path shareId": "shared-with-me"}, fresh: freshSharedWithMe},
+
+		"editTestQuestion": {fresh: freshDraftQuestion, body: func(_ *iso, own *party, slot string) any {
+			return withProseMedia(choiceInput(own), own, slot)
+		}},
+		"copyTest":             {},
+		"copyQuestionsForTest": {body: fixed(map[string]any{"questionIds": []any{""}})},
 
 		"createWordImport": {},
 		"listWordImports":  {},
@@ -499,11 +600,28 @@ func isolationCases() map[string]isoCase {
 			blind:  map[string]string{"body /ids/-": ownOnly},
 			body:   fixed(map[string]any{"ids": []any{""}}),
 		},
-		"getMySummary":                  {},
-		"getNotificationPreferences":    {},
-		"updateNotificationPreferences": {},
-		"updatePreferences":             {},
-		"setAvatar":                     {format: "avatar"},
-		"deleteAvatar":                  {},
+		"getMySummary":               {},
+		"getNotificationPreferences": {},
+
+		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
+		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},
+		"postStaffDirectMessage":         {fresh: freshAttachment, excuse: posted, body: messagePost},
+		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead},
+		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
+		"postClassAnnouncement":          {fresh: freshAttachment, excuse: posted, body: messagePost},
+		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
+		"listStudentThreads":             {student: true},
+		"getStudentDirectThread":         {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
+		"postStudentDirectMessage":       {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
+		"markStudentDirectThreadRead":    {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
+		"getStudentClassThread":          {student: true, omit: []string{"after"}, excuse: paged},
+		"markStudentClassThreadRead":     {student: true, excuse: pointed, body: messageRead},
+		"uploadMessageAttachment":        {format: "png"},
+		"getStaffMessageAttachmentUrl":   {},
+		"getStudentMessageAttachmentUrl": {student: true},
+		"updateNotificationPreferences":  {},
+		"updatePreferences":              {},
+		"setAvatar":                      {format: "avatar"},
+		"deleteAvatar":                   {},
 	}
 }

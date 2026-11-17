@@ -178,14 +178,14 @@ func TestARefusalOfTheFormStillCarriesTheLandingOriginsCORSAnswer(t *testing.T) 
 
 // TestTheLandingOperationsAreTheFormAndTheStatus fails when an operation is
 // added to what the landing origin may call: the list is short on purpose, as
-// theOpenTwelve is, and every entry must be an open operation.
+// theOpenThirteen is, and every entry must be an open operation.
 func TestTheLandingOperationsAreTheFormAndTheStatus(t *testing.T) {
 	got := router.LandingOperations()
 	if !slices.Equal(got, []string{"POST /public/leads", "GET /public/status"}) {
 		t.Errorf("landing operations = %v, want the form and the status", got)
 	}
 	for _, operation := range got {
-		if !slices.Contains(theOpenTwelve, operation) {
+		if !slices.Contains(theOpenThirteen, operation) {
 			t.Errorf("%s is admitted from the landing origin and is not an open operation", operation)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"quizzivy/internal/modules/identity/domain"
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/limits"
+	"quizzivy/internal/shared/ties"
 )
 
 const importLeaseSeconds = int64(domain.ImportLease / time.Second)
@@ -287,6 +288,9 @@ func (s *settlement) enrol(ctx context.Context, row domain.ImportCreate, userID 
 		INSERT INTO app.class_members (class_id, user_id, joined_via, added_by)
 		VALUES ($1::uuid, $2::uuid, 'admin', $3::uuid)`, row.ClassID, userID, s.batch.By); err != nil {
 		return false, fmt.Errorf("user imports: enrol: %w", err)
+	}
+	if err := ties.Enrolled(ctx, s.tx, row.ClassID, userID); err != nil {
+		return false, err
 	}
 	return true, nil
 }

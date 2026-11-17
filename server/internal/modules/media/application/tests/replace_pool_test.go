@@ -51,10 +51,16 @@ func TestReplacementPoolRepointsOnlyEditableOwnedGraphAndCountsDistinctGroups(t 
 		if got := w.text(t, `SELECT media_asset_id::text FROM app.questions WHERE id=$1`, id); got != out.Asset.ID {
 			t.Fatalf("owned question=%s", got)
 		}
+		if got := w.text(t, `SELECT coalesce(updated_by::text,'') FROM app.questions WHERE id=$1`, id); got != w.actor {
+			t.Fatalf("a re-pointed question is recorded as %q's, want the replacer's", got)
+		}
 	}
 	for _, id := range []string{deleted, excludedQ, foreignQ, foreignStandalone} {
 		if got := w.text(t, `SELECT media_asset_id::text FROM app.questions WHERE id=$1`, id); got != old {
 			t.Fatalf("ineligible question=%s", got)
+		}
+		if got := w.text(t, `SELECT coalesce(updated_by::text,'') FROM app.questions WHERE id=$1`, id); got != "" {
+			t.Fatalf("an ineligible question is recorded as %q's", got)
 		}
 	}
 	for _, id := range []string{bank, archived, draft} {

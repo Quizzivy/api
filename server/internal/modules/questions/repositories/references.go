@@ -84,7 +84,7 @@ func (s *Postgres) questionUses(ctx context.Context, scope access.Scope, questio
  FROM app.test_section_questions sq
  JOIN app.test_sections section ON section.id = sq.test_section_id
  JOIN app.tests t ON t.id = section.test_id
- WHERE sq.question_id = $1 AND t.deleted_at IS NULL AND ($2::boolean OR t.owner_id = $3::uuid)
+ WHERE sq.question_id = $1 AND t.deleted_at IS NULL AND `+readableTest(2, 3)+`
  ORDER BY t.title, t.id::text`, questionID, scope.All, opt.String(scope.UserID))
 	if err != nil {
 		return nil, err

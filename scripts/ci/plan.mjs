@@ -15,7 +15,6 @@ const NOT_CODE = [
   'sonar-project.properties',
   '.github/pull_request_template.md',
   '.github/workflows/production-monitor.yml',
-  '.github/workflows/retention-sweep.yml',
 ];
 
 /**
@@ -28,7 +27,7 @@ const NOT_CODE = [
 export const SETS = {
   image: {
     base: 'none',
-    include: ['Dockerfile', '.dockerignore', 'fly.toml', 'server/', 'migrations/', 'scripts/provision-db.sh'],
+    include: ['Dockerfile', '.dockerignore', 'deploy/production.env', 'server/', 'migrations/', 'scripts/provision-db.sh'],
     exclude: [],
   },
   // The server reads the pinned contract in api/ (D-082) and operations.md.

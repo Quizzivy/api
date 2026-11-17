@@ -68,3 +68,44 @@ func TestDeleteMediaReportsBothPublishedAndGroupReferences(t *testing.T) {
 		t.Fatalf("wrong group reference: %+v", ref)
 	}
 }
+
+// TestDeleteMediaCountsAnotherOwnersUseAndNamesNothing: a file another
+// teacher's content uses answers 409 MEDIA_IN_USE_ELSEWHERE with how many,
+// and nothing of theirs (T-R7.7).
+func TestDeleteMediaCountsAnotherOwnersUseAndNamesNothing(t *testing.T) {
+	asset := uuid.New()
+	app := &application.Application{Commands: application.Commands{Delete: cqrs.HandlerFunc[command.Delete, domain.Retired](func(context.Context, command.Delete) (domain.Retired, error) {
+		return domain.Retired{}, &domain.InUseElsewhereError{Count: 3}
+	})}}
+	transport := mediahttp.NewMedia(app)
+	handler := httpx.RequireAuth(nil, func(string) (httpx.Principal, error) {
+		return httpx.Principal{UserID: uuid.NewString()}, nil
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response, err := transport.DeleteMedia(r.Context(), openapi.DeleteMediaRequestObject{Id: asset})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.VisitDeleteMediaResponse(w); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	request := httptest.NewRequest(http.MethodDelete, "/teacher/media/"+asset.String(), nil)
+	request.Header.Set("Authorization", "Bearer fixture")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status: %d", response.Code)
+	}
+	var body struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "MEDIA_IN_USE_ELSEWHERE" || len(body.Error.Details) != 1 || body.Error.Details["count"] != float64(3) {
+		t.Fatalf("want MEDIA_IN_USE_ELSEWHERE with details {count: 3} and nothing else: %s", response.Body.String())
+	}
+}

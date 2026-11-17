@@ -22,6 +22,9 @@ func (h Tests) DeleteTest(ctx context.Context, request openapi.DeleteTestRequest
 	switch {
 	case err == nil:
 		return openapi.DeleteTest204Response{}, nil
+	case errors.Is(err, domain.ErrReadOnly), errors.Is(err, domain.ErrOwnerOnly):
+		refused, _ := shareRefusal(ctx, err)
+		return refused, nil
 	case errors.Is(err, domain.ErrNotFound):
 		return openapi.DeleteTest404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(httpapi.NotFound(ctx, httpx.Text(ctx, "Không tìm thấy dữ liệu.", "The data was not found.")))}, nil
 	case errors.Is(err, domain.ErrNotArchived):

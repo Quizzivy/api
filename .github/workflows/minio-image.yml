@@ -46,7 +46,7 @@ jobs:
       # push-image.sh, not `docker build` and `docker push`: a push from the
       # runner's own store can mount layers out of another image the runner
       # ships with, and ghcr.io then refuses the manifest (the script's header,
-      # and the api-vps job in deploy.yml, where it happened). Its builder
+      # and the api job in deploy.yml, where it happened). Its builder
       # takes the Docker Hub bases from the mirror itself, so there is no
       # mirror-images.sh call here.
       - name: Build and push unless this version is published

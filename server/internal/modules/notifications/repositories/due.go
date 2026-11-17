@@ -11,6 +11,7 @@ import (
 
 	"quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/platform/email"
 	"quizzivy/internal/shared/schedule"
 	"quizzivy/internal/shared/visibility"
 )
@@ -203,4 +204,129 @@ func (p *Postgres) InsertAbsent(ctx context.Context, userID string, notices []do
 		return 0, fmt.Errorf("notifications: insert due items: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+const (
+	scheduledDue     = "due"
+	scheduledClosing = "closing"
+	scheduledRelease = "release"
+)
+
+var dueEmailsQuery = `
+WITH due AS (
+  SELECT a.id AS assignment_id, s.id AS student_id, ` + schedule.CloseOf("o") + ` AS closes_at,
+         greatest(a.opens_at, a.published_at) AS available_at
+    FROM app.assignments a
+   CROSS JOIN LATERAL ` + visibility.Roster("a.id") + ` AS r
+    JOIN app.users s ON s.id = r.user_id AND s.disabled_at IS NULL AND ` + visibility.StudentLike("s") + `
+    ` + schedule.OverrideJoin("s.id") + `
+   WHERE a.published_at IS NOT NULL
+     AND (` + schedule.CloseOf("") + ` > $1::timestamptz
+          OR EXISTS (SELECT 1 FROM app.assignment_student_overrides x
+                      WHERE x.assignment_id = a.id AND x.closes_at > $1::timestamptz))
+     AND ` + schedule.CloseOf("o") + ` > $1::timestamptz
+     AND ` + schedule.CloseOf("o") + ` - interval '24 hours' <= $1::timestamptz
+     AND NOT EXISTS (SELECT 1 FROM app.attempts at
+                      WHERE at.assignment_id = a.id AND at.student_id = s.id AND ` + handedIn + `)
+     AND (SELECT count(*) FROM app.attempts at
+           WHERE at.assignment_id = a.id AND at.student_id = s.id AND at.status <> 'voided')
+         < a.max_attempts + coalesce(o.extra_attempts, 0)
+)
+SELECT '` + scheduledDue + `', d.assignment_id::text, d.student_id::text, lead.label, d.closes_at
+  FROM due d
+ CROSS JOIN (VALUES ('` + string(domain.LeadDay) + `', interval '24 hours'),
+                    ('` + string(domain.LeadHour) + `', interval '1 hour')) AS lead(label, before)
+ WHERE d.closes_at - lead.before > $3::timestamptz AND d.closes_at - lead.before <= $1::timestamptz
+   AND (lead.label = '` + string(domain.LeadHour) + `' OR d.closes_at - interval '1 hour' > $1::timestamptz)
+   AND d.closes_at - lead.before >= d.available_at
+UNION ALL
+SELECT '` + scheduledClosing + `', a.id::text, k.teacher_id::text, NULL::text, ` + schedule.CloseOf("") + `
+  FROM app.assignments a
+ CROSS JOIN LATERAL (SELECT a.created_by AS teacher_id
+                      UNION
+                     SELECT c.teacher_id FROM app.assignment_classes ac
+                       JOIN app.classes c ON c.id = ac.class_id
+                      WHERE ac.assignment_id = a.id) AS k
+ WHERE a.published_at IS NOT NULL
+   AND ` + schedule.CloseOf("") + ` - interval '1 hour' > $3::timestamptz
+   AND ` + schedule.CloseOf("") + ` - interval '1 hour' <= $1::timestamptz
+   AND $1::timestamptz < ` + schedule.CloseOf("") + `
+UNION ALL
+SELECT '` + scheduledRelease + `', at.id::text, at.student_id::text, NULL::text, ` + schedule.CloseOf("o") + `
+  FROM app.assignments a
+  JOIN app.attempts at ON at.assignment_id = a.id AND at.status = 'graded'
+  ` + schedule.OverrideJoin("at.student_id") + `
+ WHERE a.published_at IS NOT NULL AND a.review_release = 'after_close' AND a.review_show_score
+   AND ` + schedule.CloseOf("o") + ` > $3::timestamptz AND ` + schedule.CloseOf("o") + ` <= $1::timestamptz
+   AND at.student_id IN ` + visibility.Roster("a.id") + `
+   AND NOT EXISTS (SELECT 1 FROM app.attempt_answers ans
+                    WHERE ans.attempt_id = at.id AND ` + answered.AwaitsGrade("ans") + `)`
+
+type scheduledRow struct {
+	what   string
+	about  string
+	userID string
+	lead   *string
+	closes time.Time
+}
+
+// DueEmails reads the reminders, closing warnings and released results
+// whose moment lies in (now - domain.ScheduleLookback, now]: the reads of
+// Due's student and teacher items, over every account at once. A teacher is
+// warned only while a student they reach, whose close the assignment's is,
+// has not handed in (Mail.Closing). A released result is emailed only for a
+// paper whose status is graded, the rule Mail.Ready applies at send time:
+// this is narrower than Due's ready item, which also counts a paper handed
+// in with no answer awaiting a mark, so an auto-marked paper nobody declared
+// graded gets the item at its close but no email. An email the outbox
+// already holds is left out.
+func (r *scheduledRun) DueEmails(ctx context.Context, now time.Time) ([]domain.Email, error) {
+	rows, err := db.QueryMany(ctx, r.tx, dueEmailsQuery, []any{now, now, now.Add(-domain.ScheduleLookback)}, func(rows pgx.Rows) (scheduledRow, error) {
+		var row scheduledRow
+		err := rows.Scan(&row.what, &row.about, &row.userID, &row.lead, &row.closes)
+		return row, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("notifications: read due emails: %w", err)
+	}
+	emails := make([]domain.Email, 0, len(rows))
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		var e domain.Email
+		switch row.what {
+		case scheduledDue:
+			e = domain.DueEmail(row.about, row.userID, domain.Lead(*row.lead), row.closes)
+		case scheduledClosing:
+			e = domain.ClosingEmail(row.about, row.userID, row.closes)
+		case scheduledRelease:
+			e = domain.ReleasedEmail(row.about, row.userID)
+		}
+		emails, keys = append(emails, e), append(keys, e.DedupeKey)
+	}
+	queued, err := held(ctx, r.tx, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := emails[:0]
+	for _, e := range emails {
+		if queued[e.DedupeKey] {
+			continue
+		}
+		waiting, err := r.waiting(ctx, e, now)
+		if err != nil {
+			return nil, err
+		}
+		if waiting {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (r *scheduledRun) waiting(ctx context.Context, e domain.Email, now time.Time) (bool, error) {
+	if e.Template != domain.EmailAssignmentClosing {
+		return true, nil
+	}
+	_, waiting, err := r.mail.Closing(ctx, e.UserID, email.AssignmentClosingParams{AssignmentID: e.IDs.AssignmentID}, now)
+	return waiting, err
 }

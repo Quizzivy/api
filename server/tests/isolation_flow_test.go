@@ -30,7 +30,7 @@ func (x *iso) view(op scopedOp, c isoCase, viewer *party, bare bool) string {
 var signature = regexp.MustCompile(`[?&]X-Amz-[^"]*`)
 
 func walkedView(op scopedOp) bool {
-	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" ||
+	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" || op.id == "listStaffThreads" || op.id == "listStudentThreads" ||
 		strings.HasPrefix(op.id, "listMy") || strings.HasPrefix(op.path, "/me/"))
 }
 
@@ -44,7 +44,7 @@ func (x *iso) views(ops []scopedOp) map[string]string {
 	out := map[string]string{}
 	for _, op := range ops {
 		c := x.cases[op.id]
-		if !walkedView(op) {
+		if !walkedView(op) || c.pending != "" {
 			continue
 		}
 		viewer := x.b
@@ -226,7 +226,7 @@ func TestAnotherTeachersIdsAnswerAsMissingOnes(t *testing.T) {
 	for kind, path := range map[string]string{
 		"test": "/teacher/tests/", "class": "/teacher/classes/", "assignment": "/teacher/assignments/",
 		"attempt": "/teacher/attempts/", "question": "/teacher/questions/", "question-group": "/teacher/question-groups/",
-		"import": "/teacher/imports/", "student": "/teacher/students/",
+		"import": "/teacher/imports/", "student": "/teacher/students/", "question-set": "/teacher/question-sets/",
 	} {
 		if got := x.admin.send(http.MethodGet, path+x.a.id(kind), nil); got.status != http.StatusOK {
 			t.Errorf("the Admin opening the teacher's %s: %d %s", kind, got.status, got.body)
@@ -234,6 +234,8 @@ func TestAnotherTeachersIdsAnswerAsMissingOnes(t *testing.T) {
 	}
 	x.adminListsOwnRows()
 	x.adminsOwnAssignmentNamesEveryTarget()
+	x.directThreadsStayWithTheirParticipants()
+	x.studentThreadsStayWithTheirParticipants()
 }
 
 func (x *iso) adminListsOwnRows() {
@@ -245,6 +247,7 @@ func (x *iso) adminListsOwnRows() {
 		"/teacher/media":                      {"total", "totalBytes", "facets.all", "facets.unused", "usage.audioBytes", "usage.imageBytes"},
 		"/teacher/imports":                    {"total"},
 		"/teacher/assignments":                {"total", "facets.all"},
+		"/teacher/question-sets":              {},
 	} {
 		got := x.admin.send(http.MethodGet, path, nil)
 		if got.status != http.StatusOK {
@@ -296,7 +299,7 @@ func (x *iso) adminsOwnAssignmentNamesEveryTarget() {
 }
 
 func switchesAllOff() []map[string]any {
-	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready"}
+	events := []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "summary.weekly"}
 	out := make([]map[string]any, len(events))
 	for i, event := range events {
 		out[i] = map[string]any{"event": event, "inApp": false, "email": true}

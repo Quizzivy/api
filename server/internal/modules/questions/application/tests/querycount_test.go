@@ -66,7 +66,7 @@ func tracedPool(t *testing.T) (*pgxpool.Pool, *countingTracer) {
 // TestListCostsAFixedNumberOfQueries pins the fix for the 1+2N fetch.
 //
 // Listing used to run one query for the page and two more per row, so a full
-// page of 100 cost 201 round trips -- paid in network latency against Neon, on
+// page of 100 cost 201 round trips -- paid in network latency to the database, on
 // the screen a teacher browses most. Counted rather than reasoned about,
 // because the next loader added to that path would reintroduce it silently.
 func TestListCostsAFixedNumberOfQueries(t *testing.T) {

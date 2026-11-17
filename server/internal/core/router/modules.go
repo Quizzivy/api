@@ -14,9 +14,11 @@ import (
 	importshttp "quizzivy/internal/modules/imports/http"
 	leadshttp "quizzivy/internal/modules/leads/http"
 	mediahttp "quizzivy/internal/modules/media/http"
+	messaginghttp "quizzivy/internal/modules/messaging/http"
 	notificationshttp "quizzivy/internal/modules/notifications/http"
 	organizationhttp "quizzivy/internal/modules/organization/http"
 	questionshttp "quizzivy/internal/modules/questions/http"
+	sharinghttp "quizzivy/internal/modules/sharing/http"
 	testshttp "quizzivy/internal/modules/tests/http"
 )
 
@@ -39,4 +41,8 @@ type Modules struct {
 	Organization  organizationhttp.Organization
 	Exports       exportshttp.Exports
 	Leads         leadshttp.Leads
+	Sharing       sharinghttp.Sharing
+	Messaging     messaginghttp.Staff
+	// StudentMessaging is the student side of messaging, /app/messages.
+	StudentMessaging messaginghttp.Student
 }

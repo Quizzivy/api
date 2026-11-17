@@ -52,8 +52,8 @@ const (
 	SourceDeploy Source = "deploy"
 	// SourceR2Free is Cloudflare R2's free tier.
 	SourceR2Free Source = "r2_free"
-	// SourceNeonLaunch is the warning line chosen for Neon's Launch plan.
-	SourceNeonLaunch Source = "neon_launch"
+	// SourceVPSDisk is the warning line chosen for the server's disk.
+	SourceVPSDisk Source = "vps_disk"
 	// SourceResendFree is Resend's free plan.
 	SourceResendFree Source = "resend_free"
 )
@@ -69,10 +69,11 @@ const (
 // and exports share the account's buckets, so one limit covers them all.
 const R2FreeStorageBytes = 10 * GiB
 
-// NeonLaunchDatabaseBytes is the database size the console warns at on Neon's
-// Launch plan, which bills storage by use and sets no cap; the owner confirmed
-// Launch on 2026-10-21 and the line is 10 GB.
-const NeonLaunchDatabaseBytes = 10 * GiB
+// VPSDiskDatabaseBytes is the database size the console warns at. The database
+// lives on the server's 50 GB disk beside the system, the images and the
+// monthly restore drill's copy of itself, so 10 GB leaves room for all of them.
+// The line was 10 GB before the move to the server too.
+const VPSDiskDatabaseBytes = 10 * GiB
 
 // ResendFreeEmailsPerDay and ResendFreeEmailsPerMonth are what Resend's free
 // plan sends, 100 emails a day and 3,000 a month; read on 2026-10-21.
@@ -109,7 +110,7 @@ var catalogue = []struct {
 	{ImportPerTeacherBytes, bounds{"limit_import_per_teacher_bytes", MiB, 1 << 50, AppImportPerTeacherBytes, SourceApp}},
 	{EmailsPerDay, bounds{"limit_emails_per_day", 1, 100_000, ResendFreeEmailsPerDay, SourceResendFree}},
 	{EmailsPerMonth, bounds{"limit_emails_per_month", 1, 10_000_000, ResendFreeEmailsPerMonth, SourceResendFree}},
-	{DatabaseBytes, bounds{"limit_database_bytes", MiB, 1 << 50, NeonLaunchDatabaseBytes, SourceNeonLaunch}},
+	{DatabaseBytes, bounds{"limit_database_bytes", MiB, 1 << 50, VPSDiskDatabaseBytes, SourceVPSDisk}},
 	{WarnAtPercent, bounds{"warn_at_percent", 50, 100, AppWarnAtPercent, SourceApp}},
 }
 
@@ -385,6 +386,15 @@ func StaffRole(role string) string {
 		` AND rk.permission_key IN (` + strings.Join(quoted, ", ") + `)))`
 }
 
+// RoleHolds is the condition that a role id, the SQL expression role, holds
+// key: the built-in Admin role holds every key by being the wildcard and
+// stores no grants, so it is named; any other role holds key by a stored
+// grant.
+func RoleHolds(role string, key access.Key) string {
+	return `(EXISTS (SELECT 1 FROM app.roles rh WHERE rh.id = ` + role + ` AND rh.builtin_key = 'admin')` +
+		` OR EXISTS (SELECT 1 FROM app.role_permissions rh WHERE rh.role_id = ` + role + ` AND rh.permission_key = '` + string(key) + `'))`
+}
+
 // TeacherRoles returns the ids of the roles that take a teacher place.
 func TeacherRoles(ctx context.Context, q Querier) (map[string]struct{}, error) {
 	var ids []string
@@ -520,7 +530,7 @@ func RequireStorage(ctx context.Context, q Querier, limit, bytes int64) error {
 }
 
 // DatabaseSize is pg_database_size of the current database, which
-// approximates and is not what Neon bills.
+// approximates the files it takes on the disk.
 func DatabaseSize(ctx context.Context, q Querier) (int64, error) {
 	var out int64
 	if err := q.QueryRow(ctx, `SELECT pg_database_size(current_database())`).Scan(&out); err != nil {

@@ -67,15 +67,14 @@ test('the longest rule decides, and the base decides where none matches', () => 
   assert.equal(inSet(SETS.server, 'api/openapi.yaml'), true);
   assert.equal(inSet(SETS.server, 'api/catalogs/audit-actions.json'), true);
   assert.equal(inSet(SETS.server, 'server/tests/testdata/unit5-listening.mp3'), true);
-  assert.equal(inSet(SETS.server, 'fly.toml'), true);
+  assert.equal(inSet(SETS.server, 'deploy/production.env'), true);
   assert.equal(inSet(SETS.server, 'docs/setup/operations.md'), true);
   assert.equal(inSet(SETS.server, 'docs/setup/ci.md'), false);
   assert.equal(inSet(SETS.server, '.github/workflows/deploy.yml'), true);
   assert.equal(inSet(SETS.code, 'api/sdk-version'), true);
   assert.equal(inSet(SETS.code, 'scripts/contract/sync.sh'), true);
   assert.equal(inSet(SETS.code, 'AGENTS.md'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/retention-sweep.yml'), false);
-  assert.equal(inSet(SETS.server, '.github/workflows/retention-sweep.yml'), false);
+  assert.equal(inSet(SETS.code, '.github/workflows/production-monitor.yml'), false);
   assert.equal(inSet(SETS.code, 'server/README.md'), true);
   assert.equal(inSet(SETS.image, 'server/go.mod'), true);
   assert.equal(inSet(SETS.image, 'docs/setup/operations.md'), false);
@@ -116,7 +115,7 @@ test('the production image job reads what the image is built from and what its s
   const needed = [
     'Dockerfile',
     '.dockerignore',
-    'fly.toml',
+    'deploy/production.env',
     'server/go.mod',
     'server/cmd/api/main.go',
     'server/cmd/import-worker/main.go',

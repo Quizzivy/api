@@ -13,6 +13,8 @@ import (
 	mediarepo "quizzivy/internal/modules/media/repositories"
 	questionscmd "quizzivy/internal/modules/questions/application/command"
 	questionsrepo "quizzivy/internal/modules/questions/repositories"
+	sharingcmd "quizzivy/internal/modules/sharing/application/command"
+	sharingrepo "quizzivy/internal/modules/sharing/repositories"
 	testscmd "quizzivy/internal/modules/tests/application/command"
 	testsrepo "quizzivy/internal/modules/tests/repositories"
 	"quizzivy/internal/platform/db"
@@ -29,6 +31,7 @@ func contentTransfer(dbx db.Context, app *identityapp.Application, notifier iden
 				Questions:   questionscmd.TransferOwnershipHandler{Repo: questionsrepo.NewPostgres(scoped)},
 				Media:       mediacmd.TransferOwnershipHandler{Repo: mediarepo.NewPostgres(scoped)},
 				Assignments: assignmentscmd.TransferOwnershipHandler{Repo: assignmentsrepo.NewPostgres(scoped)},
+				Shares:      sharingcmd.TransferOwnershipHandler{Repo: sharingrepo.NewPostgres(scoped)},
 			}
 		},
 	}, notifier)
