@@ -10,6 +10,7 @@ import (
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
 	organizationquery "quizzivy/internal/modules/organization/application/query"
+	sharingquery "quizzivy/internal/modules/sharing/application/query"
 	"quizzivy/internal/shared/cqrs"
 )
 
@@ -29,3 +30,6 @@ type RecentChanges = cqrs.QueryHandler[auditquery.Recent, []auditdomain.Entry]
 
 // AICredits is the AI module's own query for the Admin's view of the month, the one GET /admin/ai/credits answers.
 type AICredits = cqrs.QueryHandler[aiquery.AdminCredits, aidomain.AdminCredits]
+
+// SharedWithMe is the sharing module's own count of the live grants to a user, the muted count beside "Shared with me".
+type SharedWithMe = cqrs.QueryHandler[sharingquery.CountSharedWithMe, int]

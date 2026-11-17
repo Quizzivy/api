@@ -51,6 +51,9 @@ func groupFailure(ctx context.Context, err error) (*groupResponse, error) {
 	message := httpx.Text(ctx, "Nhóm hoặc một định danh đã thay đổi. Vui lòng tải lại trước khi lưu.",
 		"The group or one of its ids has changed. Please reload before saving.")
 	var invalid *domain.GroupError
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return &groupResponse{status: http.StatusForbidden, problem: &refused.body}, nil
+	}
 	switch {
 	case errors.Is(err, domain.ErrGroupUnavailable):
 		return nil, httpx.ErrNotImplemented
@@ -107,6 +110,9 @@ func groupFailure(ctx context.Context, err error) (*groupResponse, error) {
 		return nil, err
 	}
 	problem := httpapi.Error(ctx, code, message)
+	if code == openapi.STALEWRITE {
+		problem = httpapi.StaleWrite(ctx, message, err)
+	}
 	if invalid != nil {
 		problem.Error.Details = &map[string]interface{}{"rule": invalid.Rule, "questionId": invalid.QuestionID, "stimulusId": invalid.StimulusID, "gapId": invalid.GapID}
 	}

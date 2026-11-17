@@ -51,6 +51,7 @@ var categoryOfEntity = map[string]Category{
 	"test_version":   Tests,
 	"question":       Tests,
 	"question_group": Tests,
+	"question_set":   Tests,
 
 	"media_asset": Media,
 

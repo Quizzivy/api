@@ -74,8 +74,7 @@ test('the longest rule decides, and the base decides where none matches', () => 
   assert.equal(inSet(SETS.code, 'api/sdk-version'), true);
   assert.equal(inSet(SETS.code, 'scripts/contract/sync.sh'), true);
   assert.equal(inSet(SETS.code, 'AGENTS.md'), false);
-  assert.equal(inSet(SETS.code, '.github/workflows/retention-sweep.yml'), false);
-  assert.equal(inSet(SETS.server, '.github/workflows/retention-sweep.yml'), false);
+  assert.equal(inSet(SETS.code, '.github/workflows/production-monitor.yml'), false);
   assert.equal(inSet(SETS.code, 'server/README.md'), true);
   assert.equal(inSet(SETS.image, 'server/go.mod'), true);
   assert.equal(inSet(SETS.image, 'docs/setup/operations.md'), false);

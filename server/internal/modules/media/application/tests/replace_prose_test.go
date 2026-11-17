@@ -64,6 +64,9 @@ func TestReplacementRepointsProseAndItsReferencesAndLeavesFrozenRows(t *testing.
 		if n := w.scalar(t, `SELECT count(*) FROM app.question_media_references WHERE question_id=$1 AND media_asset_id=$2`, id, old); n != 0 {
 			t.Fatalf("question %s keeps %d rows naming the old file", id, n)
 		}
+		if got := w.text(t, `SELECT coalesce(updated_by::text,'') FROM app.questions WHERE id=$1`, id); got != w.actor {
+			t.Fatalf("question %s is recorded as %q's, want the replacer's", id, got)
+		}
 	}
 	if n := w.scalar(t, `SELECT count(*) FROM app.question_media_references WHERE question_id=$1 AND media_asset_id=$2`, shown, out.Asset.ID); n != 2 {
 		t.Fatalf("the prompt and explanation hold %d rows naming the new file, want 2", n)
@@ -73,6 +76,9 @@ func TestReplacementRepointsProseAndItsReferencesAndLeavesFrozenRows(t *testing.
 	}
 	if raw := w.text(t, `SELECT prompt_content::text FROM app.questions WHERE id=$1`, foreign); !strings.Contains(raw, old) {
 		t.Fatalf("another owner's prompt moved: %s", raw)
+	}
+	if got := w.text(t, `SELECT coalesce(updated_by::text,'') FROM app.questions WHERE id=$1`, foreign); got != "" {
+		t.Fatalf("another owner's question is recorded as %q's", got)
 	}
 	if n := w.scalar(t, `SELECT count(*) FROM app.question_media_references WHERE question_id=$1 AND media_asset_id=$2`, foreign, old); n != 1 {
 		t.Fatalf("another owner's reference moved")

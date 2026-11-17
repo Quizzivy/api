@@ -25,6 +25,24 @@ func TestTheOrganizationSettingsRowCanBeChangedButNeitherAddedNorRemovedByTheApp
 	}
 }
 
+// TestAQuestionSetIsDeletedSoftlyByTheAppRole keeps T-R7.1's grants: a set is
+// soft-deleted, as the bank is, while its items and its grants are hard rows
+// the app removes.
+func TestAQuestionSetIsDeletedSoftlyByTheAppRole(t *testing.T) {
+	conn := migrated(t)
+	for table, want := range map[string]map[string]bool{
+		"app.question_sets":      {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": false},
+		"app.question_set_items": {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true},
+		"app.content_shares":     {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true},
+	} {
+		for priv, allowed := range want {
+			if got := hasTablePrivilege(t, conn, appRole, table, priv); got != allowed {
+				t.Errorf("%s %s on %s = %v, want %v", appRole, priv, table, got, allowed)
+			}
+		}
+	}
+}
+
 // TestAppRoleCanReadAndWriteEveryTable loops over information_schema rather than
 // naming tables, which is the same property ALTER DEFAULT PRIVILEGES was chosen
 // for: a table added later is covered without anyone extending this test.

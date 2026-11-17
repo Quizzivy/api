@@ -68,7 +68,7 @@ func TestANoticeIsRefusedForItsFirstFault(t *testing.T) {
 		want   error
 	}{
 		"no recipient":            {func(n *domain.Notice) { n.UserID = "" }, domain.ErrNoRecipient},
-		"an unknown kind":         {func(n *domain.Notice) { n.Kind = "content.shared" }, domain.ErrUnknownKind},
+		"an unknown kind":         {func(n *domain.Notice) { n.Kind = "content.unknown" }, domain.ErrUnknownKind},
 		"no kind":                 {func(n *domain.Notice) { n.Kind = "" }, domain.ErrUnknownKind},
 		"no params":               {func(n *domain.Notice) { n.Params = nil }, domain.ErrParamsMismatch},
 		"another kind's params":   {func(n *domain.Notice) { n.Params = domain.Ready{Title: "Đề giữa kỳ"} }, domain.ErrParamsMismatch},
@@ -112,7 +112,7 @@ func TestEachKindIsGovernedByTheSwitchTheSettingsDraw(t *testing.T) {
 			t.Errorf("%s is governed by %q (%v), want %s", kind, got, governed, want)
 		}
 	}
-	for _, kind := range []domain.Kind{domain.ClassJoined, domain.JoinCodesRotated, "content.shared"} {
+	for _, kind := range []domain.Kind{domain.ClassJoined, domain.JoinCodesRotated, domain.ContentShared, domain.TestPublishedByCollaborator, "content.unknown"} {
 		if got, governed := kind.Event(); governed {
 			t.Errorf("%s has the switch %s, want none", kind, got)
 		}
@@ -123,6 +123,7 @@ func TestTheContractsRoutesAreTheDomains(t *testing.T) {
 	routes := []string{
 		string(domain.RouteAssignment), string(domain.RouteAttempt), string(domain.RouteGrading),
 		string(domain.RouteClasses), string(domain.RouteResult), string(domain.RouteStudentAssignment),
+		string(domain.RouteSharedWithMe), string(domain.RouteTest),
 	}
 	slices.Sort(routes)
 	target := schema(t, "NotificationTarget")
@@ -130,7 +131,7 @@ func TestTheContractsRoutesAreTheDomains(t *testing.T) {
 		t.Errorf("the contract's routes are %v, the domain's %v", declared, routes)
 	}
 	for _, route := range routes {
-		full := domain.Target{Route: domain.Route(route), AssignmentID: someAssignment, AttemptID: someAttempt}
+		full := domain.Target{Route: domain.Route(route), AssignmentID: someAssignment, AttemptID: someAttempt, TestID: someAssignment}
 		if err := full.Validate(); err != nil {
 			t.Errorf("%s with both ids: %v", route, err)
 		}

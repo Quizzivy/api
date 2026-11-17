@@ -10,6 +10,7 @@ import (
 	importsrepo "quizzivy/internal/modules/imports/repositories"
 	mediarepo "quizzivy/internal/modules/media/repositories"
 	questionsrepo "quizzivy/internal/modules/questions/repositories"
+	sharingrepo "quizzivy/internal/modules/sharing/repositories"
 	testsrepo "quizzivy/internal/modules/tests/repositories"
 )
 
@@ -33,6 +34,7 @@ func TestEveryPageSizeMatchesItsContract(t *testing.T) {
 		"ListStudents":       identityrepo.DefaultLimit,
 		"ListUsers":          identityrepo.AdminUsersDefaultLimit,
 		"ListAllClasses":     classesrepo.AdminDefaultLimit,
+		"ListSharedWithMe":   sharingrepo.DefaultLimit,
 	}
 
 	seen := map[string]bool{}

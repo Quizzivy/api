@@ -10,7 +10,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Postgres) copyDraftGraph(ctx context.Context, tx pgx.Tx, testID, owner string, draft domain.DraftContent, in domain.DuplicateInput) error {
+// copyDraftGraph writes draft into the new test testID owned by owner: its
+// sections and instructions, its own groups as new groups, and its standalone
+// questions as questions says, a source's id to the id the copy names (the
+// source itself for a duplicate, which keeps referencing the bank; a copy of
+// it for Make a copy). Every question the copy names is locked with
+// LockForDraftUse and held to R2's rule that owner owns it before the
+// outline names it.
+func (s *Postgres) copyDraftGraph(ctx context.Context, tx pgx.Tx, testID, owner string, draft domain.DraftContent, in domain.DuplicateInput, questions func(string) string) error {
 	protected := domain.DraftContent{}
 	for _, section := range draft.Sections {
 		owned := domain.DraftSection{Groups: section.Groups}
@@ -29,19 +36,25 @@ func (s *Postgres) copyDraftGraph(ctx context.Context, tx pgx.Tx, testID, owner 
 		return goneAsset(missing[0])
 	}
 	for _, section := range draft.Sections {
-		if err := s.copyDraftSection(ctx, tx, testID, owner, section, in); err != nil {
+		if err := s.copyDraftSection(ctx, tx, testID, owner, section, in, questions); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Postgres) copyDraftSection(ctx context.Context, tx pgx.Tx, testID, owner string, section domain.DraftSection, in domain.DuplicateInput) error {
+func (s *Postgres) copyDraftSection(ctx context.Context, tx pgx.Tx, testID, owner string, section domain.DraftSection, in domain.DuplicateInput, copyOf func(string) string) error {
 	var sectionID string
 	if err := tx.QueryRow(ctx, `INSERT INTO app.test_sections (test_id,ordinal,title,instructions) VALUES ($1,$2,$3,$4) RETURNING id::text`, testID, section.Ordinal, section.Title, section.Instructions).Scan(&sectionID); err != nil {
 		return err
 	}
-	ids := standaloneDraftIDs(section)
+	sources := standaloneDraftIDs(section)
+	ids := make([]string, len(sources))
+	questions := make(map[string]string, len(sources))
+	for i, source := range sources {
+		ids[i] = copyOf(source)
+		questions[source] = ids[i]
+	}
 	if err := s.lockQuestions(ctx, tx, owner, []domain.SectionInput{{QuestionIDs: ids}}); err != nil {
 		return err
 	}
@@ -50,10 +63,6 @@ func (s *Postgres) copyDraftSection(ctx context.Context, tx pgx.Tx, testID, owne
 	}
 	if len(section.Units) == 0 {
 		return nil
-	}
-	questions := make(map[string]string, len(ids))
-	for _, id := range ids {
-		questions[id] = id
 	}
 	groups := NewGroupsPostgres(db.NewContext(tx), s.groupQuestions, s.media)
 	copied := make(map[string]string, len(section.Groups))

@@ -75,7 +75,7 @@ func (s *GroupsPostgres) create(ctx context.Context, in domain.CreateGroupInput)
 
 func recordGroupCreation(ctx context.Context, tx pgx.Tx, in domain.CreateGroupInput, testID string) error {
 	if testID != "" {
-		if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at=$2 WHERE id=$1`, testID, in.Now); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE app.tests SET updated_at=$2, updated_by=$3 WHERE id=$1`, testID, in.Now, in.ActorID); err != nil {
 			return err
 		}
 	}

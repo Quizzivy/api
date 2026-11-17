@@ -1,6 +1,7 @@
 package application
 
 import (
+	"log/slog"
 	"quizzivy/internal/modules/tests/application/command"
 	"quizzivy/internal/modules/tests/application/internal/support"
 	"quizzivy/internal/modules/tests/application/ports"
@@ -32,8 +33,11 @@ type Commands struct {
 	Delete                 cqrs.CommandHandler[command.Delete, cqrs.Nothing]
 	Create                 cqrs.CommandHandler[command.Create, domain.Test]
 	Duplicate              cqrs.CommandHandler[command.Duplicate, domain.Test]
+	Copy                   cqrs.CommandHandler[command.Copy, domain.Test]
+	CopyQuestions          cqrs.CommandHandler[command.CopyQuestions, []string]
 	Publish                cqrs.CommandHandler[command.Publish, domain.Version]
 	Update                 cqrs.CommandHandler[command.Update, domain.Test]
+	EditQuestion           cqrs.CommandHandler[command.EditQuestion, domain.QuestionEdited]
 }
 
 type Queries struct {
@@ -43,6 +47,7 @@ type Queries struct {
 	Diff          cqrs.QueryHandler[query.Diff, query.DiffResult]
 	Facets        cqrs.QueryHandler[query.Facets, domain.StatusFacets]
 	Get           cqrs.QueryHandler[query.Get, domain.Test]
+	Ownership     cqrs.QueryHandler[query.Ownership, domain.Ownership]
 	List          cqrs.QueryHandler[query.List, query.ListResult]
 	ListVersions  cqrs.QueryHandler[query.ListVersions, []domain.Version]
 	Preview       cqrs.QueryHandler[query.Preview, query.PreviewResult]
@@ -67,8 +72,11 @@ func New(repo domain.Repository) *Application {
 			Delete:                 command.DeleteHandler{Service: service},
 			Create:                 command.CreateHandler{Service: service},
 			Duplicate:              command.DuplicateHandler{Service: service},
+			Copy:                   command.CopyHandler{Service: service},
+			CopyQuestions:          command.CopyQuestionsHandler{Service: service},
 			Publish:                command.PublishHandler{Publisher: publisher},
 			Update:                 command.UpdateHandler{Service: service},
+			EditQuestion:           command.EditQuestionHandler{Service: service},
 		},
 		Queries: Queries{
 			Group:         query.GroupHandler{Groups: groups},
@@ -77,6 +85,7 @@ func New(repo domain.Repository) *Application {
 			Diff:          query.DiffHandler{Service: service},
 			Facets:        query.FacetsHandler{Service: service},
 			Get:           query.GetHandler{Service: service},
+			Ownership:     query.OwnershipHandler{Service: service},
 			List:          query.ListHandler{Service: service},
 			ListVersions:  query.ListVersionsHandler{Service: service},
 			Preview:       query.PreviewHandler{Service: service},
@@ -92,5 +101,13 @@ func New(repo domain.Repository) *Application {
 func (a *Application) WithGroups(repo domain.GroupRepository, media ports.GroupMediaKinds) *Application {
 	a.groups.Repo = repo
 	a.groups.Media = media
+	return a
+}
+
+// WithNotifier gives the publisher the notifications module's Notify, through
+// which an owner hears that a co-editor published their test, and returns the
+// application. Without it nobody is told.
+func (a *Application) WithNotifier(notifier ports.Notifier, logger *slog.Logger) *Application {
+	a.publisher.Notifier, a.publisher.Logger = notifier, logger
 	return a
 }

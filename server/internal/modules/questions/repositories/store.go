@@ -24,6 +24,9 @@ var anyOwner = access.Scope{All: true}
 
 const purgedMediaBinding = "media_assets_purged_binding"
 
+// entityQuestion is the audit log's entity for a bank question.
+const entityQuestion = "question"
+
 const questionColumns = `
 	       q.id::text, q.type::text, q.prompt, q.prompt_content, q.explanation_content,
 	       q.media_asset_id::text, q.media_asset_kind::text, q.media_alt,
@@ -68,9 +71,10 @@ func scanQuestion(row pgx.Row, extra ...any) (domain.Question, error) {
 	return q, nil
 }
 
-// Get returns one live bank question the scope reaches, with its children and
-// the tests the scope can read that use it. Another owner's question answers
-// ErrNotFound, exactly as a missing one does.
+// Get returns one live bank question the scope can read (questionAccess),
+// with its children, its owner, the reader's access and the tests the scope
+// can read that use it. A question the scope cannot read answers ErrNotFound,
+// exactly as a missing one does.
 func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (domain.Question, error) {
 	question, err := s.get(ctx, s.Conn(), scope, id, false, nil)
 	if err != nil {
@@ -91,12 +95,17 @@ func (s *Postgres) get(ctx context.Context, q db.Querier, scope access.Scope, id
 	if includeDeleted {
 		filter = ``
 	}
+	var owner domain.Owner
+	var level string
 	question, err := scanQuestion(q.QueryRow(ctx,
-		`SELECT`+questionColumns+` FROM app.questions q WHERE q.id = $1 AND q.context_group_id IS NOT DISTINCT FROM $2::uuid
-		   AND ($3::boolean OR q.owner_id = $4::uuid)`+filter, id, groupID, scope.All, opt.String(scope.UserID)))
+		`SELECT`+questionColumns+`, q.owner_id::text, (SELECT `+personName+` FROM app.users u WHERE u.id = q.owner_id), `+questionAccess(3, 4)+`
+		   FROM app.questions q WHERE q.id = $1 AND q.context_group_id IS NOT DISTINCT FROM $2::uuid
+		   AND `+questionAccess(3, 4)+` IS NOT NULL`+filter, id, groupID, scope.All, opt.String(scope.UserID)),
+		&owner.ID, &owner.Name, &level)
 	if err != nil {
 		return domain.Question{}, err
 	}
+	question.Owner, question.Access = &owner, domain.Access(level)
 	questions := []domain.Question{question}
 	if err := s.loadChildren(ctx, q, questions); err != nil {
 		return domain.Question{}, err
@@ -216,14 +225,15 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 			       level = $18, skill = $19, media_alt = $20,
 			       audio_allow_pause = CASE WHEN $7::boolean IS NULL THEN NULL
 			                                ELSE coalesce($21::boolean, audio_allow_pause, true) END,
-			       select_count = $22, max_words = $23, match_allow_reuse = $24
+			       select_count = $22, max_words = $23, match_allow_reuse = $24,
+			       updated_by = $25::uuid
 			 WHERE id = $1 AND deleted_at IS NULL
 			 RETURNING id::text`,
 			id, string(in.Input.Type), in.Input.Prompt, in.Input.MediaAssetID, kind,
 			maxPlays, allowSeek, showTranscript, in.Input.Transcript,
 			in.Input.Points, in.Input.Explanation, in.Input.SampleAnswer,
 			in.Input.Tags, nullableContent(in.Input.PromptContent), nullableContent(in.Input.ExplanationContent), ordinal, optionOrder, in.Input.Level, in.Input.Skill, mediaAlt, allowPause,
-			in.Input.SelectCount, in.Input.MaxWords, in.Input.MatchAllowReuse).Scan(&id)
+			in.Input.SelectCount, in.Input.MaxWords, in.Input.MatchAllowReuse, in.ActorID).Scan(&id)
 	} else {
 		var createID *string
 		if ownership != nil {
@@ -233,11 +243,11 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 			INSERT INTO app.questions
 			       (type, prompt, media_asset_id, media_asset_kind,
 			        audio_max_plays, audio_allow_seek, audio_show_transcript_after,
-			        transcript, points, explanation, sample_answer, tags, created_by, prompt_content, explanation_content,
+			        transcript, points, explanation, sample_answer, tags, created_by, updated_by, prompt_content, explanation_content,
 			        id, context_group_id, context_ordinal, context_option_order, owner_id, level, skill, media_alt,
 			        audio_allow_pause, copied_from_id, select_count, max_words, match_allow_reuse)
 			VALUES ($1::app.question_type, $2, $3, $4::app.media_kind, $5, $6, $7,
-			        $8, $9::numeric, $10, $11, $12, $13, $14, $15,
+			        $8, $9::numeric, $10, $11, $12, $13, $13, $14, $15,
 			        coalesce($16::uuid, uuidv7()), $17, $18, $19,
 			        coalesce((SELECT g.owner_id FROM app.question_groups g WHERE g.id = $17), $20::uuid, $13), $21, $22, $23,
 			        CASE WHEN $6::boolean IS NULL THEN NULL ELSE coalesce($24::boolean, true) END, $25::uuid, $26, $27, $28)
@@ -264,7 +274,7 @@ func (s *Postgres) write(ctx context.Context, in domain.WriteInput, update bool,
 	if err := audit.Write(ctx, tx, audit.Entry{
 		ActorUserID: &in.ActorID,
 		Action:      action,
-		Entity:      "question",
+		Entity:      entityQuestion,
 		EntityID:    &id,
 		OccurredAt:  in.Now,
 		IP:          opt.String(in.IP),
@@ -290,7 +300,8 @@ func imageAlt(kind, alt *string) *string {
 	return alt
 }
 
-// SoftDelete marks a bank question deleted and audits it. The actor must own it
+// SoftDelete marks a bank question deleted, takes it out of every question set
+// and audits it. The actor must own it
 // unless All is set; the owner is checked in the row lock, before the drafts
 // that would refuse the delete are read, so another owner's question answers
 // ErrNotFound and never the tests that use it.
@@ -323,15 +334,18 @@ func (s *Postgres) SoftDelete(ctx context.Context, in domain.WriteInput) error {
 	if len(refs) > 0 {
 		return &domain.ReferencedError{Tests: refs}
 	}
+	if err := RemoveFromSets(ctx, tx, in.ID); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE app.questions SET deleted_at = $2 WHERE id = $1`, in.ID, in.Now); err != nil {
+		`UPDATE app.questions SET deleted_at = $2, updated_by = $3::uuid WHERE id = $1`, in.ID, in.Now, in.ActorID); err != nil {
 		return fmt.Errorf("questions: soft delete: %w", err)
 	}
 	if err := audit.Write(ctx, tx, audit.Entry{
 		ActorUserID: &in.ActorID,
 		Action:      "question.deleted",
-		Entity:      "question",
+		Entity:      entityQuestion,
 		EntityID:    &in.ID,
 		OccurredAt:  in.Now,
 		IP:          opt.String(in.IP),
@@ -354,7 +368,8 @@ func (s *Postgres) AddTags(ctx context.Context, scope access.Scope, ids []string
 		         SELECT array_agg(DISTINCT t ORDER BY t)
 		           FROM unnest(q.tags || $2::text[]) AS t
 		       ),
-		       updated_at = now()
+		       updated_at = now(),
+		       updated_by = $4::uuid
 		 WHERE q.id = ANY($1::uuid[])
 		   AND q.deleted_at IS NULL
 		   AND q.context_group_id IS NULL

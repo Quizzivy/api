@@ -38,7 +38,12 @@ var everyKind = []struct {
 	{domain.Transferred{TeacherName: "Nguyễn Thị Lan", Count: 42}, domain.ContentTransferred, []string{"count", "teacherName"}},
 	{domain.TeacherChanged{ClassName: "IELTS Foundation A"}, domain.ClassTeacherChanged, []string{"className"}},
 	{domain.TeacherChanged{ClassName: "IELTS Foundation A", TeacherName: &newTeacher}, domain.ClassTeacherChanged, []string{"className", "teacherName"}},
+	{domain.Shared{SharerName: "Nguyễn Thị Lan", ContentKind: domain.ShareTest, Name: "Đề giữa kỳ", Access: domain.ShareEdit}, domain.ContentShared, []string{"access", "contentKind", "name", "sharerName"}},
+	{domain.Shared{SharerName: "Nguyễn Thị Lan", ContentKind: domain.ShareQuestionSet, Name: "Bộ ngữ pháp", Access: domain.ShareUse, Message: &sharerMessage}, domain.ContentShared, []string{"access", "contentKind", "message", "name", "sharerName"}},
+	{domain.PublishedByCollaborator{EditorName: "Trần Minh Khoa", Title: "Đề giữa kỳ", Version: 3}, domain.TestPublishedByCollaborator, []string{"editorName", "title", "version"}},
 }
+
+var sharerMessage = "Cô dùng bộ này cho lớp tối nhé."
 
 var newTeacher = "Trần Minh Khoa"
 
@@ -125,7 +130,7 @@ func TestTheEncodedParamsAreTheContracts(t *testing.T) {
 
 var kindRow = regexp.MustCompile("^\\| `([a-z_.]+)` \\| [^|]+ \\| (.+) \\|$")
 
-var optionalName = regexp.MustCompile("^`([a-zA-Z]+)` for ")
+var optionalName = regexp.MustCompile("^`([a-zA-Z]+)` (?:for|when) ")
 
 func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 	kinds := schema(t, "NotificationKind")
@@ -176,7 +181,7 @@ func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 	if len(required) != len(known) {
 		t.Errorf("the contract's table describes %d kinds, want %d", len(required), len(known))
 	}
-	if domain.Kind("content.shared").Known() {
+	if domain.Kind("content.unknown").Known() {
 		t.Error("a kind outside the contract is known")
 	}
 }
@@ -210,26 +215,32 @@ func TestParamsOutsideTheContractsBoundsAreRefused(t *testing.T) {
 		params domain.Params
 		ok     bool
 	}{
-		"a title at the limit":       {domain.Ready{Title: text(title)}, true},
-		"a title over the limit":     {domain.Ready{Title: text(title + 1)}, false},
-		"an empty title":             {domain.Ready{}, false},
-		"a name at the limit":        {domain.Joined{StudentName: text(name), ClassName: text(name)}, true},
-		"a student name over":        {domain.Joined{StudentName: text(name + 1), ClassName: "Lớp"}, false},
-		"a class name over":          {domain.Joined{StudentName: "Nam", ClassName: text(name + 1)}, false},
-		"an empty class name":        {domain.Joined{StudentName: "Nam"}, false},
-		"zero counts":                {domain.Submitted{Title: "Đề"}, true},
-		"a negative count":           {domain.Submitted{Title: "Đề", Count: -1}, false},
-		"a negative to-grade":        {domain.Submitted{Title: "Đề", ToGrade: -1}, false},
-		"a negative focus count":     {domain.Flagged{StudentName: "Nam", Title: "Đề", FocusLost: -1}, false},
-		"a negative not-submitted":   {domain.Closing{Title: "Đề", NotSubmitted: -1}, false},
-		"the most class names":       {domain.CodesRotated{Count: names, ClassNames: classes(names)}, true},
-		"one class name too many":    {domain.CodesRotated{Count: names + 1, ClassNames: classes(names + 1)}, false},
-		"no class name":              {domain.CodesRotated{Count: 1}, false},
-		"fewer classes than names":   {domain.CodesRotated{Count: 1, ClassNames: classes(2)}, false},
-		"more classes than names":    {domain.CodesRotated{Count: 9, ClassNames: classes(2)}, true},
-		"an overlong name in a list": {domain.CodesRotated{Count: 1, ClassNames: []string{text(name + 1)}}, false},
-		"an empty name in a list":    {domain.CodesRotated{Count: 1, ClassNames: []string{""}}, false},
-		"no closing time":            {domain.Opened{Title: "Đề"}, false},
+		"a title at the limit":         {domain.Ready{Title: text(title)}, true},
+		"a title over the limit":       {domain.Ready{Title: text(title + 1)}, false},
+		"an empty title":               {domain.Ready{}, false},
+		"a name at the limit":          {domain.Joined{StudentName: text(name), ClassName: text(name)}, true},
+		"a student name over":          {domain.Joined{StudentName: text(name + 1), ClassName: "Lớp"}, false},
+		"a class name over":            {domain.Joined{StudentName: "Nam", ClassName: text(name + 1)}, false},
+		"an empty class name":          {domain.Joined{StudentName: "Nam"}, false},
+		"zero counts":                  {domain.Submitted{Title: "Đề"}, true},
+		"a negative count":             {domain.Submitted{Title: "Đề", Count: -1}, false},
+		"a negative to-grade":          {domain.Submitted{Title: "Đề", ToGrade: -1}, false},
+		"a negative focus count":       {domain.Flagged{StudentName: "Nam", Title: "Đề", FocusLost: -1}, false},
+		"a negative not-submitted":     {domain.Closing{Title: "Đề", NotSubmitted: -1}, false},
+		"the most class names":         {domain.CodesRotated{Count: names, ClassNames: classes(names)}, true},
+		"one class name too many":      {domain.CodesRotated{Count: names + 1, ClassNames: classes(names + 1)}, false},
+		"no class name":                {domain.CodesRotated{Count: 1}, false},
+		"fewer classes than names":     {domain.CodesRotated{Count: 1, ClassNames: classes(2)}, false},
+		"more classes than names":      {domain.CodesRotated{Count: 9, ClassNames: classes(2)}, true},
+		"an overlong name in a list":   {domain.CodesRotated{Count: 1, ClassNames: []string{text(name + 1)}}, false},
+		"an empty name in a list":      {domain.CodesRotated{Count: 1, ClassNames: []string{""}}, false},
+		"no closing time":              {domain.Opened{Title: "Đề"}, false},
+		"a share of an unknown kind":   {domain.Shared{SharerName: "Lan", ContentKind: "course", Name: "Đề", Access: domain.ShareUse}, false},
+		"a share with no access":       {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: "own"}, false},
+		"an empty share message":       {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse, Message: new("")}, false},
+		"a share message at the limit": {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse, Message: new(text(500))}, true},
+		"a share message over":         {domain.Shared{SharerName: "Lan", ContentKind: domain.ShareTest, Name: "Đề", Access: domain.ShareUse, Message: new(text(501))}, false},
+		"version zero":                 {domain.PublishedByCollaborator{EditorName: "Khoa", Title: "Đề", Version: 0}, false},
 	} {
 		raw, err := domain.Encode(c.params)
 		if c.ok && err != nil {

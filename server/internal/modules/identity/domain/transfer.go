@@ -25,20 +25,22 @@ type ContentTransfer struct {
 }
 
 // MovedContent counts what a transfer gave the recipient, as OwnedContent
-// counts it, with question groups beside it: every class and assignment, and
-// the tests, questions, question groups and media not deleted.
+// counts it, with question groups and question sets beside it: every class and
+// assignment, and the tests, questions, question groups, question sets and
+// media not deleted.
 type MovedContent struct {
 	Classes        int
 	Tests          int
 	Questions      int
 	QuestionGroups int
+	QuestionSets   int
 	Media          int
 	Assignments    int
 }
 
 // Total is how many things moved.
 func (m MovedContent) Total() int {
-	return m.Classes + m.Tests + m.Questions + m.QuestionGroups + m.Media + m.Assignments
+	return m.Classes + m.Tests + m.Questions + m.QuestionGroups + m.QuestionSets + m.Media + m.Assignments
 }
 
 // LeftBehind counts what a transfer leaves with the source: its Word imports

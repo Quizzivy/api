@@ -32,6 +32,9 @@ const (
 
 	ContentTransferred  Kind = "content.transferred"
 	ClassTeacherChanged Kind = "class.teacher_changed"
+
+	ContentShared               Kind = "content.shared"
+	TestPublishedByCollaborator Kind = "test.published_by_collaborator"
 )
 
 var governing = map[Kind]Event{
@@ -48,6 +51,7 @@ var switchless = map[Kind]bool{
 	ClassJoined: true, JoinCodesRotated: true,
 	AIAllowanceWarning: true, AICreditRequest: true, AICreditRequestDecided: true,
 	ContentTransferred: true, ClassTeacherChanged: true,
+	ContentShared: true, TestPublishedByCollaborator: true,
 }
 
 // Known reports whether k is a kind this binary writes and words.

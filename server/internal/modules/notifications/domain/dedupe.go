@@ -98,3 +98,16 @@ func TransferredKey(fromUserID string) string {
 func TeacherChangedKey(classID string) string {
 	return "teacher_changed:" + classID
 }
+
+// SharedKey is the dedupe key of a teacher being told that a test or a
+// question set was shared with them: a later share of the same content, after
+// a revocation, replaces the item.
+func SharedKey(kind, resourceID string) string {
+	return "shared:" + kind + ":" + resourceID
+}
+
+// CollaboratorPublishedKey is the dedupe key of an owner being told that a
+// co-editor published version of their test: each version is told once.
+func CollaboratorPublishedKey(testID string, version int) string {
+	return "collaborator_published:" + testID + ":" + strconv.Itoa(version)
+}

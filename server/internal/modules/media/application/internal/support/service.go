@@ -107,14 +107,15 @@ func (s *Service) Identify(r io.ReaderAt, size int64) (domain.Kind, string, *int
 }
 
 // Describe fills what a library row shows beyond its own columns: the
-// published versions that reference it, how many live questions use it, and
-// a signed URL, since the bucket is private (§11.2).
+// published versions that reference it (every owner's counted, only the
+// asset owner's own named, T-R7.7), how many live questions use it, and a
+// signed URL, since the bucket is private (§11.2).
 func (s *Service) Describe(ctx context.Context, assets []domain.Asset) error {
 	ids := make([]string, len(assets))
 	for i := range assets {
 		ids[i] = assets[i].ID
 	}
-	refs, err := s.Repo.ReferencesFor(ctx, ids)
+	uses, err := s.Repo.VersionUses(ctx, ids)
 	if err != nil {
 		return err
 	}
@@ -128,8 +129,8 @@ func (s *Service) Describe(ctx context.Context, assets []domain.Asset) error {
 			return err
 		}
 		assets[i].URL = url
-		assets[i].UsedIn = refs[assets[i].ID]
-		assets[i].UsageCount = len(assets[i].UsedIn)
+		assets[i].UsedIn = uses[assets[i].ID].Tests
+		assets[i].UsageCount = uses[assets[i].ID].Count
 		assets[i].QuestionCount = questions[assets[i].ID]
 	}
 	return nil

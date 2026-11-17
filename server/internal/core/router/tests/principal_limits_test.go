@@ -61,6 +61,8 @@ var thePerActorLimits = map[string][]ratelimit.Rule{
 	"DELETE /auth/sessions/{familyId}":           {{Burst: 10, Window: time.Minute}, {Burst: 60, Window: time.Hour}},
 	"POST /auth/sessions/revoke-others":          {{Burst: 5, Window: time.Minute}, {Burst: 30, Window: time.Hour}},
 	"POST /auth/set-password/request":            {{Burst: 3, Window: time.Minute}, {Burst: 10, Window: time.Hour}},
+	"GET /teacher/directory/teachers":            {{Burst: 60, Window: time.Minute}},
+	"POST /teacher/shares":                       {{Burst: 30, Window: time.Hour}},
 
 	"POST /teacher/ai/questions/generate":                                         aiSuggestion,
 	"POST /teacher/ai/tests/{id}/check":                                           aiSuggestion,

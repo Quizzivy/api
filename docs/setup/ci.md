@@ -1,7 +1,8 @@
 # CI
 
-`.github/workflows/ci.yml` runs on every pull request and on every push to
-`main`, `develop` and `work/**`. One check, **CI result**, is what the branch
+`.github/workflows/ci.yml` runs on every pull request that is not a draft and
+on every push to `main`, `develop` and `work/**`. A draft runs nothing, not even
+Plan; it gets its CI run when it is marked ready for review. One check, **CI result**, is what the branch
 rules require; it passes only when every job did what the plan asked of it.
 
 ## What runs
@@ -191,13 +192,6 @@ superuser, as a managed provider's admin is, runs `scripts/provision-db.sh` as i
 database of its own and drops both, because the script's node tests use a stub `psql` and cannot
 see a statement a non-superuser may not run. Where `CI` is set and the variable is not, it fails
 instead of skipping.
-
-`.github/workflows/retention-sweep.yml` is the nightly sweep, not a CI job: the
-planner lists it with the files whose change runs no code job, and
-`scripts/ci/tests/retention-sweep.test.mjs`, which `Plan` runs, pins its
-schedule, its one-at-a-time group, the 15-minute limit, that the environment
-secret is read by the sweep step alone and that no expression is written into a
-script (`docs/setup/operations.md`, "Retention and anonymization").
 
 A test that needs the object store or the image skips when its variable is
 unset, and `go test` reports a package whose tests all skipped as `ok`. The

@@ -369,6 +369,7 @@ func toAPITransferred(r domain.TransferredContent) openapi.UserContentTransferRe
 	out.Moved.Tests = r.Moved.Tests
 	out.Moved.Questions = r.Moved.Questions
 	out.Moved.QuestionGroups = r.Moved.QuestionGroups
+	out.Moved.QuestionSets = r.Moved.QuestionSets
 	out.Moved.Media = r.Moved.Media
 	out.Moved.Assignments = r.Moved.Assignments
 	out.LeftBehind.Imports = r.LeftBehind.Imports

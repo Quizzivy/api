@@ -22,6 +22,11 @@ type altRepository struct {
 	writes int
 }
 
+// Access answers that the caller owns the question being saved.
+func (r *altRepository) Access(context.Context, access.Scope, string) (questions.Access, error) {
+	return questions.AccessOwner, nil
+}
+
 func (r *altRepository) Create(_ context.Context, in questions.WriteInput) (questions.Question, error) {
 	r.writes++
 	return questions.Question{

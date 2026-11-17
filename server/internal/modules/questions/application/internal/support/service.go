@@ -12,7 +12,12 @@ import (
 type Service struct {
 	Repo  domain.Repository
 	Media ports.MediaKinds
-	Now   func() time.Time
+	// Sets and Contexts are nil until the application is given them (WithSets),
+	// and Tests until it is given the tests module's edit rule (WithTests).
+	Sets     domain.SetRepository
+	Contexts domain.WriteContexts
+	Tests    ports.EditableTests
+	Now      func() time.Time
 }
 
 func NewService(repo domain.Repository, media ports.MediaKinds) *Service {
@@ -34,7 +39,7 @@ func (s *Service) ResolveMediaKind(ctx context.Context, scope access.Scope, asse
 }
 
 func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update bool) (domain.Question, error) {
-	kind, err := s.ResolveMediaKind(ctx, req.Scope(), req.Input.MediaAssetID)
+	kind, err := s.ResolveMediaKind(ctx, req.MediaScope(), req.Input.MediaAssetID)
 	if err != nil {
 		return domain.Question{}, err
 	}
@@ -42,19 +47,33 @@ func (s *Service) Write(ctx context.Context, req domain.WriteRequest, update boo
 		return domain.Question{}, err
 	}
 
-	in := domain.WriteInput{
-		ID:             req.ID,
-		Input:          req.Input,
-		MediaAssetKind: kind,
-		ActorID:        req.ActorID,
-		OwnerID:        req.OwnerID,
-		All:            req.All,
-		Now:            s.Now(),
-		IP:             req.IP,
-		UserAgent:      req.UserAgent,
-	}
+	in := s.InputOf(req)
+	in.MediaAssetKind = kind
+	write := s.Repo.Create
 	if update {
-		return s.Repo.Update(ctx, in)
+		write = s.Repo.Update
 	}
-	return s.Repo.Create(ctx, in)
+	written, err := write(ctx, in)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	written.Access = domain.WriterAccess(req)
+	return written, nil
+}
+
+// InputOf is req as the repository's write input, stamped now, with no media
+// kind resolved yet.
+func (s *Service) InputOf(req domain.WriteRequest) domain.WriteInput {
+	return domain.WriteInput{
+		ID:                req.ID,
+		Input:             req.Input,
+		ActorID:           req.ActorID,
+		OwnerID:           req.OwnerID,
+		All:               req.All,
+		SourceMedia:       req.SourceMedia,
+		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+		Now:               s.Now(),
+		IP:                req.IP,
+		UserAgent:         req.UserAgent,
+	}
 }

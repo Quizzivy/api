@@ -10,7 +10,10 @@ DELETE /teacher/classes/{id}/join-code teaching.classes.write
 DELETE /teacher/classes/{id}/members/{userId} teaching.classes.write
 DELETE /teacher/media/{id} content.media.write
 DELETE /teacher/question-groups/{id} content.questions.write | content.tests.write
+DELETE /teacher/question-sets/{id} content.questions.write
 DELETE /teacher/questions/{id} content.questions.write
+DELETE /teacher/shared-with-me/{shareId} workspace.teacher
+DELETE /teacher/shares/{shareId} content.share
 DELETE /teacher/tests/{id} content.tests.write
 DELETE /teacher/tests/{id}/versions/{version} content.tests.publish
 GET /admin/ai/credits ai.credits.manage
@@ -58,6 +61,7 @@ GET /teacher/classes/{id} workspace.teacher
 GET /teacher/classes/{id}/join-code teaching.classes.write
 GET /teacher/classes/{id}/members people.students.read
 GET /teacher/dashboard workspace.teacher
+GET /teacher/directory/teachers content.share
 GET /teacher/grading/queue teaching.grading
 GET /teacher/imports content.tests.write
 GET /teacher/imports/capabilities content.tests.write
@@ -69,8 +73,12 @@ GET /teacher/imports/{id}/sources/{sourceId}/download content.tests.write
 GET /teacher/media workspace.teacher
 GET /teacher/question-groups workspace.teacher
 GET /teacher/question-groups/{id} workspace.teacher
+GET /teacher/question-sets content.questions.write
+GET /teacher/question-sets/{id} content.questions.write
 GET /teacher/questions workspace.teacher
 GET /teacher/questions/{id} workspace.teacher
+GET /teacher/shared-with-me workspace.teacher
+GET /teacher/shares content.share
 GET /teacher/students people.students.read
 GET /teacher/students/{id} people.students.read
 GET /teacher/summary workspace.teacher
@@ -90,9 +98,12 @@ PATCH /teacher/attempts/{id}/note teaching.grading
 PATCH /teacher/classes/{id} teaching.classes.write
 PATCH /teacher/media/{id} content.media.write
 PATCH /teacher/question-groups/{id}/archive content.questions.write
+PATCH /teacher/question-sets/{id} content.questions.write
 PATCH /teacher/questions/{id} content.questions.write | content.tests.write
+PATCH /teacher/shares/{shareId} content.share
 PATCH /teacher/students/{id} people.students.create
 PATCH /teacher/tests/{id} content.tests.write
+PATCH /teacher/tests/{id}/questions/{questionId} content.tests.write
 POST /admin/ai/credit-requests/{id}/approve ai.credits.manage
 POST /admin/ai/credit-requests/{id}/decline ai.credits.manage
 POST /admin/ai/credits/additions ai.credits.manage
@@ -159,15 +170,22 @@ POST /teacher/media content.media.write
 POST /teacher/media/{id}/replace content.media.write
 POST /teacher/question-groups content.questions.write | content.tests.write
 POST /teacher/question-groups/{id}/copy content.questions.write | content.tests.write
+POST /teacher/question-sets content.questions.write
+POST /teacher/question-sets/{id}/copy content.questions.write
+POST /teacher/question-sets/{id}/items content.questions.write
+POST /teacher/question-sets/{id}/items/remove content.questions.write
 POST /teacher/questions content.questions.write | content.tests.write
 POST /teacher/questions/tags content.questions.write
 POST /teacher/questions/{id}/duplicate content.questions.write | content.tests.write
+POST /teacher/shares content.share
 POST /teacher/students people.students.create
 POST /teacher/students/reset-passwords people.students.reset_password
 POST /teacher/students/{id}/reset-password people.students.reset_password
 POST /teacher/tests content.tests.write
+POST /teacher/tests/{id}/copy content.tests.write
 POST /teacher/tests/{id}/duplicate content.tests.write
 POST /teacher/tests/{id}/publish content.tests.publish
+POST /teacher/tests/{id}/question-copies content.tests.write
 POST /teacher/tests/{id}/questions/move content.tests.write
 POST /teacher/tests/{id}/versions/{version}/current content.tests.publish
 POST /teacher/tests/{id}/versions/{version}/draft content.tests.write

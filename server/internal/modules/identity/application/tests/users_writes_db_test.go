@@ -377,6 +377,32 @@ func TestAnOwnerKeepsTheirRoleUntilTheirContentMovesButMayChangeToAnotherTeacher
 	}
 }
 
+// A set emptied of its questions still keeps its grants open to others, and
+// only a teacher workspace reaches it, so it holds the role as content does;
+// a deleted one does not.
+func TestASetAloneKeepsItsOwnerInATeacherRole(t *testing.T) {
+	w := newWritesWorld(t)
+	owner := w.account(t, "bo", "teacher")
+	t.Cleanup(func() { w.exec(t, `DELETE FROM app.question_sets WHERE owner_id = $1::uuid`, owner) })
+	w.exec(t, `INSERT INTO app.question_sets (name, owner_id, created_by) VALUES ($1, $2::uuid, $2::uuid)`, "Bộ trống "+nonce(t), owner)
+	before := w.row(t, owner)
+
+	err := w.changeRole(w.everything(), owner, w.role(t, "student"))
+
+	var owns *domain.OwnsContentError
+	if !errors.As(err, &owns) || owns.Owned != (domain.OwnedContent{QuestionSets: 1}) {
+		t.Fatalf("answered %v, want a refusal counting the set alone", err)
+	}
+	if after := w.row(t, owner); after != before {
+		t.Errorf("a refused change altered %+v into %+v", before, after)
+	}
+
+	w.exec(t, `UPDATE app.question_sets SET deleted_at = now() WHERE owner_id = $1::uuid`, owner)
+	if err := w.changeRole(w.everything(), owner, w.role(t, "student")); err != nil {
+		t.Errorf("an owner of a deleted set only: %v, want the change made", err)
+	}
+}
+
 func TestARoleThatIsNotAssignableOrNotThereIsRefusedBeforeAnythingIsWritten(t *testing.T) {
 	w := newWritesWorld(t)
 	target := w.account(t, "gv", "teacher")

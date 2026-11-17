@@ -8,15 +8,17 @@ import (
 	"time"
 )
 
-// ListInput selects a page of tests.
+// ListInput selects a page of tests: the scope's own, and with IncludeShared
+// those shared with its user too (the assignment wizard's include=shared).
 type ListInput struct {
 	Status *Status
 	// Tags filter by the tags of the questions a test CONTAINS.
-	Tags  []string
-	Query string
-	Page  int
-	Limit int
-	Scope access.Scope
+	Tags          []string
+	Query         string
+	Page          int
+	Limit         int
+	Scope         access.Scope
+	IncludeShared bool
 }
 
 // CreateInput is a new empty draft, owned by OwnerID when set and by ActorID

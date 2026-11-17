@@ -194,7 +194,7 @@ type replacementDescriptionFailure struct {
 	cause error
 }
 
-func (r replacementDescriptionFailure) ReferencesFor(context.Context, []string) (map[string][]domain.TestRef, error) {
+func (r replacementDescriptionFailure) VersionUses(context.Context, []string) (map[string]domain.VersionUses, error) {
 	return nil, r.cause
 }
 func TestReplacementRealCommittedDescriptionFailureRetainsDurableObject(t *testing.T) {

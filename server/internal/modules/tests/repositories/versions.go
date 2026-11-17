@@ -57,7 +57,7 @@ func scanVersion(row pgx.Row) (domain.Version, error) {
 // domain.ErrNotFound, as an unknown id is.
 func (s *Postgres) ListVersions(ctx context.Context, scope access.Scope, testID string) ([]domain.Version, error) {
 	rows, err := s.Query(ctx, `SELECT `+versionColumns+` JOIN app.tests vt ON vt.id = v.test_id
-		WHERE v.test_id = $1 AND vt.deleted_at IS NULL AND ($2::boolean OR vt.owner_id = $3::uuid)
+		WHERE v.test_id = $1 AND vt.deleted_at IS NULL AND `+testAccess("vt", 2, 3)+` IS NOT NULL
 		ORDER BY v.version DESC`,
 		testID, scope.All, opt.String(scope.UserID))
 	if err != nil {
@@ -82,20 +82,4 @@ func (s *Postgres) ListVersions(ctx context.Context, scope access.Scope, testID 
 		}
 	}
 	return out, nil
-}
-
-func requireVisibleTest(ctx context.Context, q interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}, scope access.Scope, testID string) error {
-	var visible bool
-	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM app.tests
-		WHERE id = $1 AND deleted_at IS NULL AND `+scopedTest+`)`,
-		testID, scope.All, opt.String(scope.UserID)).Scan(&visible)
-	if err != nil {
-		return fmt.Errorf("tests: read test: %w", err)
-	}
-	if !visible {
-		return domain.ErrNotFound
-	}
-	return nil
 }

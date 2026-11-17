@@ -195,6 +195,28 @@ func freshAttempt(x *iso, own *party) *party {
 	return own.with("attempt", attempt)
 }
 
+func freshSet(_ *iso, own *party) *party {
+	return own.with("question-set", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/question-sets", map[string]any{
+		"name": "Bộ dùng một lần", "questionIds": []any{own.id("question")},
+	})))
+}
+
+func shareBody(kind string) func(*iso, *party, string) any {
+	return func(*iso, *party, string) any {
+		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
+	}
+}
+
+func freshShare(x *iso, own *party) *party {
+	test := freshTest(x, own).id("test")
+	return own.with("share", own.shareWith(own.c, test, own.mateID))
+}
+
+func freshSharedWithMe(x *iso, own *party) *party {
+	test := id(own.mate.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề chia sẻ dùng một lần " + nonce(x.t)}))
+	return own.with("shared-with-me", own.shareWith(own.mate, test, own.userID))
+}
+
 func freshPublishedTest(_ *iso, own *party) *party {
 	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
 	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề đã phát hành dùng một lần"})
@@ -205,6 +227,19 @@ func freshPublishedTest(_ *iso, own *party) *party {
 	section := test["sections"].([]any)[0].(map[string]any)["id"].(string)
 	version := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests/"+id(test)+"/publish", nil))
 	return own.with("test", id(test)).with("section", section).with("test-version", version).with("question", question)
+}
+
+// freshDraftQuestion is a question of the caller's in the draft of a test of
+// theirs, both new, so an edit in the test's context (editTestQuestion) never
+// changes the world's question that later cases edit.
+func freshDraftQuestion(_ *iso, own *party) *party {
+	question := id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/questions", choiceInput(own)))
+	test := own.c.must(http.StatusCreated, http.MethodPost, "/teacher/tests", map[string]any{"title": "Đề sửa câu dùng một lần"})
+	own.c.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+id(test), map[string]any{
+		"expectedUpdatedAt": test["updatedAt"],
+		"sections":          []map[string]any{{"title": "Phần 1", "questionIds": []string{question}}},
+	})
+	return own.with("test", id(test)).with("question", question)
 }
 
 func freshGroupedTest(x *iso, own *party) *party {
@@ -238,6 +273,10 @@ const (
 	outsideEvent    = "an event naming a question outside the attempt's paper is kept without it; the cross-reference scan proves the id is not stored"
 	outsideAnswer   = "an answer to a question outside the attempt's paper is dropped; the cross-reference scan proves no row names it"
 	ownOnly         = "marks only the caller's own notifications; any other id is skipped"
+
+	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
+
+	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
 
 	reportedPerStudent = "answers 200 and reports each student it cannot reset as NOT_FOUND, another teacher's as a missing one's; the bulk reset flow test proves the rows stay untouched"
 	budgetSpent        = "the third call in a minute is refused 429 (two a minute per user), so the caller's own id cannot be tried here; the bulk reset flow test resets the caller's own students beside another teacher's in one batch"
@@ -346,6 +385,39 @@ func isolationCases() map[string]isoCase {
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},
+
+		"listQuestionSets":    {},
+		"createQuestionSet":   {body: fixed(map[string]any{"name": "Bộ mới", "questionIds": []any{""}})},
+		"getQuestionSet":      {},
+		"updateQuestionSet":   {body: fixed(map[string]any{"name": "Bộ đã đổi tên"})},
+		"deleteQuestionSet":   {fresh: freshSet},
+		"addQuestionSetItems": {body: fixed(map[string]any{"questionIds": []any{""}})},
+		"removeQuestionSetItems": {
+			fresh:  freshSet,
+			excuse: map[string]string{"body /questionIds/-": notInSet},
+			body:   fixed(map[string]any{"questionIds": []any{""}}),
+		},
+		"copyQuestionSet": {body: fixed(map[string]any{"questionIds": []any{""}})},
+
+		"searchTeacherDirectory": {query: map[string]string{"q": "lan"}},
+		"listShares": {each: []isoCase{
+			{query: map[string]string{"kind": "test"}},
+			{query: map[string]string{"kind": "question_set"}, as: map[string]string{"query resourceId": "question-set"}},
+		}},
+		"createShares": {each: []isoCase{
+			{body: shareBody("test"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}},
+			{body: shareBody("question_set"), excuse: map[string]string{"body /granteeIds/-": anyTeacher}, as: map[string]string{"body /resourceId": "question-set"}},
+		}},
+		"updateShare":        {body: fixed(map[string]any{"access": "edit"})},
+		"deleteShare":        {fresh: freshShare},
+		"listSharedWithMe":   {},
+		"removeSharedWithMe": {as: map[string]string{"path shareId": "shared-with-me"}, fresh: freshSharedWithMe},
+
+		"editTestQuestion": {fresh: freshDraftQuestion, body: func(_ *iso, own *party, slot string) any {
+			return withProseMedia(choiceInput(own), own, slot)
+		}},
+		"copyTest":             {},
+		"copyQuestionsForTest": {body: fixed(map[string]any{"questionIds": []any{""}})},
 
 		"createWordImport": {},
 		"listWordImports":  {},

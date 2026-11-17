@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"quizzivy/internal/modules/tests/domain"
@@ -30,8 +29,8 @@ func (s *Postgres) Duplicate(ctx context.Context, in domain.DuplicateInput) (dom
 
 	var copyID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO app.tests (title, description, created_by, owner_id)
-		 SELECT title, description, $2, owner_id FROM app.tests WHERE id = $1
+		`INSERT INTO app.tests (title, description, created_by, updated_by, owner_id)
+		 SELECT title, description, $2, $2, owner_id FROM app.tests WHERE id = $1
 		 RETURNING id::text`, in.ID, in.ActorID).Scan(&copyID); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: copy test row: %w", err)
 	}
@@ -44,7 +43,7 @@ func (s *Postgres) Duplicate(ctx context.Context, in domain.DuplicateInput) (dom
 		if err != nil {
 			return domain.Test{}, err
 		}
-		if err := s.copyDraftGraph(ctx, tx, copyID, owner, draft, in); err != nil {
+		if err := s.copyDraftGraph(ctx, tx, copyID, owner, draft, in, sameQuestion); err != nil {
 			return domain.Test{}, err
 		}
 	}
@@ -65,18 +64,24 @@ func (s *Postgres) Duplicate(ctx context.Context, in domain.DuplicateInput) (dom
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&created, domain.AccessOwner)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: commit duplicate: %w", err)
 	}
 	return created, nil
 }
 
+// sameQuestion is a duplicate's outline: the copy names the source's own
+// bank questions.
+func sameQuestion(id string) string { return id }
+
+// lockDuplicateSource locks the test a duplicate copies. Duplicating keeps
+// references to the source's bank questions, so it is the owner's (D4); a
+// reader through a grant makes a copy instead (T-R7.7).
 func lockDuplicateSource(ctx context.Context, tx pgx.Tx, id string, scope access.Scope) (string, error) {
-	var owner string
-	err := tx.QueryRow(ctx, `SELECT owner_id::text FROM app.tests WHERE id=$1 AND deleted_at IS NULL AND `+scopedTest+` FOR UPDATE`,
-		id, scope.All, opt.String(scope.UserID)).Scan(&owner)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", domain.ErrNotFound
+	reached, err := reachTest(ctx, tx, scope, id, domain.ActionOwn, testExclusive)
+	if err != nil {
+		return "", err
 	}
-	return owner, err
+	return reached.owner, nil
 }

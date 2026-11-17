@@ -98,7 +98,7 @@ func (m *mediaLibrary) SoftDelete(context.Context, mediadomain.DeleteInput) (med
 	return mediadomain.Retired{}, nil
 }
 
-func (m *mediaLibrary) ReferencesFor(context.Context, []string) (map[string][]mediadomain.TestRef, error) {
+func (m *mediaLibrary) VersionUses(context.Context, []string) (map[string]mediadomain.VersionUses, error) {
 	return nil, nil
 }
 
