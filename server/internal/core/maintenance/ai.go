@@ -36,7 +36,7 @@ type AIReport struct {
 
 type aiAction func(ctx context.Context, app *aiapp.Application, by domain.Author) (any, error)
 
-// RunAI runs act through the credits application over conn, as System with the operator named in the audit row. With apply false it runs inside a transaction that it rolls back and gives the application no way to tell anyone; with apply true it commits and tells, as the Admin operation would.
+// RunAI runs act through the credits application over conn, as System with the operator named in the audit row. With apply false it runs inside a transaction that it rolls back and gives the application no way to tell anyone; with apply true it commits and tells in the app, as the Admin operation would, but sends no email: quizzivy_maintenance holds no privilege on app.email_outbox, so a request decided here reaches its teacher in the bell only (T-R7.23 leaves this to the owner).
 func RunAI(ctx context.Context, conn db.Conn, name, operator string, apply bool, act aiAction) (AIReport, error) {
 	report := AIReport{Command: name, Operator: operator}
 	zone, err := config.AppLocation()
