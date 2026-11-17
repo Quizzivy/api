@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 	"quizzivy/internal/modules/ai/domain"
 	airepo "quizzivy/internal/modules/ai/repositories"
 	notificationsapp "quizzivy/internal/modules/notifications/application"
+	notificationsemail "quizzivy/internal/modules/notifications/application/email"
 	notificationsrepo "quizzivy/internal/modules/notifications/repositories"
 	"quizzivy/internal/platform/config"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/platform/email"
 )
 
 const (
@@ -36,7 +39,7 @@ type AIReport struct {
 
 type aiAction func(ctx context.Context, app *aiapp.Application, by domain.Author) (any, error)
 
-// RunAI runs act through the credits application over conn, as System with the operator named in the audit row. With apply false it runs inside a transaction that it rolls back and gives the application no way to tell anyone; with apply true it commits and tells in the app, as the Admin operation would, but sends no email: quizzivy_maintenance holds no privilege on app.email_outbox, so a request decided here reaches its teacher in the bell only (T-R7.23 leaves this to the owner).
+// RunAI runs act through the credits application over conn, as System with the operator named in the audit row. With apply false it runs inside a transaction that it rolls back and gives the application no way to tell anyone, so it writes no notice and queues no email. With apply true it commits and tells the teacher of a decided request as the Admin operation does (T-R7.23, the owner's decision of 2026-11-16): in the app, and by an email that Notify's email channel queues in app.email_outbox unless NOTIFY_EMAIL_EVENTS, read from the console's environment as Load reads the API's, turns it off; a value the API would refuse fails the command before it writes. Migration 00173 grants quizzivy_maintenance what that path runs and lets it queue nothing else. The console sends nothing itself: the API's and the worker's dispatchers send the row, and drop it if their own NOTIFY_EMAIL_EVENTS turns it off. The console cannot wake them, so the row waits for a dispatcher's next pass, which comes when that process queues an email of its own, a pending row falls due or it starts: within seconds on a busy outbox, later on a quiet one. As in the API, a notice or an email that fails is logged, here on the console's standard error, and never fails the decision, which is already committed.
 func RunAI(ctx context.Context, conn db.Conn, name, operator string, apply bool, act aiAction) (AIReport, error) {
 	report := AIReport{Command: name, Operator: operator}
 	zone, err := config.AppLocation()
@@ -45,8 +48,13 @@ func RunAI(ctx context.Context, conn db.Conn, name, operator string, apply bool,
 	}
 	by := domain.Author{Operator: operator}
 	if apply {
-		notifications := notificationsapp.New(notificationsrepo.NewPostgres(db.NewContext(conn)))
-		app := aiapp.New(airepo.NewPostgres(db.NewContext(conn)), aiapp.Options{Zone: zone, Notifier: notifications.Commands.Notify})
+		events, err := config.NotifyEmailEvents()
+		if err != nil {
+			return report, err
+		}
+		dbx := db.NewContext(conn)
+		notifications := notificationsapp.New(notificationsrepo.NewPostgres(dbx)).WithMail(consoleMail(dbx, events))
+		app := aiapp.New(airepo.NewPostgres(dbx), aiapp.Options{Zone: zone, Notifier: notifications.Commands.Notify, Logger: slog.Default()})
 		report.Result, err = act(ctx, app, by)
 		report.Applied = err == nil
 		return report, err
@@ -59,6 +67,11 @@ func RunAI(ctx context.Context, conn db.Conn, name, operator string, apply bool,
 	app := aiapp.New(airepo.NewPostgres(db.NewContext(tx)), aiapp.Options{Zone: zone})
 	report.Result, err = act(ctx, app, by)
 	return report, err
+}
+
+// consoleMail is Notify's email channel for the console, as wiring.NotificationMail is the API's, over an outbox with no sealer: the only email the console's notices call for, a credit decision, carries no secret, so it needs no SECRETS_KEY. events is NOTIFY_EMAIL_EVENTS, which turns the email off as it does on the API.
+func consoleMail(dbx db.Context, events []string) notificationsemail.Mailer {
+	return notificationsemail.Mailer{Outbox: notificationsrepo.NewMail(dbx, email.NewOutbox(nil)), Sends: config.Email{Events: events}.Sends}
 }
 
 type aiFlags struct {

@@ -214,8 +214,11 @@ read what the commands' predicates read, delete from `attempt_events`, `user_ide
 `refresh_tokens`, `notifications`, `ai_reservations` and the messaging tables (`messages`,
 `message_attachments`, `conversation_reads`, `conversations`, `messaging_ties`, granted with them and
 never their bodies, file names or storage keys), write `payload` on `attempt_answers`,
-the identity columns on `users` (only to anonymise them, below), and insert into `audit_log`. It cannot `UPDATE` or `DELETE` the
-audit log, cannot touch `ai_usage_ledger`, and owns nothing.
+the identity columns on `users` (only to anonymise them, below), and insert into `audit_log`. Since
+`00173` it also inserts into `email_outbox`, for the credit decision email of `ai-credits approve`
+and `decline` ("AI credits", below), and reads back only a row's id by its dedupe key. It cannot
+`UPDATE` or `DELETE` the audit log or the outbox, cannot touch `ai_usage_ledger` or
+`email_suppressions`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
 more adds the grant in its own migration.
 
@@ -238,7 +241,11 @@ undone for that account's sign-in. It cannot sign in as anyone and cannot read a
 leave the account anonymised (the reserved address, no password hash, no phone, photo or display
 name, and disabled), so the role can set neither an email nor a password hash nor enable an
 account again, alone or together; and it holds no `INSERT` on `user_identities` or
-`set_password_tokens`, so it cannot reopen an anonymised row either. The database refuses to
+`set_password_tokens`, so it cannot reopen an anonymised row either. A second trigger, on
+`app.email_outbox` (migration `00173`), refuses every row the role inserts that is not a credit
+decision email, without a sealed secret, to an account at that account's own address; what the
+email says is read again when it is sent, so the role cannot mail an address Quizzivy does not hold
+or say anything a real decision did not. The database refuses to
 anonymise only the last active Admin; skipping an owner of classes or content, or an account with
 an attempt in progress, is the sweep's and `anonymize-user`'s rule, which direct SQL with the
 credential does not follow. It also cannot change a `role_id`, update or delete the
@@ -1092,8 +1099,13 @@ maintenance ai-reservations-sweep
   without it. The audit row names who approved. The product bills nobody; the extra is paid for
   outside Quizzivy (DG-196).
 - **`approve`** raises the teacher's allowance for the request's month by the amount and
-  **`decline`** changes nothing but the status; both tell the teacher. An earlier month's request
-  can only be declined.
+  **`decline`** changes nothing but the status; both tell the teacher, in the app and by email, as
+  the Admin's buttons do (the owner's decision of 2026-11-16). The command only queues the email in
+  `email_outbox`; the API's or the worker's dispatcher sends it on its next pass, which on a quiet
+  outbox is when that process next queues an email of its own, a held row falls due, or it
+  restarts. The command honours `NOTIFY_EMAIL_EVENTS` from its own environment as the API does, so
+  run it with the API's value (unset sends the email); a value the API would refuse fails every
+  `-apply` before it writes. An earlier month's request can only be declined.
 - **`set-rules`** takes any of `-default-allowance` (rewrites this month's allowances that are not
   custom, never below what a teacher has used), `-warn-percent` (50 to 99) and `-on-limit`
   (`pause`, or `request` to let a teacher ask for more).

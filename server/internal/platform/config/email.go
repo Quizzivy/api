@@ -196,8 +196,15 @@ func loadEmailLimits(cfg *Config) error {
 	if e.SendRate < 1 || e.SendRate > maxEmailSendRate {
 		return fmt.Errorf("EMAIL_SEND_RATE must be between 1 and %d a second", maxEmailSendRate)
 	}
-	e.Events, err = notifyEmailEvents(os.Getenv("NOTIFY_EMAIL_EVENTS"))
+	e.Events, err = NotifyEmailEvents()
 	return err
+}
+
+// NotifyEmailEvents reads NOTIFY_EMAIL_EVENTS as Load does, for a process
+// that loads no Config: the maintenance console, whose decision emails are
+// turned off by the same setting as the API's.
+func NotifyEmailEvents() ([]string, error) {
+	return notifyEmailEvents(os.Getenv("NOTIFY_EMAIL_EVENTS"))
 }
 
 // notifyEmailEvents reads NOTIFY_EMAIL_EVENTS: a comma list of the names
