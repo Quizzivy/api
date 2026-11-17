@@ -15,7 +15,6 @@ const NOT_CODE = [
   'sonar-project.properties',
   '.github/pull_request_template.md',
   '.github/workflows/production-monitor.yml',
-  '.github/workflows/retention-sweep.yml',
 ];
 
 /**
