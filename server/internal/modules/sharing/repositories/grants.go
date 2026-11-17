@@ -15,7 +15,7 @@ import (
 )
 
 // Grant shares the live resource, under a share lock on its row so a delete
-// waits for it, with each recipient domain.Skip lets through, and audits each
+// waits for it, with each recipient domain.SkipReason lets through, and audits each
 // grant in the statement that inserts it. A recipient whose grant another
 // share inserted meanwhile is skipped as ALREADY_SHARED.
 func (p *Postgres) Grant(ctx context.Context, req domain.GrantRequest) (domain.Granted, error) {
@@ -32,7 +32,7 @@ func (p *Postgres) Grant(ctx context.Context, req domain.GrantRequest) (domain.G
 	out := domain.Granted{Grants: []domain.Grant{}, Skipped: []domain.Skipped{}}
 	var granting []string
 	for _, c := range candidates {
-		if code, skipped := domain.Skip(c, owner, req.ActorID); skipped {
+		if code, skipped := domain.SkipReason(c, owner, req.ActorID); skipped {
 			out.Skipped = append(out.Skipped, domain.Skipped{UserID: c.UserID, Code: code})
 			continue
 		}
