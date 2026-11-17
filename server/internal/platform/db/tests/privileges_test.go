@@ -25,6 +25,24 @@ func TestTheOrganizationSettingsRowCanBeChangedButNeitherAddedNorRemovedByTheApp
 	}
 }
 
+// TestAQuestionSetIsDeletedSoftlyByTheAppRole keeps T-R7.1's grants: a set is
+// soft-deleted, as the bank is, while its items and its grants are hard rows
+// the app removes.
+func TestAQuestionSetIsDeletedSoftlyByTheAppRole(t *testing.T) {
+	conn := migrated(t)
+	for table, want := range map[string]map[string]bool{
+		"app.question_sets":      {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": false},
+		"app.question_set_items": {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true},
+		"app.content_shares":     {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true},
+	} {
+		for priv, allowed := range want {
+			if got := hasTablePrivilege(t, conn, appRole, table, priv); got != allowed {
+				t.Errorf("%s %s on %s = %v, want %v", appRole, priv, table, got, allowed)
+			}
+		}
+	}
+}
+
 // TestAppRoleCanReadAndWriteEveryTable loops over information_schema rather than
 // naming tables, which is the same property ALTER DEFAULT PRIVILEGES was chosen
 // for: a table added later is covered without anyone extending this test.
@@ -80,7 +98,7 @@ func TestAppRoleCanReadAndWriteEveryTable(t *testing.T) {
 func TestTheAppendOnlyTablesAreAppendOnlyForTheAppRole(t *testing.T) {
 	conn := migrated(t)
 
-	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger"} {
+	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger", "app.messages"} {
 		t.Run(table, func(t *testing.T) {
 			for _, priv := range []string{"SELECT", "INSERT"} {
 				if !hasTablePrivilege(t, conn, appRole, table, priv) {
@@ -241,7 +259,7 @@ const maintenanceRole = "quizzivy_maintenance"
 
 var maintenanceGrants = map[string]map[string]string{
 	"ai_credit_periods":            {"SELECT": "*", "INSERT": "*", "UPDATE": "*"},
-	"ai_credit_requests":           {"SELECT": "*", "UPDATE": "*"},
+	"ai_credit_requests":           {"SELECT": "*", "UPDATE": "decided_at,decided_by,status"},
 	"ai_reservations":              {"SELECT": "*", "DELETE": "*"},
 	"ai_settings":                  {"SELECT": "*", "UPDATE": "*"},
 	"ai_teacher_credits":           {"SELECT": "*", "INSERT": "*", "UPDATE": "*"},
@@ -253,10 +271,19 @@ var maintenanceGrants = map[string]map[string]string{
 	"audit_log":                    {"INSERT": "*"},
 	"class_join_codes":             {"SELECT": "class_id,code_ciphertext,id,key_id,lookup_scheme,revoked_at", "UPDATE": "code_ciphertext,code_hash,key_id"},
 	"classes":                      {"SELECT": "teacher_id"},
-	"leads":                        {"SELECT": "created_at,id", "DELETE": "*"},
-	"maintenance_windows":          {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
-	"media_assets":                 {"SELECT": "owner_id"},
-	"notification_preferences":     {"SELECT": "event,in_app,user_id"},
+	"conversation_reads":           {"SELECT": "conversation_id,user_id", "DELETE": "*"},
+	"conversations":                {"SELECT": "id,kind,staff_id,student_id", "DELETE": "*"},
+	"email_outbox": {
+		"SELECT": "dedupe_key,id",
+		"INSERT": "dedupe_key,deliver_after,expires_at,id,locale,params,secret_ciphertext,template,to_address,to_user_id",
+	},
+	"leads":                    {"SELECT": "created_at,id", "DELETE": "*"},
+	"maintenance_windows":      {"SELECT": "*", "INSERT": "ends_at,starts_at", "UPDATE": "cancelled_at,ends_at"},
+	"media_assets":             {"SELECT": "owner_id"},
+	"message_attachments":      {"SELECT": "id,uploaded_by", "DELETE": "*"},
+	"messages":                 {"SELECT": "attachment_id,conversation_id,id", "DELETE": "*"},
+	"messaging_ties":           {"SELECT": "staff_id,student_id", "DELETE": "*"},
+	"notification_preferences": {"SELECT": "email,event,in_app,user_id"},
 	"notifications": {
 		"SELECT": "dedupe_key,id,kind,params,target,user_id",
 		"INSERT": "dedupe_key,kind,params,target,user_id",
@@ -265,6 +292,7 @@ var maintenanceGrants = map[string]map[string]string{
 	},
 	"organization_settings": {"SELECT": "anonymise_disabled_after_months,keep_answers_months,keep_focus_events_months"},
 	"question_groups":       {"SELECT": "owner_id"},
+	"question_sets":         {"SELECT": "owner_id"},
 	"questions":             {"SELECT": "owner_id"},
 	"refresh_tokens":        {"SELECT": "user_id", "DELETE": "*"},
 	"role_permissions":      {"SELECT": "*"},
@@ -274,7 +302,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"tests":                 {"SELECT": "owner_id"},
 	"user_identities":       {"SELECT": "user_id", "DELETE": "*"},
 	"users": {
-		"SELECT": "disabled_at,display_name,email,full_name,id,role_id",
+		"SELECT": "disabled_at,display_name,email,full_name,id,locale,role_id",
 		"UPDATE": "avatar_key,disabled_at,display_name,email,full_name,must_change_password,password_hash,phone",
 	},
 }
@@ -340,7 +368,7 @@ func TestTheMaintenanceRoleHoldsExactlyTheGrantsItsCommandsUse(t *testing.T) {
 func TestTheMaintenanceRoleCannotRewriteARecordOrCreateAnything(t *testing.T) {
 	conn := migrated(t)
 
-	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger"} {
+	for _, table := range []string{"app.audit_log", "app.attempt_events", "app.attempt_group_audio_receipts", "app.ai_usage_ledger", "app.messages"} {
 		for _, priv := range []string{"UPDATE", "TRUNCATE"} {
 			if hasTablePrivilege(t, conn, maintenanceRole, table, priv) {
 				t.Errorf("%s can %s %s; a record the application can rewrite is not evidence", maintenanceRole, priv, table)
@@ -414,6 +442,133 @@ func TestTheAppRoleCannotRewriteFrozenMediaReferences(t *testing.T) {
 	for _, priv := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
 		if !hasTablePrivilege(t, conn, appRole, "app.question_media_references", priv) {
 			t.Errorf("%s cannot %s the bank's media references", appRole, priv)
+		}
+	}
+}
+
+// TestTheMessagingTablesHoldWhatT_R7_9Grants pins the five messaging files
+// (00163 to 00167). For quizzivy_app a message is append-only and never
+// deleted, a thread changes only last_message_at and is never deleted, a file
+// is never rewritten and may go only while no message holds it (the RESTRICT
+// key's part), a read pointer moves and stays, and a tie is a fact. For
+// quizzivy_maintenance, D16's anonymisation (T-R7.12) deletes from all four
+// message tables and the ties and writes nothing there, and reads no body, file
+// name or storage key (D17).
+func TestTheMessagingTablesHoldWhatT_R7_9Grants(t *testing.T) {
+	conn := migrated(t)
+	for table, want := range map[string]map[string]bool{
+		"app.message_attachments": {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": true},
+		"app.conversations":       {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+		"app.messages":            {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+		"app.conversation_reads":  {"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": false},
+		"app.messaging_ties":      {"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": false},
+	} {
+		for priv, allowed := range want {
+			if got := hasTablePrivilege(t, conn, appRole, table, priv); got != allowed {
+				t.Errorf("%s %s on %s = %v, want %v", appRole, priv, table, got, allowed)
+			}
+		}
+	}
+	var updatable string
+	if err := conn.QueryRow(`SELECT string_agg(a.attname, ',' ORDER BY a.attname) FROM pg_attribute a
+		 WHERE a.attrelid = 'app.conversations'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+		   AND has_column_privilege($1, a.attrelid, a.attnum, 'UPDATE')`, appRole).Scan(&updatable); err != nil {
+		t.Fatal(err)
+	}
+	if updatable != "last_message_at" {
+		t.Errorf("%s may UPDATE app.conversations(%s), want last_message_at alone", appRole, updatable)
+	}
+
+	for _, table := range []string{"app.message_attachments", "app.conversations", "app.messages", "app.conversation_reads", "app.messaging_ties"} {
+		if !hasTablePrivilege(t, conn, maintenanceRole, table, "DELETE") {
+			t.Errorf("%s cannot DELETE %s; anonymisation removes an account's threads there", maintenanceRole, table)
+		}
+		var writes bool
+		if err := conn.QueryRow(`SELECT has_any_column_privilege($1, $2, 'INSERT, UPDATE, REFERENCES')
+			OR has_table_privilege($1, $2, 'TRUNCATE, TRIGGER')`, maintenanceRole, table).Scan(&writes); err != nil {
+			t.Fatal(err)
+		}
+		if writes {
+			t.Errorf("%s may write %s beyond DELETE", maintenanceRole, table)
+		}
+	}
+	for _, c := range [][2]string{{"app.messages", "body"}, {"app.message_attachments", "original_filename"}, {"app.message_attachments", "storage_key"}} {
+		var reads bool
+		if err := conn.QueryRow(`SELECT has_column_privilege($1, $2, $3, 'SELECT')`, maintenanceRole, c[0], c[1]).Scan(&reads); err != nil {
+			t.Fatal(err)
+		}
+		if reads {
+			t.Errorf("%s may read %s.%s; D17 keeps contents with their participants", maintenanceRole, c[0], c[1])
+		}
+	}
+}
+
+// TestTheSuppressionListHoldsWhatT_R7_15Grants pins 00172: quizzivy_app reads
+// the list (the dispatcher), adds to it (the webhook) and may remove from it,
+// but never rewrites a row, and quizzivy_maintenance holds nothing on it.
+func TestTheSuppressionListHoldsWhatT_R7_15Grants(t *testing.T) {
+	conn := migrated(t)
+	for priv, want := range map[string]bool{"SELECT": true, "INSERT": true, "UPDATE": false, "DELETE": true, "TRUNCATE": false} {
+		if got := hasTablePrivilege(t, conn, appRole, "app.email_suppressions", priv); got != want {
+			t.Errorf("%s %s on app.email_suppressions = %v, want %v", appRole, priv, got, want)
+		}
+	}
+	var any bool
+	if err := conn.QueryRow(`SELECT has_any_column_privilege($1, 'app.email_suppressions', 'SELECT, INSERT, UPDATE, REFERENCES')
+		OR has_table_privilege($1, 'app.email_suppressions', 'DELETE, TRUNCATE, TRIGGER')`, maintenanceRole).Scan(&any); err != nil {
+		t.Fatal(err)
+	}
+	if any {
+		t.Errorf("%s holds a privilege on app.email_suppressions; no maintenance command reads or writes it", maintenanceRole)
+	}
+}
+
+// TestTheMaintenanceRoleMayOnlyQueueTheDecisionEmail pins 00173, the owner's
+// decision of 2026-11-16 that the console emails a credit decision: the role
+// inserts into the outbox and reads back a row's id by its dedupe key, and
+// nothing more of it, so it can neither read what a queued email says nor
+// change, hold back or delete one; and the guard that keeps its inserts to a
+// decision email at an account's own address fires for the role alone, as
+// 00139's users guard does.
+func TestTheMaintenanceRoleMayOnlyQueueTheDecisionEmail(t *testing.T) {
+	conn := migrated(t)
+	for _, column := range []string{"to_address", "to_user_id", "template", "params", "secret_ciphertext", "locale", "sent_at", "failed_at", "last_error_code"} {
+		var reads bool
+		if err := conn.QueryRow(`SELECT has_column_privilege($1, 'app.email_outbox', $2, 'SELECT')`, maintenanceRole, column).Scan(&reads); err != nil {
+			t.Fatal(err)
+		}
+		if reads {
+			t.Errorf("%s may read app.email_outbox.%s; it queues an email and reads back nothing it says", maintenanceRole, column)
+		}
+	}
+	var writes bool
+	if err := conn.QueryRow(`SELECT has_any_column_privilege($1, 'app.email_outbox', 'UPDATE, REFERENCES')
+		OR has_table_privilege($1, 'app.email_outbox', 'DELETE, TRUNCATE, TRIGGER')`, maintenanceRole).Scan(&writes); err != nil {
+		t.Fatal(err)
+	}
+	if writes {
+		t.Errorf("%s may change or delete a queued email; only the dispatchers do", maintenanceRole)
+	}
+	for _, c := range []struct {
+		query string
+		what  string
+	}{
+		{`SELECT EXISTS (SELECT 1 FROM pg_trigger t
+		     WHERE t.tgrelid = 'app.email_outbox'::regclass AND t.tgname = 'email_outbox_maintenance_guard' AND t.tgenabled = 'O'
+		       AND pg_get_triggerdef(t.oid) LIKE 'CREATE TRIGGER email_outbox_maintenance_guard BEFORE INSERT ON app.email_outbox FOR EACH ROW WHEN%'
+		       AND pg_get_triggerdef(t.oid) LIKE '%' || $1 || '%')`, "a BEFORE INSERT guard on app.email_outbox that fires for the role alone"},
+		{`SELECT NOT has_function_privilege('public', 'app.email_outbox_maintenance_guard()', 'EXECUTE')
+		     AND NOT has_function_privilege($1, 'app.email_outbox_maintenance_guard()', 'EXECUTE')`, "no EXECUTE on the outbox guard, which fires without it"},
+		{`SELECT coalesce(NOT p.prosecdef AND p.proconfig = ARRAY['search_path=pg_catalog, pg_temp']
+		       AND p.proowner <> (SELECT oid FROM pg_roles WHERE rolname = $1), false)
+		    FROM pg_proc p WHERE p.oid = 'app.email_outbox_maintenance_guard()'::regprocedure`, "a SECURITY INVOKER outbox guard, not owned by the role, with search_path pinned to pg_catalog, pg_temp"},
+	} {
+		var got bool
+		if err := conn.QueryRow(c.query, maintenanceRole).Scan(&got); err != nil {
+			t.Fatalf("%s: %v", c.what, err)
+		}
+		if !got {
+			t.Errorf("%s: want %s", maintenanceRole, c.what)
 		}
 	}
 }

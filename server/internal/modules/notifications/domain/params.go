@@ -10,6 +10,8 @@ const (
 	maxTitle      = 300
 	maxName       = 200
 	maxClassNames = 5
+	maxMessage    = 500
+	maxExcerpt    = 80
 )
 
 // Params is what one kind's sentence is built from: plain values under the
@@ -36,6 +38,19 @@ type fields struct {
 	Credits      *int       `json:"credits,omitempty"`
 	TeacherName  *string    `json:"teacherName,omitempty"`
 	Decision     *string    `json:"decision,omitempty"`
+	SharerName   *string    `json:"sharerName,omitempty"`
+	ContentKind  *string    `json:"contentKind,omitempty"`
+	Name         *string    `json:"name,omitempty"`
+	Access       *string    `json:"access,omitempty"`
+	Message      *string    `json:"message,omitempty"`
+	EditorName   *string    `json:"editorName,omitempty"`
+	Version      *int       `json:"version,omitempty"`
+	SenderName   *string    `json:"senderName,omitempty"`
+	Excerpt      *string    `json:"excerpt,omitempty"`
+	Flagged      *int       `json:"flagged,omitempty"`
+	// uncounted says that ClassNames are not Count's classes, as for the
+	// weekly summary, whose Count is papers.
+	uncounted bool
 }
 
 // Encode returns p as the object the store keeps and the reader is sent. It
@@ -55,8 +70,34 @@ func (f fields) valid() bool {
 	return within(f.Title, maxTitle) && within(f.StudentName, maxName) && within(f.ClassName, maxName) &&
 		within(f.TeacherName, maxName) && decided(f.Decision) &&
 		counted(f.Count) && counted(f.ToGrade) && counted(f.FocusLost) && counted(f.NotSubmitted) &&
-		counted(f.Used) && counted(f.Allowance) && counted(f.Credits) &&
-		named(f.ClassNames, f.Count) && (f.ClosesAt == nil || !f.ClosesAt.IsZero())
+		counted(f.Used) && counted(f.Allowance) && counted(f.Credits) && counted(f.Flagged) &&
+		named(f.ClassNames, f.classes()) && (f.ClosesAt == nil || !f.ClosesAt.IsZero()) && f.sharing()
+}
+
+func (f fields) classes() *int {
+	if f.uncounted {
+		return nil
+	}
+	return f.Count
+}
+
+func (f fields) sharing() bool {
+	return within(f.SharerName, maxName) && within(f.Name, maxTitle) && within(f.Message, maxMessage) &&
+		within(f.EditorName, maxName) && oneOf(f.ContentKind, ShareTest, ShareQuestionSet) &&
+		oneOf(f.Access, ShareUse, ShareEdit) && (f.Version == nil || *f.Version >= 1) &&
+		within(f.SenderName, maxName) && within(f.Excerpt, maxExcerpt)
+}
+
+func oneOf(value *string, allowed ...string) bool {
+	if value == nil {
+		return true
+	}
+	for _, a := range allowed {
+		if *value == a {
+			return true
+		}
+	}
+	return false
 }
 
 func named(names *[]string, count *int) bool {
@@ -279,4 +320,92 @@ func (TeacherChanged) Kind() Kind { return ClassTeacherChanged }
 
 func (p TeacherChanged) fields() fields {
 	return fields{ClassName: &p.ClassName, TeacherName: p.TeacherName}
+}
+
+// The values ContentShared's ContentKind and Access take, as the contract's
+// ShareKind and ShareAccess.
+const (
+	ShareTest        = "test"
+	ShareQuestionSet = "question_set"
+	ShareUse         = "use"
+	ShareEdit        = "edit"
+)
+
+// Shared is ContentShared's params: who shared, what kind of content and its
+// name, the access given and, when the sharer wrote one, their message.
+type Shared struct {
+	SharerName  string
+	ContentKind string
+	Name        string
+	Access      string
+	Message     *string
+}
+
+func (Shared) Kind() Kind { return ContentShared }
+
+func (p Shared) fields() fields {
+	return fields{SharerName: &p.SharerName, ContentKind: &p.ContentKind, Name: &p.Name, Access: &p.Access, Message: p.Message}
+}
+
+// PublishedByCollaborator is TestPublishedByCollaborator's params: the
+// co-editor who published, the test's title and the version they published.
+type PublishedByCollaborator struct {
+	EditorName string
+	Title      string
+	Version    int
+}
+
+func (PublishedByCollaborator) Kind() Kind { return TestPublishedByCollaborator }
+
+func (p PublishedByCollaborator) fields() fields {
+	return fields{EditorName: &p.EditorName, Title: &p.Title, Version: &p.Version}
+}
+
+// MessageNotice is MessageReceived's params: who wrote the newest message of
+// a thread the teacher has not read, how many are unread, and the newest one's
+// first 80 characters or its file's name. The messaging module writes it
+// under MessageKey.
+type MessageNotice struct {
+	SenderName string
+	Count      int
+	Excerpt    string
+}
+
+func (MessageNotice) Kind() Kind { return MessageReceived }
+
+func (p MessageNotice) fields() fields {
+	return fields{SenderName: &p.SenderName, Count: &p.Count, Excerpt: &p.Excerpt}
+}
+
+// TeacherMessageNotice is MessageFromTeacher's params: MessageNotice's, and
+// for a class announcement the class's name. The messaging module writes it
+// under MessageKey.
+type TeacherMessageNotice struct {
+	SenderName string
+	Count      int
+	Excerpt    string
+	ClassName  *string
+}
+
+func (TeacherMessageNotice) Kind() Kind { return MessageFromTeacher }
+
+func (p TeacherMessageNotice) fields() fields {
+	return fields{SenderName: &p.SenderName, Count: &p.Count, Excerpt: &p.Excerpt, ClassName: p.ClassName}
+}
+
+// Weekly is SummaryWeekly's params: last week's papers handed in on the
+// teacher's classes, how many answers wait for a mark, how many attempts were
+// flagged, and the names of at least one and at most five of the classes.
+// T-R7.14's scheduler writes it.
+type Weekly struct {
+	Count      int
+	ToGrade    int
+	Flagged    int
+	ClassNames []string
+}
+
+func (Weekly) Kind() Kind { return SummaryWeekly }
+
+func (p Weekly) fields() fields {
+	return fields{Count: &p.Count, ToGrade: &p.ToGrade, Flagged: &p.Flagged, ClassNames: &p.ClassNames, uncounted: true}
 }

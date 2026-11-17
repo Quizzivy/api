@@ -26,6 +26,7 @@ func (s ExtendHandler) Handle(ctx context.Context, cmd Extend) (domain.Assignmen
 	if err != nil {
 		return extended, err
 	}
+	s.Nudge()
 	if cmd.Notify {
 		s.TellMoved(ctx, extended.ID)
 	}

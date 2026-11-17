@@ -10,6 +10,6 @@ import (
 	"quizzivy/internal/platform/db"
 )
 
-func assignments(dbx db.Context, notifier assignmentsports.Notifier, logger *slog.Logger) assignmentshttp.Assignments {
-	return assignmentshttp.NewAssignments(assignmentsapp.New(assignmentsrepo.NewPostgres(dbx)).WithNotifier(notifier, logger))
+func assignments(dbx db.Context, notifier assignmentsports.Notifier, nudge assignmentsports.ScheduleNudge, logger *slog.Logger) assignmentshttp.Assignments {
+	return assignmentshttp.NewAssignments(assignmentsapp.New(assignmentsrepo.NewPostgres(dbx)).WithNotifier(notifier, logger).WithScheduleNudge(nudge))
 }

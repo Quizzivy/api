@@ -203,6 +203,7 @@ JWT_SIGNING_KEY        openssl rand -base64 48
 JOIN_CODE_KEY          openssl rand -base64 32, with an offline copy in the owner's password manager
 SECRETS_KEY            openssl rand -base64 32, with an offline copy (docs/setup/operations.md, "Secrets key")
 RESEND_API_KEY         from the Resend dashboard, a sending-only key for quizzivy.com
+RESEND_WEBHOOK_SECRET  the Signing secret of the Resend webhook (whsec_...), "Email (Resend)" below; optional, but without it bounces and complaints are not received
 GOOGLE_CLIENT_SECRET   from the OAuth client
 S3_ENDPOINT            https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
 S3_BUCKET              quizzivy-media
@@ -262,6 +263,22 @@ Verify after setting the records: the domain shows "Verified" in Resend, then
 send one real message to a mailbox you control and read its headers: SPF,
 DKIM and DMARC must all say `pass`. That check is part of R5's exit criteria
 (`docs/plan/75-r5.md`).
+
+**Bounces and complaints.** In Resend's dashboard, Webhooks → Add endpoint:
+URL `https://api.quizzivy.com/public/email-events`, events `email.bounced` and
+`email.complained` (other events are accepted and ignored). The endpoint's
+page shows its Signing secret, `whsec_` followed by base64; set it as
+`RESEND_WEBHOOK_SECRET` in `app.secrets.env` and restart the API. The API
+verifies every delivery's Svix signature. A hard bounce (an `email.bounced`
+whose `bounce.type` is `Permanent`, or names no type) or a complaint lists the
+recipient in `app.email_suppressions`, but only an address Quizzivy already
+holds, one in the email outbox or on an account; a soft bounce (`Transient`,
+`Undetermined`) and an address Quizzivy never mailed list nothing. A listed
+address gets no more mail: each message to it is closed with
+`last_error_code = 'SUPPRESSED'`. Without the secret the endpoint answers 501
+and nothing is listed. Resend's "Send test event" checks the setup: a 401 in
+its delivery log is a wrong secret, a 501 a missing one. `NOTIFY_EMAIL_EVENTS`
+(T-R7.13) turns notification emails off by name; it does not affect this list.
 
 ## Deployment shape
 

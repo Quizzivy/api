@@ -39,6 +39,7 @@ const (
 	AssignmentsFile    = "assignments.csv"
 	AttemptsFile       = "attempts.csv"
 	LeadsFile          = "leads.csv"
+	MessagesFile       = "messages_summary.csv"
 	AnswersFile        = "answers.csv"
 	ReadmeFile         = "README.txt"
 	ArchiveContentType = "application/zip"
@@ -184,6 +185,17 @@ var catalogue = []File{
 			col("handled_at", "Lần đổi trạng thái gần nhất", "Latest change of status"),
 			col("created_at", "Lúc gửi yêu cầu", "When the request was sent"),
 			col("updated_at", "Lần sửa gần nhất", "Latest change"),
+		}},
+	{MessagesFile, "Mỗi cuộc trò chuyện một dòng: kênh thông báo của một lớp, hoặc tin nhắn riêng giữa một nhân viên và một học viên. Chỉ có số tin nhắn và thời điểm, không có nội dung tin nhắn, tên tệp hay tệp đính kèm nào.",
+		"One row per conversation: a class's announcement channel, or the direct messages between one staff member and one student. It holds only counts and times: no message's text, no file's name and no attachment.", []Column{
+			col("id", "Mã cuộc trò chuyện", "Conversation ID"),
+			col("kind", "Loại (class là kênh thông báo của lớp, direct là tin nhắn riêng)", "Kind (class for a class's announcement channel, direct for direct messages)"),
+			col("class_id", "Mã lớp của kênh thông báo, trống với tin nhắn riêng (classes.csv)", "Class ID of an announcement channel, empty for direct messages (classes.csv)"),
+			col("staff_id", "Mã tài khoản của nhân viên trong tin nhắn riêng, trống với kênh của lớp (users.csv)", "Account ID of the staff member in direct messages, empty for a class's channel (users.csv)"),
+			col("student_id", "Mã tài khoản của học viên trong tin nhắn riêng, trống với kênh của lớp (users.csv)", "Account ID of the student in direct messages, empty for a class's channel (users.csv)"),
+			col("message_count", "Số tin nhắn", "Number of messages"),
+			col("first_message_at", "Lúc gửi tin nhắn đầu tiên", "When the first message was sent"),
+			col("last_message_at", "Lúc gửi tin nhắn gần nhất", "When the latest message was sent"),
 		}},
 }
 

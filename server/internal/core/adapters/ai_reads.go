@@ -38,7 +38,7 @@ type AITests struct {
 
 // Passage reads the shared material named stimulusID from a group of the draft of testID. It answers aidomain.ErrNotFound for a test the scope does not reach and for a passage the test does not hold.
 func (r AITests) Passage(ctx context.Context, scope access.Scope, testID, stimulusID string) (aidomain.Passage, error) {
-	test, err := r.Test.Handle(ctx, testsquery.Get{ID: testID, Scope: scope})
+	test, err := r.owned(ctx, scope, testID)
 	if errors.Is(err, testsdomain.ErrNotFound) {
 		return aidomain.Passage{}, aidomain.ErrNotFound
 	}
@@ -64,7 +64,7 @@ func (r AITests) Passage(ctx context.Context, scope access.Scope, testID, stimul
 
 // Draft reads the questions of the draft of testID in the order the builder shows them: each section's units in turn, a standalone question as one number and a group as one number per member, in the group's order. A question the scope cannot read is left out but keeps its number, so a number is the question's place in the builder; a group the scope cannot read is left out whole, because its members cannot be counted. It answers aidomain.ErrNotFound for a test the scope does not reach.
 func (r AITests) Draft(ctx context.Context, scope access.Scope, testID string) (aidomain.Paper, error) {
-	test, err := r.Test.Handle(ctx, testsquery.Get{ID: testID, Scope: scope})
+	test, err := r.owned(ctx, scope, testID)
 	if errors.Is(err, testsdomain.ErrNotFound) {
 		return aidomain.Paper{}, aidomain.ErrNotFound
 	}
@@ -88,7 +88,7 @@ func (r AITests) Draft(ctx context.Context, scope access.Scope, testID string) (
 
 // Section reads the section named sectionID of the draft of testID: its title, its instructions, and the type and prompt of each of its standalone questions and of each member of its groups, in the order the builder shows them. A question or group the scope cannot read is left out. It answers aidomain.ErrNotFound for a test the scope does not reach and for a section the test does not hold.
 func (r AITests) Section(ctx context.Context, scope access.Scope, testID, sectionID string) (aidomain.Section, error) {
-	test, err := r.Test.Handle(ctx, testsquery.Get{ID: testID, Scope: scope})
+	test, err := r.owned(ctx, scope, testID)
 	if errors.Is(err, testsdomain.ErrNotFound) {
 		return aidomain.Section{}, aidomain.ErrNotFound
 	}
@@ -114,6 +114,18 @@ func (r AITests) Section(ctx context.Context, scope access.Scope, testID, sectio
 	return aidomain.Section{}, aidomain.ErrNotFound
 }
 
+// owned reads the draft of testID for the assistant, which works for the
+// test's owner and scope.all only: a recipient of a share reads the test in the
+// builder but asks no AI operation of it (web#79), so the test answers as
+// missing.
+func (r AITests) owned(ctx context.Context, scope access.Scope, testID string) (testsdomain.Test, error) {
+	test, err := r.Test.Handle(ctx, testsquery.Get{ID: testID, Scope: scope})
+	if err == nil && !test.Access.Owner() {
+		return testsdomain.Test{}, testsdomain.ErrNotFound
+	}
+	return test, err
+}
+
 func outlineUnits(section testsdomain.Section) []testsdomain.SectionUnit {
 	if len(section.Units) > 0 {
 		return section.Units
@@ -130,7 +142,7 @@ func (r AITests) readUnit(ctx context.Context, scope access.Scope, unit testsdom
 		return r.readGroup(ctx, scope, unit.ID, first)
 	}
 	question, err := r.Question.Handle(ctx, questionsquery.Get{ID: unit.ID, Scope: scope})
-	if errors.Is(err, questionsdomain.ErrNotFound) {
+	if errors.Is(err, questionsdomain.ErrNotFound) || err == nil && !question.Access.Owner() {
 		return nil, 1, nil
 	}
 	if err != nil {
@@ -338,10 +350,10 @@ type AIQuestions struct {
 	List     cqrs.QueryHandler[questionsquery.List, questionsquery.ListResult]
 }
 
-// Get reads one stored question the scope reaches, and answers aidomain.ErrNotFound for any other.
+// Get reads one stored question the scope owns, or any under scope.all, and answers aidomain.ErrNotFound for any other: a question read through a share is not the assistant's (web#79).
 func (r AIQuestions) Get(ctx context.Context, scope access.Scope, id string) (aidomain.Question, error) {
 	q, err := r.Question.Handle(ctx, questionsquery.Get{ID: id, Scope: scope})
-	if errors.Is(err, questionsdomain.ErrNotFound) {
+	if errors.Is(err, questionsdomain.ErrNotFound) || err == nil && !q.Access.Owner() {
 		return aidomain.Question{}, aidomain.ErrNotFound
 	}
 	if err != nil {

@@ -20,6 +20,7 @@ func TestARefusedClassDeletionNamesWhatHoldsIt(t *testing.T) {
 	for want, refusal := range map[openapi.ReferencedBy]error{
 		"assignments": &domain.ReferencedError{By: domain.ReferencedByAssignments},
 		"members":     &domain.ReferencedError{By: domain.ReferencedByMembers},
+		"messages":    &domain.ReferencedError{By: domain.ReferencedByMessages},
 		"other":       domain.ErrReferenced,
 	} {
 		app := &application.Application{Commands: application.Commands{

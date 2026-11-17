@@ -44,7 +44,7 @@ func TestNothingIsReadOrMarkedWithoutACaller(t *testing.T) {
 	_, preferences := app.Queries.Preferences.Handle(ctx, query.Preferences{})
 	_, mark := app.Commands.MarkRead.Handle(ctx, command.MarkRead{IDs: ids(1)})
 	_, all := app.Commands.MarkAllRead.Handle(ctx, command.MarkAllRead{})
-	_, update := app.Commands.UpdatePreferences.Handle(ctx, command.UpdatePreferences{Preferences: domain.WithDefaults(nil)})
+	_, update := app.Commands.UpdatePreferences.Handle(ctx, command.UpdatePreferences{Preferences: domain.WithDefaults(nil, domain.Staff)})
 	for label, err := range map[string]error{
 		"List": list, "Summary": summary, "Preferences": preferences, "MarkRead": mark, "MarkAllRead": all, "UpdatePreferences": update,
 	} {
@@ -84,40 +84,72 @@ func TestMarkAllReadMarksOnlyThroughTheCallersOwnStatement(t *testing.T) {
 	}
 }
 
-func TestPreferencesFillTheFiveDefaults(t *testing.T) {
+func TestPreferencesFillTheSevenDefaults(t *testing.T) {
 	store := only(t, "Preferences")
-	got, err := over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader})
+	got, err := over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader, Recipient: domain.Staff})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 || store.userID != reader {
-		t.Fatalf("%d preferences for %q, want the five switches for the caller", len(got), store.userID)
+	if len(got) != 7 || store.userID != reader {
+		t.Fatalf("%d preferences for %q, want the seven switches for the caller", len(got), store.userID)
 	}
 	for i, event := range domain.Events() {
-		if got[i] != (domain.Preference{Event: event, InApp: true, Email: false}) {
-			t.Errorf("%s defaults to %+v, want in the app and not by email", event, got[i])
+		if got[i] != domain.DefaultPreference(event, domain.Staff) {
+			t.Errorf("%s defaults to %+v, want %+v", event, got[i], domain.DefaultPreference(event, domain.Staff))
 		}
 	}
 
 	store = only(t, "Preferences")
 	store.stored = []domain.Preference{{Event: domain.EventAssignmentClosing, InApp: false, Email: true}}
-	got, err = over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader})
+	got, err = over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader, Recipient: domain.Staff})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got[2] != store.stored[0] || !got[0].InApp || got[0].Email {
 		t.Errorf("a stored switch did not win, or a default moved: %+v", got)
 	}
+
+	store = only(t, "Preferences")
+	store.stored = []domain.Preference{{Event: domain.EventResultReady, InApp: true, Email: false}}
+	got, err = over(store).Queries.Preferences.Handle(context.Background(), query.Preferences{UserID: reader, Recipient: domain.Student})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[4] != (domain.Preference{Event: domain.EventResultReady, InApp: true, Email: true}) {
+		t.Errorf("a student's switch saved before R7 reads %+v, want its email to follow the app (DG-82)", got[4])
+	}
+}
+
+// TestAStudentsWriteStoresEmailEqualToTheAppSwitch fails when a student's
+// PUT can store an email column that differs from the same switch in the
+// app, as the contract's NotificationPreference.email forbids (DG-82).
+func TestAStudentsWriteStoresEmailEqualToTheAppSwitch(t *testing.T) {
+	given := domain.WithDefaults(nil, domain.Staff)
+	given[3] = domain.Preference{Event: domain.EventAssignmentDueSoon, InApp: false, Email: true}
+	given[4] = domain.Preference{Event: domain.EventResultReady, InApp: true, Email: false}
+	store := only(t, "SavePreferences")
+	got, err := over(store).Commands.UpdatePreferences.Handle(context.Background(), command.UpdatePreferences{UserID: reader, Recipient: domain.Student, Preferences: given})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range store.saved {
+		if p.Email != p.InApp || p.InApp != given[i].InApp {
+			t.Errorf("a student's %s was stored as %+v from %+v", p.Event, p, given[i])
+		}
+	}
+	if !slices.Equal(got, store.saved) {
+		t.Errorf("the answer %+v is not what was stored %+v", got, store.saved)
+	}
 }
 
 func TestUpdatePreferencesStoresTheWholeSetInTheSwitchesOrder(t *testing.T) {
-	given := domain.WithDefaults(nil)
+	given := domain.WithDefaults(nil, domain.Staff)
 	given[1].InApp, given[4].Email = false, true
 	want := slices.Clone(given)
 	slices.Reverse(given)
 
 	store := only(t, "SavePreferences")
-	got, err := over(store).Commands.UpdatePreferences.Handle(context.Background(), command.UpdatePreferences{UserID: reader, Preferences: given})
+	got, err := over(store).Commands.UpdatePreferences.Handle(context.Background(), command.UpdatePreferences{UserID: reader, Recipient: domain.Staff, Preferences: given})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,17 +162,17 @@ func TestUpdatePreferencesStoresTheWholeSetInTheSwitchesOrder(t *testing.T) {
 }
 
 func TestUpdatePreferencesRefusesARepeatedAnUnknownAndAMissingEvent(t *testing.T) {
-	repeated := domain.WithDefaults(nil)
+	repeated := domain.WithDefaults(nil, domain.Staff)
 	repeated[3].Event = domain.EventAttemptSubmitted
-	unknown := domain.WithDefaults(nil)
-	unknown[0].Event = "summary.weekly"
+	unknown := domain.WithDefaults(nil, domain.Staff)
+	unknown[0].Event = "class.joined"
 	for label, c := range map[string]struct {
 		given []domain.Preference
 		want  error
 	}{
 		"a repeated event": {repeated, domain.ErrEventsNotOnceEach},
 		"an unknown event": {unknown, domain.ErrUnknownEvent},
-		"a missing event":  {domain.WithDefaults(nil)[:4], domain.ErrEventsNotOnceEach},
+		"a missing event":  {domain.WithDefaults(nil, domain.Staff)[:4], domain.ErrEventsNotOnceEach},
 	} {
 		store := only(t, "")
 		_, err := over(store).Commands.UpdatePreferences.Handle(context.Background(), command.UpdatePreferences{UserID: reader, Preferences: c.given})

@@ -186,6 +186,58 @@ func TestTheDailyHousekeepingClearsWhatOutlivedItsKeepingAndNothingElse(t *testi
 	freshLogo := "branding/" + hex.EncodeToString(sum[:]) + ".png"
 	put(media, freshLogo)
 
+	// Message attachments: a file left unsent for 25 hours goes, row and
+	// object; a file sent as long ago and one uploaded now stay, and an
+	// object no row names is kept inside its 24 hours.
+	attachment := func(sentTo string, ago time.Duration) (id, key string) {
+		t.Helper()
+		id = uuid.NewString()
+		key = "messages/" + id + ".pdf"
+		put(media, key)
+		exec(`INSERT INTO app.message_attachments (id, uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256, created_at)
+			VALUES ($1::uuid, $2::uuid, $3, 'application/pdf', 10, 'bai-tap.pdf', sha256('x'::bytea), now() - make_interval(hours => $4))`, id, owner, key, int(ago.Hours()))
+		if sentTo != "" {
+			exec(`INSERT INTO app.messages (conversation_id, sender_id, client_id, attachment_id, created_at) VALUES ($1::uuid, $2::uuid, gen_random_uuid(), $3::uuid, now() - make_interval(hours => $4))`,
+				sentTo, owner, id, int(ago.Hours()))
+		}
+		return id, key
+	}
+	var learner, thread string
+	if err := pool.QueryRow(ctx, `INSERT INTO app.users (email, full_name, role_id) VALUES ($1, 'Học viên nhận tệp', (SELECT id FROM app.roles WHERE builtin_key = 'student')) RETURNING id::text`,
+		address("learner")).Scan(&learner); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at) VALUES ('direct', $1::uuid, $2::uuid, now()) RETURNING id::text`,
+		owner, learner).Scan(&thread); err != nil {
+		t.Fatal(err)
+	}
+	unsentID, unsentKey := attachment("", 25*time.Hour)
+	sentID, sentKey := attachment(thread, 25*time.Hour)
+	freshID, freshKey := attachment("", 0)
+	youngOrphan := "messages/" + uuid.NewString() + ".pdf"
+	put(media, youngOrphan)
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			`DELETE FROM app.messages WHERE conversation_id = $1::uuid`,
+			`DELETE FROM app.conversations WHERE id = $1::uuid`,
+		} {
+			if _, err := pool.Exec(ctx, sql, thread); err != nil {
+				t.Errorf("cleanup: %v", err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM app.message_attachments WHERE uploaded_by = $1::uuid`, owner); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM app.users WHERE id = $1::uuid`, learner); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+		for _, key := range []string{sentKey, freshKey, youngOrphan} {
+			if err := media.Delete(ctx, key); err != nil {
+				t.Errorf("cleanup %s: %v", key, err)
+			}
+		}
+	})
+
 	exec(`INSERT INTO app.user_activity_days (user_id, day) VALUES ($1::uuid, current_date - 450), ($1::uuid, current_date - 350), ($1::uuid, current_date)`, owner)
 	sentOld, failedOld := outbox("sent-old", "sent", 40*24*time.Hour), outbox("failed-old", "failed", 40*24*time.Hour)
 	sentRecent, failedRecent, pending := outbox("sent-recent", "sent", 5*24*time.Hour), outbox("failed-recent", "failed", 24*time.Hour), outbox("pending", "", 90*24*time.Hour)
@@ -257,7 +309,8 @@ func TestTheDailyHousekeepingClearsWhatOutlivedItsKeepingAndNothingElse(t *testi
 		<-stopped
 	})
 
-	steps := []string{"activity_days", "email_outbox", "set_password_links", "import_sheets", "import_jobs", "data_exports", "avatar_objects", "branding_objects"}
+	steps := []string{"activity_days", "email_outbox", "set_password_links", "import_sheets", "import_jobs", "data_exports", "avatar_objects", "branding_objects",
+		"unsent_message_attachments", "message_attachment_objects"}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		seen := true
@@ -365,8 +418,23 @@ func TestTheDailyHousekeepingClearsWhatOutlivedItsKeepingAndNothingElse(t *testi
 		t.Errorf("the photo of an account in use was touched: kept %v, marked %v", present(media, livePhoto), avatarSwept(t, pool, owner))
 	}
 
+	attachmentRows := func(id string) int {
+		return count(`SELECT count(*) FROM app.message_attachments WHERE id = $1::uuid`, id)
+	}
+	if attachmentRows(unsentID) != 0 || present(media, unsentKey) {
+		t.Errorf("a file unsent for 25 hours: row kept %v, object kept %v, want both gone", attachmentRows(unsentID) == 1, present(media, unsentKey))
+	}
+	for name, c := range map[string]struct{ id, key string }{"sent 25 hours ago": {sentID, sentKey}, "uploaded now": {freshID, freshKey}} {
+		if attachmentRows(c.id) != 1 || !present(media, c.key) {
+			t.Errorf("a file %s: row kept %v, object kept %v, want both kept", name, attachmentRows(c.id) == 1, present(media, c.key))
+		}
+	}
+	if !present(media, youngOrphan) {
+		t.Error("an object under messages/ that no row names was removed inside its 24 hour grace")
+	}
+
 	leaked := logs.String()
-	for _, secret := range []string{lapsedID, liveID, lapsedKey, freshLogo, tag, owner, oldDone, oldFailed, anonymised, "avatars/"} {
+	for _, secret := range []string{lapsedID, liveID, lapsedKey, freshLogo, tag, owner, oldDone, oldFailed, anonymised, "avatars/", unsentID, sentID, "messages/"} {
 		if strings.Contains(leaked, secret) {
 			t.Errorf("the housekeeping logs carry %q", secret)
 		}
@@ -414,9 +482,10 @@ func TestAStepThatCannotReachStorageLogsItsClassAndNoKeyEndpointOrBucket(t *test
 	})
 
 	deadline := time.Now().Add(30 * time.Second)
-	for !strings.Contains(logs.String(), `"step":"branding_objects"`) || !strings.Contains(logs.String(), `"step":"data_exports"`) || !strings.Contains(logs.String(), `"step":"avatar_objects"`) {
+	for !strings.Contains(logs.String(), `"step":"branding_objects"`) || !strings.Contains(logs.String(), `"step":"data_exports"`) || !strings.Contains(logs.String(), `"step":"avatar_objects"`) ||
+		!strings.Contains(logs.String(), `"step":"message_attachment_objects"`) {
 		if time.Now().After(deadline) {
-			t.Fatalf("the first housekeeping run did not report the three storage steps: %s", logs.String())
+			t.Fatalf("the first housekeeping run did not report the four storage steps: %s", logs.String())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -427,8 +496,8 @@ func TestAStepThatCannotReachStorageLogsItsClassAndNoKeyEndpointOrBucket(t *test
 		}
 	}
 	text := strings.Join(lines, "\n")
-	if got := strings.Count(text, `"code":"HOUSEKEEPING_STEP_FAILED"`); got != 3 {
-		t.Errorf("%d steps failed, want the three that need storage: %s", got, text)
+	if got := strings.Count(text, `"code":"HOUSEKEEPING_STEP_FAILED"`); got != 4 {
+		t.Errorf("%d steps failed, want the four that list or remove objects: %s", got, text)
 	}
 	if !strings.Contains(text, `"failure":"network"`) {
 		t.Errorf("the log does not name the class of the failure: %s", text)
@@ -438,7 +507,7 @@ func TestAStepThatCannotReachStorageLogsItsClassAndNoKeyEndpointOrBucket(t *test
 			t.Errorf("the step %s did not finish beside the failing ones: %s", step, text)
 		}
 	}
-	for _, leak := range []string{id, key, "exports/", "branding/", "avatars/", anonymised, "127.0.0.1", away, served.S3Bucket, served.ImportBucket, owner, email} {
+	for _, leak := range []string{id, key, "exports/", "branding/", "avatars/", "messages/", anonymised, "127.0.0.1", away, served.S3Bucket, served.ImportBucket, owner, email} {
 		if strings.Contains(text, leak) {
 			t.Errorf("the log carries %q: %s", leak, text)
 		}
@@ -552,8 +621,10 @@ func TestWithoutAMediaBucketNoAnonymisedAccountIsMarked(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if strings.Contains(logs.String(), `"step":"avatar_objects"`) {
-		t.Errorf("the avatar step ran with no media bucket: %s", logs.String())
+	for _, step := range []string{"avatar_objects", "unsent_message_attachments", "message_attachment_objects"} {
+		if strings.Contains(logs.String(), `"step":"`+step+`"`) {
+			t.Errorf("the %s step ran with no media bucket: %s", step, logs.String())
+		}
 	}
 	if avatarSwept(t, w.pool, anonymised) {
 		t.Error("an anonymised account was marked on a server that cannot reach its photos")

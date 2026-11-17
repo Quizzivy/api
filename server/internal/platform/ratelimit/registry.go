@@ -54,6 +54,13 @@ func (reg *Registry) AddKeyed(pattern string) *Route {
 	return route
 }
 
+// Share registers route, made by Add or AddKeyed, under pattern too, so the
+// two operations spend one budget. `pattern` is "METHOD /path".
+func (reg *Registry) Share(pattern string, route *Route) *Route {
+	reg.routes[normalize(pattern)] = route
+	return route
+}
+
 // WithKey adds a keyed bucket after those already on the route.
 func (r *Route) WithKey(name string, key KeyFunc, capacity int, rules ...Rule) *Route {
 	r.Keyed = append(r.Keyed, Keyed{Name: name, Key: key, Limiter: New(capacity, rules...)})
@@ -129,4 +136,5 @@ func ClientIP(header string) KeyFunc {
 var (
 	PerMinute = func(n int) Rule { return Rule{Burst: n, Window: time.Minute} }
 	PerHour   = func(n int) Rule { return Rule{Burst: n, Window: time.Hour} }
+	PerDay    = func(n int) Rule { return Rule{Burst: n, Window: 24 * time.Hour} }
 )

@@ -65,8 +65,8 @@ func TestEveryNonOpenOperationDeclaresAPermission(t *testing.T) {
 func TestOpenOperationsDeclareNone(t *testing.T) {
 	spec := freshSpec(t)
 	open := openPatterns(spec)
-	if len(open) != 12 {
-		t.Errorf("%d open operations, want the twelve of theOpenTwelve", len(open))
+	if len(open) != len(theOpenThirteen) {
+		t.Errorf("%d open operations, want the thirteen of theOpenThirteen", len(open))
 	}
 	eachOperation(spec, func(pattern string, op *openapi3.Operation) {
 		if _, isOpen := open[pattern]; !isOpen {
@@ -83,8 +83,8 @@ func TestEveryDeclaredValueIsKnown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requirements) != 183 {
-		t.Errorf("%d operations declare a permission, want 183", len(requirements))
+	if len(requirements) != 217 {
+		t.Errorf("%d operations declare a permission, want 217", len(requirements))
 	}
 	for pattern, requirement := range requirements {
 		for _, k := range requirement.Keys() {
@@ -451,8 +451,8 @@ func TestTheAssistantMeetsOnlyItsSixRows(t *testing.T) {
 			t.Errorf("%s as the Assistant: %d, want %d", pattern, got, want)
 		}
 	}
-	if refused != 98 {
-		t.Errorf("the Assistant is refused %d operations, want 98: sixty-nine staff operations, the seventeen AI ones and the twelve /app ones", refused)
+	if refused != 111 {
+		t.Errorf("the Assistant is refused %d operations, want 111: seventy-five staff operations (five of them content.share's, one the class announcement), the seventeen AI ones and the nineteen /app ones", refused)
 	}
 }
 

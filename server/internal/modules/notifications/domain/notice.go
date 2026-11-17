@@ -18,6 +18,12 @@ const (
 	// carries them, added to the stored ones; a stored row without one counts
 	// as zero.
 	Add
+	// Renew writes the notice in place of the stored row as a new
+	// notification: a new id, so it lists first, and created now, so
+	// domain.Retention counts from its latest write. Its count is added to the
+	// stored one while that row is unread, and starts again from the notice's
+	// once the row was read.
+	Renew
 )
 
 // Notice is one notification as a producer hands it in. DedupeKey names the
@@ -30,6 +36,10 @@ type Notice struct {
 	Target    *Target
 	DedupeKey string
 	Merge     Merge
+	// AttemptID is the paper a submission notice is about. The in-app item
+	// does not store it; the submissions digest it emails counts the papers
+	// its bucket's notices named (T-R7.13).
+	AttemptID string
 }
 
 // Validate answers the first of ErrNoRecipient, ErrUnknownKind,
@@ -56,7 +66,10 @@ func (n Notice) Validate() error {
 	if length := utf8.RuneCountInString(n.DedupeKey); length < 1 || length > MaxDedupeKey {
 		return ErrInvalidDedupeKey
 	}
-	if n.Merge != Replace && n.Merge != Add {
+	if !idOrNone(n.AttemptID) {
+		return ErrInvalidTarget
+	}
+	if n.Merge != Replace && n.Merge != Add && n.Merge != Renew {
 		return ErrUnknownMerge
 	}
 	return nil

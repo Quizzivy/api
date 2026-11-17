@@ -40,6 +40,11 @@ func RateLimits() *ratelimit.Registry {
 	reg.Add("GET /public/organization", capacity, ratelimit.PerMinute(120), ratelimit.PerHour(2000))
 	reg.Add("GET /public/organization/logo", capacity, ratelimit.PerMinute(300))
 	reg.Add("POST /public/leads", capacity, ratelimit.PerMinute(3), ratelimit.PerHour(10))
+	// Resend's signed delivery events (T-R7.15), per sending address: a
+	// bounce or complaint arrives one delivery at a time, and Resend retries a
+	// refused one, so 120 a minute holds a burst without letting a caller
+	// spend the signature check at will.
+	reg.Add("POST /public/email-events", capacity, ratelimit.PerMinute(120))
 
 	return reg
 }
@@ -75,7 +80,10 @@ var aiConsoleWrites = []string{
 // perActor, keyed by ratelimit.PrincipalKey. They are applied after the
 // permission gate, so an entry may name only an operation that requires a
 // token; New refuses any other. The authenticated operations that mint a
-// credential are here, and so are the uploads that store a file per call.
+// credential are here, so are the uploads that store a file per call, and so
+// are the share dialog's directory of colleagues and its grants, and so are a
+// staff member's messages, whose direct messages and announcements spend one
+// budget.
 func PrincipalRateLimits() *ratelimit.Registry {
 	reg := ratelimit.NewRegistry()
 	const capacity = 10_000
@@ -114,6 +122,12 @@ func PrincipalRateLimits() *ratelimit.Registry {
 	perActor("PUT /me/avatar", ratelimit.PerHour(10))
 	perActor("POST /admin/settings/logo", ratelimit.PerHour(20))
 	perActor("POST /teacher/media/{id}/replace", ratelimit.PerMinute(10), ratelimit.PerHour(60))
+	perActor("GET /teacher/directory/teachers", ratelimit.PerMinute(60))
+	perActor("POST /teacher/shares", ratelimit.PerHour(30))
+	reg.Share("POST /teacher/messages/classes/{classId}", reg.AddKeyed("POST /teacher/messages/students/{studentId}").
+		WithKey("perActor", ratelimit.PrincipalKey, capacity, ratelimit.PerMinute(30), ratelimit.PerDay(500)))
+	perActor("POST /app/messages/teachers/{teacherId}", ratelimit.PerMinute(10), ratelimit.PerDay(200))
+	perActor("POST /teacher/messages/attachments", ratelimit.PerHour(20))
 	for _, pattern := range aiSuggestions {
 		perActor(pattern, ratelimit.PerMinute(10), ratelimit.PerHour(100))
 	}

@@ -382,7 +382,8 @@ func TestAStudentSeesWhenAndWhereAClassMeetsAndNothingElse(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("the student's classes: %d %v", status, body)
 	}
-	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherName"}
+	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
+	teacher := r.a.me(t)
 	shown := byID(items(body))
 	if len(shown) != 2 {
 		t.Fatalf("the student sees %d classes, want 2", len(shown))
@@ -395,6 +396,9 @@ func TestAStudentSeesWhenAndWhereAClassMeetsAndNothingElse(t *testing.T) {
 		slices.Sort(keys)
 		if !slices.Equal(keys, want) {
 			t.Errorf("class %s carries %v, want exactly %v", classID, keys, want)
+		}
+		if row["teacherId"] != teacher {
+			t.Errorf("class %s names the teacher %v, want %s, whose thread the card opens", classID, row["teacherId"], teacher)
 		}
 		photo, _ := row["teacherAvatarUrl"].(string)
 		if photo == "" || !strings.Contains(photo, "X-Amz-Signature") {

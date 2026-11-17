@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/platform/db"
-	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/paging"
+	"quizzivy/internal/shared/visibility"
 	"strings"
 )
 
@@ -21,19 +21,26 @@ const titleSearch = `app.immutable_unaccent(lower(t.title))` +
 
 const tagCondition = `EXISTS (SELECT 1 FROM (` + draftQuestionRows + `) q WHERE q.tags && $%d::text[])`
 
-func scopedTests(scope access.Scope) ([]string, []any) {
-	if scope.All {
-		return []string{liveTests}, []any{}
+// scopedTests is the condition and the arguments of a list of tests: the live
+// tests the scope's user owns, every live test under scope.all, and, with
+// IncludeShared, those shared with the user too. The scope's scope.all and
+// user id are placeholders $1 and $2, so testAccess("t", 1, 2) is each row's
+// access for the reader.
+func scopedTests(in domain.ListInput) ([]string, []any) {
+	reach := `($1::boolean OR t.owner_id = $2::uuid)`
+	if in.IncludeShared {
+		reach = `($1::boolean OR t.owner_id = $2::uuid OR t.id IN ` + visibility.SharedTestIDs(2) + `)`
 	}
-	return []string{liveTests, `t.owner_id = $1::uuid`}, []any{opt.String(scope.UserID)}
+	return []string{liveTests, reach}, []any{in.Scope.All, opt.String(in.Scope.UserID)}
 }
 
-// List returns one page of live tests, newest first, and the paging that
-// goes with it (O-20: OFFSET, so the client can draw numbered pages).
+// List returns one page of live tests, newest first, each with the reader's
+// access, and the paging that goes with it (O-20: OFFSET, so the client can
+// draw numbered pages).
 func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Test, paging.Page, error) {
 	number, limit, offset := paging.Clamp(in.Page, in.Limit, DefaultLimit, MaxLimit)
 
-	where, args := scopedTests(in.Scope)
+	where, args := scopedTests(in)
 	if in.Status != nil {
 		args = append(args, string(*in.Status))
 		where = append(where, fmt.Sprintf(`t.status = $%d::app.test_status`, len(args)))
@@ -55,7 +62,7 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Test
 	}
 
 	args = append(args, limit, offset)
-	rows, err := s.Query(ctx, `SELECT`+testColumns+testFrom+filter+fmt.Sprintf(`
+	rows, err := s.Query(ctx, `SELECT`+testColumns+`, `+testAccess("t", 1, 2)+testFrom+filter+fmt.Sprintf(`
 		 ORDER BY t.id DESC
 		 LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
@@ -65,10 +72,12 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Test
 
 	list := make([]domain.Test, 0, limit)
 	for rows.Next() {
-		t, err := scanTest(rows)
+		var level string
+		t, err := scanTest(rows, &level)
 		if err != nil {
 			return nil, paging.Page{}, err
 		}
+		readerView(&t, domain.Access(level))
 		list = append(list, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -106,7 +115,7 @@ func (s *Postgres) attachSections(ctx context.Context, list []domain.Test) error
 // Tags returns every tag reachable through the current status and search, so
 // A-03's filter cannot offer a chip that returns nothing.
 func (s *Postgres) Tags(ctx context.Context, in domain.ListInput) ([]string, error) {
-	where, args := scopedTests(in.Scope)
+	where, args := scopedTests(in)
 	if in.Status != nil {
 		args = append(args, string(*in.Status))
 		where = append(where, fmt.Sprintf(`t.status = $%d::app.test_status`, len(args)))

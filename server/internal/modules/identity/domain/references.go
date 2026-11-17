@@ -10,6 +10,7 @@ const (
 	ReferencedByAssignments  Reference = "assignments"
 	ReferencedByAttempts     Reference = "attempts"
 	ReferencedByAudit        Reference = "audit"
+	ReferencedByMessages     Reference = "messages"
 	ReferencedByOwnedContent Reference = "owned_content"
 	ReferencedByOther        Reference = "other"
 )

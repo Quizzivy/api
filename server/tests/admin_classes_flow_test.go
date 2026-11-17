@@ -46,6 +46,9 @@ func TestAnAdminGivesAClassToAnotherTeacherWhoThenTeachesItAndItsAssignments(t *
 	if !lists(t, heir, "/me/notifications", "class.teacher_changed") || !lists(t, a.c, "/me/notifications", "class.teacher_changed") {
 		t.Error("a teacher's bell holds no class.teacher_changed item")
 	}
+	if heirs, previous := w.queued(t, heirID, "class_teacher_changed"), w.queued(t, a.c.me(t), "class_teacher_changed"); heirs != 1 || previous != 1 {
+		t.Errorf("the change with notify on queued %d emails to the new teacher and %d to the previous one, want one each", heirs, previous)
+	}
 
 	created := admin.must(http.StatusCreated, http.MethodPost, "/admin/classes", map[string]any{
 		"name": "Lớp do quản trị tạo " + nonce(t), "teacherId": heirID, "scheduleLabel": "Thứ 7 · 9:00",

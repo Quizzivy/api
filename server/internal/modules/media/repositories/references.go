@@ -8,27 +8,28 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/visibility"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// References lists the published versions whose questions use the asset, by
-// title then version. Any at all blocks deletion with a 409 (§8).
+// References lists the published versions of any owner's tests whose
+// questions use the asset, by title then version. Any at all blocks deletion
+// with a 409 (§8): the owner's named, another owner's only counted
+// (usesElsewhere).
 func References(ctx context.Context, q db.Querier, assetID string) ([]domain.TestRef, error) {
-	byAsset, err := ReferencesFor(ctx, q, []string{assetID})
+	byAsset, err := referencesFor(ctx, q, []string{assetID}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return byAsset[assetID], nil
+	return byAsset[strings.ToLower(assetID)], nil
 }
 
-// ReferencesFor is References for a whole page of assets in one query, which
-// is what the library list needs: a count and a name per row, without a round
-// trip per row.
-func ReferencesFor(ctx context.Context, q db.Querier, assetIDs []string) (map[string][]domain.TestRef, error) {
-	rows, err := q.Query(ctx, `
-		WITH version_assets AS (
+// versionAssets is the version sections that use each asset in $1: through
+// a version question's attachment, a version group's materials or
+// recordings, or a version question's prose.
+const versionAssets = `version_assets AS (
 		 SELECT media_asset_id,test_version_section_id FROM app.test_version_questions WHERE media_asset_id=ANY($1::uuid[])
 		 UNION
 		 SELECT a.media_asset_id,g.test_version_section_id FROM app.test_version_group_assets a
@@ -39,13 +40,20 @@ func ReferencesFor(ctx context.Context, q db.Querier, assetIDs []string) (map[st
 		 UNION
 		 SELECT r.media_asset_id,q.test_version_section_id FROM app.test_version_question_media_references r
 		 JOIN app.test_version_questions q ON q.id=r.test_version_question_id WHERE r.media_asset_id=ANY($1::uuid[])
-		)
+		)`
+
+// referencesFor is References for a whole page of assets in one query, kept
+// to the versions of tests ownerID owns when ownerID is not nil.
+func referencesFor(ctx context.Context, q db.Querier, assetIDs []string, ownerID *string) (map[string][]domain.TestRef, error) {
+	rows, err := q.Query(ctx, `
+		WITH `+versionAssets+`
 		SELECT DISTINCT a.media_asset_id::text,t.id::text,t.title,tv.version
 		FROM version_assets a
 		JOIN app.test_version_sections tvs ON tvs.id=a.test_version_section_id
 		JOIN app.test_versions tv ON tv.id=tvs.test_version_id
 		JOIN app.tests t ON t.id=tv.test_id
-		ORDER BY a.media_asset_id::text,t.title,tv.version,t.id::text`, assetIDs)
+		WHERE $2::uuid IS NULL OR t.owner_id=$2::uuid
+		ORDER BY a.media_asset_id::text,t.title,tv.version,t.id::text`, assetIDs, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("media: references: %w", err)
 	}
@@ -58,6 +66,43 @@ func ReferencesFor(ctx context.Context, q db.Querier, assetIDs []string) (map[st
 			return nil, fmt.Errorf("media: references: %w", err)
 		}
 		out[asset] = append(out[asset], ref)
+	}
+	return out, rows.Err()
+}
+
+// VersionUses is, for a whole page of assets in one query, which is what the
+// library list needs, the published versions that use each: those of tests
+// the asset's own owner owns named, by title then version, and every owner's
+// counted. It is keyed by the asset's canonical text; an asset no version
+// uses is left out.
+func VersionUses(ctx context.Context, q db.Querier, assetIDs []string) (map[string]domain.VersionUses, error) {
+	rows, err := q.Query(ctx, `
+		WITH `+versionAssets+`
+		SELECT DISTINCT a.media_asset_id::text,t.id::text,t.title,tv.version,coalesce(t.owner_id=m.owner_id,false)
+		FROM version_assets a
+		JOIN app.media_assets m ON m.id=a.media_asset_id
+		JOIN app.test_version_sections tvs ON tvs.id=a.test_version_section_id
+		JOIN app.test_versions tv ON tv.id=tvs.test_version_id
+		JOIN app.tests t ON t.id=tv.test_id
+		ORDER BY a.media_asset_id::text,t.title,tv.version,t.id::text`, assetIDs)
+	if err != nil {
+		return nil, fmt.Errorf("media: version uses: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]domain.VersionUses{}
+	for rows.Next() {
+		var asset string
+		var ref domain.TestRef
+		var own bool
+		if err := rows.Scan(&asset, &ref.ID, &ref.Title, &ref.Version, &own); err != nil {
+			return nil, fmt.Errorf("media: version uses: %w", err)
+		}
+		uses := out[asset]
+		uses.Count++
+		if own {
+			uses.Tests = append(uses.Tests, ref)
+		}
+		out[asset] = uses
 	}
 	return out, rows.Err()
 }
@@ -162,7 +207,7 @@ func ReachableByStudent(ctx context.Context, q db.Querier, studentID, assetID st
 	return reachable, nil
 }
 
-const readableAssets = `
+var readableAssets = `
 	SELECT a.id::text, a.kind::text
 	  FROM app.media_assets a
 	 WHERE a.id = ANY($1::uuid[])
@@ -175,7 +220,7 @@ const readableAssets = `
 	                               UNION ALL
 	                               SELECT question_id FROM app.question_media_references WHERE media_asset_id = a.id)
 	                  AND q.context_group_id IS NULL
-	                  AND q.deleted_at IS NULL AND q.owner_id = $3::uuid)
+	                  AND q.deleted_at IS NULL AND ` + visibility.QuestionAccess("q", 2, 3) + ` IS NOT NULL)
 	    OR EXISTS (SELECT 1
 	                 FROM app.question_groups g
 	                 LEFT JOIN app.test_sections s ON s.id = g.owner_section_id
@@ -190,7 +235,8 @@ const readableAssets = `
 	                               SELECT q.context_group_id FROM app.question_media_references r
 	                                 JOIN app.questions q ON q.id = r.question_id
 	                                WHERE r.media_asset_id = a.id AND q.context_group_id IS NOT NULL)
-	                  AND CASE WHEN g.owner_section_id IS NULL THEN g.owner_id ELSE t.owner_id END = $3::uuid)
+	                  AND CASE WHEN g.owner_section_id IS NULL THEN g.owner_id = $3::uuid
+	                           ELSE ` + visibility.TestAccess("t", 2, 3) + ` IS NOT NULL END)
 	    OR EXISTS (SELECT 1
 	                 FROM app.test_version_sections vs
 	                 JOIN app.test_versions tv ON tv.id = vs.test_version_id
@@ -208,13 +254,17 @@ const readableAssets = `
 	                                SELECT vq.test_version_section_id FROM app.test_version_question_media_references vm
 	                                  JOIN app.test_version_questions vq ON vq.id = vm.test_version_question_id
 	                                 WHERE vm.media_asset_id = a.id)
-	                  AND t.deleted_at IS NULL AND t.owner_id = $3::uuid))`
+	                  AND t.deleted_at IS NULL AND ` + visibility.TestAccess("t", 2, 3) + ` IS NOT NULL))`
 
 // Readable is the one definition of which assets a staff scope may read, and
-// so bind or sign: its own, every asset under scope.all, and any asset already
-// used by one of its live bank questions, by a group it owns (a section group
-// through its live test), or by a published version of one of its live tests.
-// A question uses an asset it attaches or shows in its prose (DG-109).
+// so bind or sign (T-R2.12b, T-R7.7): its own, every asset under scope.all,
+// and any asset already used by content the scope can read, under the rules
+// shared/visibility holds, a share included: a live bank question it can read
+// (QuestionAccess), a bank group it owns, a section group of a live test it
+// can read (TestAccess), or a published version of one. A question uses an
+// asset it attaches or shows in its prose (DG-109). So a co-editor binds the
+// owner's audio in the shared test, and a copier's later edit of a copy keeps
+// the media the copy names, which are then its own question's.
 // It returns the kind of each readable id, keyed by the id's canonical text; an
 // id it leaves out is missing, deleted or unreadable, and callers must answer
 // the three alike. A zero scope reads nothing. It takes no lock.
@@ -256,8 +306,8 @@ func RequireReadable(ctx context.Context, q db.Querier, scope access.Scope, asse
 	return nil
 }
 
-func (s *Postgres) ReferencesFor(ctx context.Context, assetIDs []string) (map[string][]domain.TestRef, error) {
-	return ReferencesFor(ctx, s.Conn(), assetIDs)
+func (s *Postgres) VersionUses(ctx context.Context, assetIDs []string) (map[string]domain.VersionUses, error) {
+	return VersionUses(ctx, s.Conn(), assetIDs)
 }
 
 func (s *Postgres) QuestionCounts(ctx context.Context, assetIDs []string) (map[string]int, error) {

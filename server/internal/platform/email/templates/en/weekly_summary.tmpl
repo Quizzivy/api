@@ -1,0 +1,42 @@
+{{define "subject"}}{{.Org}}: Your weekly summary{{end}}
+
+{{define "classes"}}{{range $i, $name := .}}{{if $i}}, {{end}}{{$name}}{{end}}{{end}}
+
+{{define "week"}}{{.Params.WeekOf.UTC.Format "2 Jan 2006"}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}
+
+The week from {{template "week" .}} in {{template "classes" .Params.ClassNames}}:
+
+Papers handed in: {{.Params.Count}}
+To grade: {{.Params.ToGrade}}
+Flagged: {{.Params.Flagged}}
+
+See the details on your dashboard:
+
+{{.Link}}
+
+--
+Change which emails you get:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}</p>
+<p>The week from {{template "week" .}} in {{template "classes" .Params.ClassNames}}:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;border-collapse:collapse">
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Papers handed in</td><td style="padding:2px 0;font-weight:bold">{{.Params.Count}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">To grade</td><td style="padding:2px 0;font-weight:bold">{{.Params.ToGrade}}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;vertical-align:top">Flagged</td><td style="padding:2px 0;font-weight:bold">{{.Params.Flagged}}</td></tr>
+</table>
+<p>See the details on your dashboard:</p>
+<p><a href="{{.Link}}">Open your dashboard</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
+</body>
+</html>{{end}}

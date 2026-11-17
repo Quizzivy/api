@@ -98,7 +98,7 @@ func lockActiveAdmins(ctx context.Context, tx pgx.Tx, target string) ([]string, 
 func ownedContent(ctx context.Context, q db.Querier, userID string) (domain.OwnedContent, error) {
 	var owned domain.OwnedContent
 	err := q.QueryRow(ctx, `SELECT `+ownedCountsSQL+` FROM app.users u WHERE u.id = $1::uuid`, userID).
-		Scan(&owned.Classes, &owned.Tests, &owned.Questions, &owned.Media, &owned.Assignments)
+		Scan(&owned.Classes, &owned.Tests, &owned.Questions, &owned.Media, &owned.Assignments, &owned.QuestionSets)
 	if err != nil {
 		return domain.OwnedContent{}, fmt.Errorf("users: count owned content: %w", err)
 	}

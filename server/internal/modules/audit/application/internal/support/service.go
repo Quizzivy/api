@@ -39,12 +39,19 @@ func (s *Service) LocationOf(ctx context.Context, viewerID string) (string, *tim
 }
 
 // Present reads records for a screen or a file, resolving the labels of the
-// rows they are about in one batch per kind of row and signing each actor's
-// photo once.
+// rows they are about, and the names of the recipients their shared_with
+// changes record, in one batch per kind of row, and signing each actor's photo
+// once.
 func (s *Service) Present(ctx context.Context, records []domain.Record) ([]domain.Entry, error) {
 	labels, err := s.Repo.Labels(ctx, refsOf(records))
 	if err != nil {
 		return nil, err
+	}
+	names := map[string]string{}
+	for ref, label := range labels {
+		if ref.Type == "user" {
+			names[ref.ID] = label
+		}
 	}
 	signed := map[string]string{}
 	entries := make([]domain.Entry, len(records))
@@ -56,6 +63,7 @@ func (s *Service) Present(ctx context.Context, records []domain.Record) ([]domai
 			}
 		}
 		entries[i] = domain.NewEntry(rec, label, s.avatarOf(ctx, rec.Actor, signed))
+		entries[i].NameGrantees(names)
 	}
 	return entries, nil
 }
@@ -78,9 +86,15 @@ func refsOf(records []domain.Record) []domain.EntityRef {
 	seen := make(map[domain.EntityRef]bool, len(records))
 	var refs []domain.EntityRef
 	for _, rec := range records {
-		if ref, ok := rec.Ref(); ok && !seen[ref] {
-			seen[ref] = true
-			refs = append(refs, ref)
+		mentioned := domain.GranteeRefs(rec.Diff)
+		if ref, ok := rec.Ref(); ok {
+			mentioned = append(mentioned, ref)
+		}
+		for _, ref := range mentioned {
+			if !seen[ref] {
+				seen[ref] = true
+				refs = append(refs, ref)
+			}
 		}
 	}
 	return refs

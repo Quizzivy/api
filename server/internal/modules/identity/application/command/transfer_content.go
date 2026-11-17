@@ -13,8 +13,8 @@ import (
 
 // TransferUserContent hands everything the disabled account ID owns to ToID,
 // and tells ToID when Notify is set. The mover moves classes, tests, questions,
-// question groups, media and assignments; R7 and R10 extend it for question
-// sets, shares, word lists and courses.
+// question groups, question sets, media and assignments, and deletes the grants
+// to ToID of what ToID now owns; R10 extends it for word lists and courses.
 type TransferUserContent struct {
 	Request domain.WriteRequest
 	ID      string

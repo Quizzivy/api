@@ -19,8 +19,6 @@ const entityTest = "test"
 
 const liveTests = `t.deleted_at IS NULL`
 
-const scopedTest = `($2::boolean OR owner_id = $3::uuid)`
-
 // QuestionLocks and MediaLocks are the row locks other modules take on this
 // module's behalf inside its transactions, so a draft cannot outlive what it
 // names, and the checks that run under them. NotOwnedBy reads, without
@@ -44,6 +42,7 @@ type Postgres struct {
 	questions      QuestionLocks
 	media          MediaLocks
 	groupQuestions GroupQuestionStore
+	writes         QuestionWrites
 }
 
 func NewPostgres(dbx db.Context, questions QuestionLocks, media MediaLocks) *Postgres {
@@ -60,7 +59,9 @@ const testColumns = `
 	       t.id::text, t.title, t.description, t.status::text, t.current_version, t.last_published_version,
 	       outline.points::text, outline.questions, outline.audio, outline.skills,
 	       uses.live, uses.scheduled, uses.closed,
-	       t.created_at, t.updated_at, t.deleted_at`
+	       t.created_at, t.updated_at, t.deleted_at,
+	       t.owner_id::text, (SELECT coalesce(nullif(u.display_name, ''), u.full_name) FROM app.users u WHERE u.id = t.owner_id),
+	       (SELECT count(*) FROM app.content_shares g WHERE g.test_id = t.id)`
 
 const testFrom = `
 	  FROM app.tests t
@@ -73,14 +74,15 @@ const testFrom = `
 	      FROM (` + draftQuestionRows + `) q
 	  ) outline` + testUsage
 
-func scanTest(row pgx.Row) (domain.Test, error) {
+func scanTest(row pgx.Row, extra ...any) (domain.Test, error) {
 	var t domain.Test
 	var status string
 	var lastPublished int
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &status, &t.CurrentVersion, &lastPublished,
+	fields := []any{&t.ID, &t.Title, &t.Description, &status, &t.CurrentVersion, &lastPublished,
 		&t.TotalPoints, &t.QuestionCount, &t.AudioCount, &t.Skills,
 		&t.Assignments.Live, &t.Assignments.Scheduled, &t.Assignments.Closed,
-		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt)
+		&t.CreatedAt, &t.UpdatedAt, &t.DeletedAt, &t.OwnerID, &t.OwnerName, &t.SharedWith}
+	err := row.Scan(append(fields, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Test{}, domain.ErrNotFound
 	}
@@ -92,20 +94,15 @@ func scanTest(row pgx.Row) (domain.Test, error) {
 	return t, nil
 }
 
-// Get returns one live test with its draft outline; a test outside scope is
-// domain.ErrNotFound.
+// Get returns one live test the scope can read, with its draft outline and
+// the reader's access; any other test is domain.ErrNotFound.
 func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (domain.Test, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
 		return domain.Test{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var locked string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM app.tests WHERE id=$1 AND deleted_at IS NULL AND `+scopedTest+` FOR SHARE`,
-		id, scope.All, opt.String(scope.UserID)).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Test{}, domain.ErrNotFound
-	}
+	reached, err := reachTest(ctx, tx, scope, id, domain.ActionRead, testShared)
 	if err != nil {
 		return domain.Test{}, err
 	}
@@ -113,6 +110,7 @@ func (s *Postgres) Get(ctx context.Context, scope access.Scope, id string) (doma
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&result, reached.access)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, err
 	}
@@ -190,7 +188,7 @@ func (s *Postgres) Create(ctx context.Context, in domain.CreateInput) (domain.Te
 
 	var id string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO app.tests (title, description, created_by, owner_id) VALUES ($1, $2, $3, coalesce($4::uuid, $3))
+		`INSERT INTO app.tests (title, description, created_by, updated_by, owner_id) VALUES ($1, $2, $3, $3, coalesce($4::uuid, $3))
 		 RETURNING id::text`, in.Title, in.Description, in.ActorID, opt.String(in.OwnerID)).Scan(&id); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: insert: %w", err)
 	}
@@ -210,6 +208,7 @@ func (s *Postgres) Create(ctx context.Context, in domain.CreateInput) (domain.Te
 	if err != nil {
 		return domain.Test{}, err
 	}
+	readerView(&created, domain.AccessOwner)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Test{}, fmt.Errorf("tests: commit create: %w", err)
 	}

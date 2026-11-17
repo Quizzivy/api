@@ -16,10 +16,19 @@ type Service struct {
 	Repo     domain.Repository
 	Notifier ports.Notifier
 	Logger   *slog.Logger
+	Schedule ports.ScheduleNudge
 }
 
 func NewService(repo domain.Repository) *Service {
 	return &Service{Repo: repo}
+}
+
+// Nudge tells the notification scheduler, when there is one, that a write
+// committed that can move a close.
+func (s *Service) Nudge() {
+	if s.Schedule != nil {
+		s.Schedule.Nudge()
+	}
 }
 
 // TellMoved tells the students whose close an extension of the assignment

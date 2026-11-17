@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/content"
@@ -32,7 +33,8 @@ func (s *Postgres) WithMedia(media MediaLocks) *Postgres {
 
 // groupAuthorized reads every live asset: a group member's media were
 // authorized against the group's scope by the group write, under the same
-// locks, before the member is written.
+// locks, before the member is written, and a duplicate's are its source's,
+// which the writer has read.
 var groupAuthorized = access.Scope{All: true}
 
 // lockProseMedia checks the media a write's prompt and explanation show, as the
@@ -63,11 +65,14 @@ func (s *Postgres) lockProseMedia(ctx context.Context, tx pgx.Tx, in domain.Writ
 		}
 	}
 	scope := access.Scope{UserID: in.ActorID, All: in.All}
-	if groupMember {
+	if groupMember || in.SourceMedia {
 		scope = groupAuthorized
 	}
 	kinds, err := s.media.ReadableKinds(ctx, tx, scope, ids)
 	if err != nil {
+		return err
+	}
+	if err := s.keptKinds(ctx, tx, in, scope, ids, kinds); err != nil {
 		return err
 	}
 	for _, id := range gone {
@@ -109,4 +114,28 @@ func fieldName(field string) string {
 		return "explanationContent"
 	}
 	return "promptContent"
+}
+
+// keptKinds adds to kinds the media among ids that the question being edited
+// already binds (WriteInput.KeptMedia), which an edit made in its test's or
+// set's context may keep although the editor's own scope does not read them.
+func (s *Postgres) keptKinds(ctx context.Context, tx pgx.Tx, in domain.WriteInput, scope access.Scope, ids []string, kinds map[string]string) error {
+	if scope.All || len(in.KeptMedia) == 0 {
+		return nil
+	}
+	var kept []string
+	for _, id := range ids {
+		if _, readable := kinds[strings.ToLower(id)]; !readable && slices.Contains(in.KeptMedia, strings.ToLower(id)) {
+			kept = append(kept, id)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	more, err := s.media.ReadableKinds(ctx, tx, groupAuthorized, kept)
+	if err != nil {
+		return err
+	}
+	maps.Copy(kinds, more)
+	return nil
 }

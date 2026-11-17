@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/platform/db"
-	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
 	"quizzivy/internal/shared/paging"
 	"strings"
@@ -27,16 +26,19 @@ const searchCondition = `(
 		OR ` + TrigramExpression + ` LIKE '%%' || app.immutable_unaccent(lower($%[1]d)) || '%%' ESCAPE '\'
 	)`
 
-func bankRows(scope access.Scope) ([]any, []string) {
+func bankRows(in domain.ListInput) ([]any, []string) {
 	where := []string{`q.deleted_at IS NULL`, `q.context_group_id IS NULL`}
-	if scope.All {
+	if in.SetID != "" {
+		return []any{in.SetID}, append(where, `q.id IN (SELECT i.question_id FROM app.question_set_items i WHERE i.set_id = $1::uuid)`)
+	}
+	if in.Scope.All {
 		return nil, where
 	}
-	return []any{opt.String(scope.UserID)}, append(where, `q.owner_id = $1::uuid`)
+	return []any{opt.String(in.Scope.UserID)}, append(where, `q.owner_id = $1::uuid`)
 }
 
 func appendFilters(in domain.ListInput, opts filterOpts) ([]any, []string) {
-	args, where := bankRows(in.Scope)
+	args, where := bankRows(in)
 
 	if opts.types && len(in.Types) > 0 {
 		types := make([]string, len(in.Types))
@@ -78,8 +80,9 @@ func allFilters() filterOpts {
 	return filterOpts{types: true, tags: true, levels: true, skills: true}
 }
 
-// List returns one page of live bank questions, newest first, with the
-// paging beside it (O-20: OFFSET, so the client can draw numbered pages).
+// List returns one page of live bank questions, newest first, or a set's in
+// set order, each with its owner, with the paging beside it (O-20: OFFSET, so
+// the client can draw numbered pages).
 func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Question, paging.Page, error) {
 	number, limit, offset := paging.Clamp(in.Page, in.Limit, DefaultLimit, MaxLimit)
 
@@ -93,10 +96,14 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Ques
 		return nil, paging.Page{}, fmt.Errorf("questions: count: %w", err)
 	}
 
+	columns, order := questionColumns+`, q.owner_id::text, (SELECT `+personName+` FROM app.users u WHERE u.id = q.owner_id)`, `q.id DESC`
+	if in.SetID != "" {
+		order = `(SELECT i.ordinal FROM app.question_set_items i WHERE i.set_id = $1::uuid AND i.question_id = q.id), q.id`
+	}
 	args = append(args, limit, offset)
-	rows, err := s.Query(ctx, `SELECT`+questionColumns+from+fmt.Sprintf(`
-		 ORDER BY q.id DESC
-		 LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	rows, err := s.Query(ctx, `SELECT`+columns+from+fmt.Sprintf(`
+		 ORDER BY %s
+		 LIMIT $%d OFFSET $%d`, order, len(args)-1, len(args)), args...)
 	if err != nil {
 		return nil, paging.Page{}, fmt.Errorf("questions: list: %w", err)
 	}
@@ -104,10 +111,12 @@ func (s *Postgres) List(ctx context.Context, in domain.ListInput) ([]domain.Ques
 
 	questions := make([]domain.Question, 0, limit)
 	for rows.Next() {
-		question, err := scanQuestion(rows)
+		var owner domain.Owner
+		question, err := scanQuestion(rows, &owner.ID, &owner.Name)
 		if err != nil {
 			return nil, paging.Page{}, err
 		}
+		question.Owner = &owner
 		questions = append(questions, question)
 	}
 	if err := rows.Err(); err != nil {

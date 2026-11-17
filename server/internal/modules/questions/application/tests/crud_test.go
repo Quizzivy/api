@@ -7,7 +7,10 @@ import (
 	"errors"
 	"quizzivy/internal/modules/questions/application/command"
 	"quizzivy/internal/modules/questions/application/query"
+	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/provenance"
 	"testing"
+	"time"
 
 	"quizzivy/internal/modules/questions/domain"
 	"quizzivy/internal/modules/questions/repositories"
@@ -420,5 +423,104 @@ func TestDuplicateIsANewRowWithTheSameContent(t *testing.T) {
 	}
 	if copied.UsedInTests != 0 {
 		t.Errorf("a fresh copy is used in %d tests", copied.UsedInTests)
+	}
+}
+
+// lastWriter is who the question records as its last writer, "" for no one.
+func lastWriter(t *testing.T, pool *pgxpool.Pool, id string) string {
+	t.Helper()
+	var by *string
+	if err := pool.QueryRow(context.Background(), `SELECT updated_by::text FROM app.questions WHERE id = $1`, id).Scan(&by); err != nil {
+		t.Fatal(err)
+	}
+	if by == nil {
+		return ""
+	}
+	return *by
+}
+
+// TestTwoEditorsOfAQuestionTellTheSecondWhoSavedFirst: the owner and a
+// scope.all editor open one question at one revision. The owner saves first;
+// the second save on that revision is refused naming the owner and the time
+// of the owner's save, and writes nothing. After reloading, it saves and is
+// recorded as the last writer.
+func TestTwoEditorsOfAQuestionTellTheSecondWhoSavedFirst(t *testing.T) {
+	pool := newPool(t)
+	owner, admin := makeAuthor(t, pool), makeAuthor(t, pool)
+	svc := newService(t, pool)
+	ctx := context.Background()
+	update := func(actor string, all bool, id, prompt string, expected *time.Time) (domain.Question, error) {
+		return svc.Commands.Update.Handle(ctx, command.Update{Request: domain.WriteRequest{ID: id, ActorID: actor, All: all,
+			ExpectedUpdatedAt: expected, Input: domain.Input{Type: domain.ShortAnswer, Prompt: prompt, Points: "1.00", Tags: []string{}}}})
+	}
+
+	opened := write(t, svc, owner, "Câu mở chung")
+	if got := lastWriter(t, pool, opened.ID); got != owner {
+		t.Errorf("a new question is recorded as %q's, want its author's", got)
+	}
+	first, err := update(owner, false, opened.ID, "Bản của chủ câu hỏi", &opened.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = update(admin, true, opened.ID, "Bản thứ hai", &opened.UpdatedAt)
+	if !errors.Is(err, domain.ErrStaleWrite) {
+		t.Fatalf("the second save on the revision the first replaced: %v, want a stale write", err)
+	}
+	last, named := provenance.Of(err)
+	if !named || last.By == nil || last.By.ID != owner || last.By.Name != "Giáo viên" ||
+		!last.At.Truncate(time.Microsecond).Equal(first.UpdatedAt.Truncate(time.Microsecond)) {
+		t.Errorf("the stale write names %+v (named %v), want the owner at %s", last, named, first.UpdatedAt)
+	}
+	kept, err := svc.Queries.Get.Handle(ctx, query.Get{Scope: everyone, ID: opened.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.Prompt != "Bản của chủ câu hỏi" || lastWriter(t, pool, opened.ID) != owner {
+		t.Errorf("the refused save wrote: prompt %q, last writer %s", kept.Prompt, lastWriter(t, pool, opened.ID))
+	}
+
+	if _, err := update(admin, true, opened.ID, "Bản thứ hai", &first.UpdatedAt); err != nil {
+		t.Fatalf("the second save after reloading: %v", err)
+	}
+	if got := lastWriter(t, pool, opened.ID); got != admin {
+		t.Errorf("the second save is recorded as %q's, want the second editor's", got)
+	}
+}
+
+// TestAnUpdateWithoutExpectedUpdatedAtStillSucceeds: a v0.13.0 client sends
+// no expectedUpdatedAt, and its update is saved whatever changed since, as
+// before R7. Every write still records its writer.
+func TestAnUpdateWithoutExpectedUpdatedAtStillSucceeds(t *testing.T) {
+	pool := newPool(t)
+	owner, admin := makeAuthor(t, pool), makeAuthor(t, pool)
+	svc := newService(t, pool)
+	ctx := context.Background()
+
+	q := write(t, svc, owner, "Câu của bản cũ")
+	for i, editor := range []struct {
+		actor string
+		all   bool
+	}{{owner, false}, {admin, true}, {owner, false}} {
+		saved, err := svc.Commands.Update.Handle(ctx, command.Update{Request: domain.WriteRequest{ID: q.ID, ActorID: editor.actor, All: editor.all,
+			Input: domain.Input{Type: domain.ShortAnswer, Prompt: "Lần sửa " + string(rune('1'+i)), Points: "1.00", Tags: []string{}}}})
+		if err != nil {
+			t.Fatalf("save %d without expectedUpdatedAt: %v", i+1, err)
+		}
+		if got := lastWriter(t, pool, q.ID); got != editor.actor || saved.Prompt != "Lần sửa "+string(rune('1'+i)) {
+			t.Errorf("save %d: last writer %q, prompt %q", i+1, got, saved.Prompt)
+		}
+	}
+
+	if _, err := svc.Commands.AddTags.Handle(ctx, command.AddTags{IDs: []string{q.ID}, Tags: []string{"the-admins-tag"}, Scope: access.Scope{UserID: admin, All: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastWriter(t, pool, q.ID); got != admin {
+		t.Errorf("a tag added by the admin is recorded as %q's", got)
+	}
+	if _, err := svc.Commands.Delete.Handle(ctx, command.Delete{Request: domain.WriteRequest{ID: q.ID, ActorID: owner}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastWriter(t, pool, q.ID); got != owner {
+		t.Errorf("the delete is recorded as %q's", got)
 	}
 }

@@ -1,0 +1,31 @@
+{{define "subject"}}{{.Org}}: {{.Params.Count}} {{if eq .Params.Count 1}}paper{{else}}papers{{end}} handed in for {{.Params.Title}}{{end}}
+
+{{define "window"}}between {{(.Params.From.In .Zone).Format "15:04"}} and {{(.Params.Until.In .Zone).Format "15:04"}} on {{(.Params.Until.In .Zone).Format "2 Jan 2006 (GMT-07:00)"}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}
+
+{{.Params.Count}} {{if eq .Params.Count 1}}paper was{{else}}papers were{{end}} handed in for {{.Params.Title}} {{template "window" .}}.{{if eq .Params.ToGrade 1}} 1 of them needs grading.{{else if .Params.ToGrade}} {{.Params.ToGrade}} of them need grading.{{end}}
+
+Open the assignment to see them:
+
+{{.Link}}
+
+--
+Change which emails you get:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Hello {{.Params.FullName}},{{else}}Hello,{{end}}</p>
+<p>{{.Params.Count}} {{if eq .Params.Count 1}}paper was{{else}}papers were{{end}} handed in for {{.Params.Title}} {{template "window" .}}.{{if eq .Params.ToGrade 1}} 1 of them needs grading.{{else if .Params.ToGrade}} {{.Params.ToGrade}} of them need grading.{{end}}</p>
+<p>Open the assignment to see them:</p>
+<p><a href="{{.Link}}">Open the assignment</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
+</body>
+</html>{{end}}

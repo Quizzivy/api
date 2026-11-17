@@ -164,7 +164,7 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 	pool := newPool(t)
 	app := over(pool)
 	userID, other := newUser(t, pool, "student"), newUser(t, pool, "student")
-	off := domain.WithDefaults(nil)
+	off := domain.WithDefaults(nil, domain.Staff)
 	off[3].InApp = false
 	save(t, app, userID, off)
 
@@ -186,7 +186,7 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 		t.Fatalf("a switch that is on and a kind without a switch wrote %d rows, want 2", len(rows))
 	}
 
-	everything := domain.WithDefaults(nil)
+	everything := domain.WithDefaults(nil, domain.Staff)
 	for i := range everything {
 		everything[i].InApp = false
 	}
@@ -203,11 +203,33 @@ func TestASwitchedOffEventWritesNothing(t *testing.T) {
 		}
 	}
 
-	on := domain.WithDefaults(nil)
+	on := domain.WithDefaults(nil, domain.Staff)
 	save(t, app, userID, on)
 	notify(t, app, userID, "due_soon:1", domain.DueSoon{Title: "Đề giữa kỳ", ClosesAt: closes}, domain.Replace)
 	if rows := rowsOf(t, pool, userID); len(rows) != 4 {
 		t.Errorf("with the switch back on the user holds %d rows, want 4", len(rows))
+	}
+}
+
+// TestAWeeklySummaryIsWrittenInTheAppOnlyOnceTheTeacherTurnsItOn fails when
+// a switch whose default is off in the app (summary.weekly, as the deck
+// draws it) writes its in-app item for a teacher who never saved it, or not
+// for one who turned it on.
+func TestAWeeklySummaryIsWrittenInTheAppOnlyOnceTheTeacherTurnsItOn(t *testing.T) {
+	pool := newPool(t)
+	app := over(pool)
+	userID := newUser(t, pool, "teacher")
+	weekly := domain.Weekly{Count: 3, ToGrade: 1, Flagged: 0, ClassNames: []string{"Lớp A"}}
+	notify(t, app, userID, "weekly:2026-W46", weekly, domain.Replace)
+	if rows := rowsOf(t, pool, userID); len(rows) != 0 {
+		t.Fatalf("a teacher who never turned the weekly summary on in the app holds %+v", rows)
+	}
+	on := domain.WithDefaults(nil, domain.Staff)
+	on[6].InApp = true
+	save(t, app, userID, on)
+	notify(t, app, userID, "weekly:2026-W46", weekly, domain.Replace)
+	if rows := rowsOf(t, pool, userID); len(rows) != 1 || rows[0].kind != "summary.weekly" {
+		t.Errorf("with the weekly summary on in the app the teacher holds %+v", rows)
 	}
 }
 

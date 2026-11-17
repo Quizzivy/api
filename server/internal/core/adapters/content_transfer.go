@@ -8,6 +8,9 @@ import (
 	identityrepo "quizzivy/internal/modules/identity/repositories"
 	mediacmd "quizzivy/internal/modules/media/application/command"
 	questionscmd "quizzivy/internal/modules/questions/application/command"
+	questionsdomain "quizzivy/internal/modules/questions/domain"
+	sharingcmd "quizzivy/internal/modules/sharing/application/command"
+	sharingdomain "quizzivy/internal/modules/sharing/domain"
 	testscmd "quizzivy/internal/modules/tests/application/command"
 	testsdomain "quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/platform/db"
@@ -22,15 +25,19 @@ type ContentMovers struct {
 	Ledger      identitydomain.TransferLedger
 	Classes     cqrs.CommandHandler[classescmd.TransferOwnership, int]
 	Tests       cqrs.CommandHandler[testscmd.TransferOwnership, testsdomain.Transferred]
-	Questions   cqrs.CommandHandler[questionscmd.TransferOwnership, int]
+	Questions   cqrs.CommandHandler[questionscmd.TransferOwnership, questionsdomain.Transferred]
 	Media       cqrs.CommandHandler[mediacmd.TransferOwnership, int]
 	Assignments cqrs.CommandHandler[assignmentscmd.TransferOwnership, int]
+	Shares      cqrs.CommandHandler[sharingcmd.TransferOwnership, int]
 }
 
 // ContentTransfer implements the identity module's ContentMover: it locks both
 // accounts through the ledger, moves classes, tests and question groups,
-// questions, media and assignments in that order, and records the audit row,
-// all in one transaction, so a failure at any step moves nothing.
+// question sets and questions, media and assignments in that order, deletes
+// the grants whose grantee now owns what they name, and records the audit row,
+// all in one transaction, so a failure at any step moves nothing. The other
+// grants to the moved tests and sets follow them unwritten: a grant stores no
+// owner.
 type ContentTransfer struct {
 	DB     db.Context
 	Movers func(db.Context) ContentMovers
@@ -44,7 +51,7 @@ func (c ContentTransfer) Move(ctx context.Context, req identitydomain.WriteReque
 		if err := m.Ledger.LockTransfer(ctx, in); err != nil {
 			return err
 		}
-		moved, err := m.move(ctx, in.FromID, in.ToID)
+		moved, err := m.move(ctx, req, in)
 		if err != nil {
 			return err
 		}
@@ -61,7 +68,8 @@ func (c ContentTransfer) Move(ctx context.Context, req identitydomain.WriteReque
 	return out, nil
 }
 
-func (m ContentMovers) move(ctx context.Context, from, to string) (identitydomain.MovedContent, error) {
+func (m ContentMovers) move(ctx context.Context, req identitydomain.WriteRequest, in identitydomain.ContentTransfer) (identitydomain.MovedContent, error) {
+	from, to := in.FromID, in.ToID
 	var moved identitydomain.MovedContent
 	var err error
 	if moved.Classes, err = m.Classes.Handle(ctx, classescmd.TransferOwnership{From: from, To: to}); err != nil {
@@ -72,12 +80,19 @@ func (m ContentMovers) move(ctx context.Context, from, to string) (identitydomai
 		return moved, err
 	}
 	moved.Tests, moved.QuestionGroups = tests.Tests, tests.Groups
-	if moved.Questions, err = m.Questions.Handle(ctx, questionscmd.TransferOwnership{From: from, To: to}); err != nil {
+	questions, err := m.Questions.Handle(ctx, questionscmd.TransferOwnership{From: from, To: to})
+	if err != nil {
 		return moved, err
 	}
+	moved.Questions, moved.QuestionSets = questions.Questions, questions.Sets
 	if moved.Media, err = m.Media.Handle(ctx, mediacmd.TransferOwnership{From: from, To: to}); err != nil {
 		return moved, err
 	}
-	moved.Assignments, err = m.Assignments.Handle(ctx, assignmentscmd.TransferOwnership{From: from, To: to})
+	if moved.Assignments, err = m.Assignments.Handle(ctx, assignmentscmd.TransferOwnership{From: from, To: to}); err != nil {
+		return moved, err
+	}
+	_, err = m.Shares.Handle(ctx, sharingcmd.TransferOwnership{To: to, Write: sharingdomain.Write{
+		ActorID: req.ActorID, All: req.All, Now: in.Now, IP: req.IP, UserAgent: req.UserAgent,
+	}})
 	return moved, err
 }

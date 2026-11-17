@@ -8,7 +8,6 @@ import (
 	"quizzivy/internal/modules/tests/domain"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
-	"quizzivy/internal/shared/opt"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -42,7 +41,8 @@ func NewGroupsPostgres(dbx db.Context, questions GroupQuestionStore, media Media
 }
 
 // Get reads a complete group while holding its shared aggregate lock,
-// including archived bank groups; a group outside scope is domain.ErrNotFound.
+// including archived bank groups; a test-owned group is read by whoever may
+// read its test, and any group outside scope is domain.ErrNotFound.
 func (s *GroupsPostgres) Get(ctx context.Context, scope access.Scope, id string) (domain.StoredGroup, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -56,7 +56,7 @@ func (s *GroupsPostgres) Get(ctx context.Context, scope access.Scope, id string)
 	if err != nil {
 		return domain.StoredGroup{}, err
 	}
-	if !inScope(scope, group.OwnerID) {
+	if !reachableGroup(scope, group) {
 		return domain.StoredGroup{}, domain.ErrNotFound
 	}
 	if err := s.readGraph(ctx, tx, &group); err != nil {
@@ -102,6 +102,13 @@ func inScope(scope access.Scope, owner string) bool {
 	return scope.All || (scope.UserID != "" && owner == scope.UserID)
 }
 
+// reachableGroup reports whether scope reaches group once its test, if it
+// has one, was reached: a test-owned group is read and changed as its test is
+// (testAccess), and a bank group is its owner's and scope.all's.
+func reachableGroup(scope access.Scope, group domain.StoredGroup) bool {
+	return group.OwnerSectionID != nil || inScope(scope, group.OwnerID)
+}
+
 func lockGroupReadOwner(ctx context.Context, tx pgx.Tx, id string, scope access.Scope) error {
 	var testID *string
 	err := tx.QueryRow(ctx, `SELECT s.test_id::text FROM app.question_groups g
@@ -112,12 +119,7 @@ func lockGroupReadOwner(ctx context.Context, tx pgx.Tx, id string, scope access.
 	if err != nil || testID == nil {
 		return err
 	}
-	var locked string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM app.tests WHERE id=$1 AND deleted_at IS NULL AND `+scopedTest+` FOR SHARE`,
-		*testID, scope.All, opt.String(scope.UserID)).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
-	}
+	_, err = reachTest(ctx, tx, scope, *testID, domain.ActionRead, testShared)
 	return err
 }
 

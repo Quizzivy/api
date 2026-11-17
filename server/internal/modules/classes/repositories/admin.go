@@ -10,6 +10,7 @@ import (
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/audit"
 	"quizzivy/internal/shared/paging"
+	"quizzivy/internal/shared/ties"
 	"slices"
 	"strings"
 
@@ -264,6 +265,9 @@ func writeTeacher(ctx context.Context, tx pgx.Tx, in domain.ChangeTeacherInput, 
 	if _, err := tx.Exec(ctx, `UPDATE app.classes SET teacher_id = $2::uuid WHERE id = $1::uuid`,
 		in.ClassID, in.TeacherID); err != nil {
 		return fmt.Errorf("change teacher of %s: %w", in.ClassID, err)
+	}
+	if err := ties.Reassigned(ctx, tx, []string{in.ClassID}); err != nil {
+		return err
 	}
 	diff, err := json.Marshal(teacherDiff{Teacher: ownerChange{Old: previous, New: in.TeacherID}})
 	if err != nil {

@@ -6,8 +6,11 @@ import (
 	"quizzivy/internal/modules/questions/domain"
 )
 
+// Create adds a question to the bank. With ForTestID it is made for that
+// test's draft and belongs to the test's owner, with the actor as its author.
 type Create struct {
-	Request domain.WriteRequest
+	Request   domain.WriteRequest
+	ForTestID string
 }
 
 type CreateHandler struct {
@@ -23,5 +26,9 @@ func (s CreateHandler) Handle(ctx context.Context, cmd Create) (domain.Question,
 	if err := cmd.Request.Input.ValidateAuthoring(); err != nil {
 		return domain.Question{}, err
 	}
-	return s.Write(ctx, cmd.Request, false)
+	req, err := s.ForTest(ctx, cmd.Request, cmd.ForTestID)
+	if err != nil {
+		return domain.Question{}, err
+	}
+	return s.Write(ctx, req, false)
 }

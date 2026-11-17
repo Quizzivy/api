@@ -9,16 +9,19 @@ import (
 
 	"quizzivy/internal/modules/ai/domain"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/limits"
 	"quizzivy/internal/shared/opt"
 )
 
 const pendingIndex = "ai_credit_requests_one_pending_idx"
 
-const managersOfCredits = `
-	SELECT u.id::text FROM app.users u JOIN app.roles r ON r.id = u.role_id
-	 WHERE u.disabled_at IS NULL
-	   AND (r.builtin_key = 'admin'
-	        OR EXISTS (SELECT 1 FROM app.role_permissions rp WHERE rp.role_id = r.id AND rp.permission_key = 'ai.credits.manage'))
+// managersOfCredits is every enabled user who holds ai.credits.manage, the
+// rule the notifications module's request email reads its recipient by
+// (limits.RoleHolds).
+var managersOfCredits = `
+	SELECT u.id::text FROM app.users u
+	 WHERE u.disabled_at IS NULL AND ` + limits.RoleHolds("u.role_id", access.AICreditsManage) + `
 	 ORDER BY u.id`
 
 // CreateRequest records a teacher's request in one transaction that reads the centre's rule under a share lock, so a rule change cannot land between the check and the insert. The partial unique index is what allows one pending request a month: a second insert answers ErrRequestPending. The result names every user who holds ai.credits.manage (the Admin role holds it by being the wildcard), so the caller can tell them.

@@ -11,7 +11,7 @@ import (
 
 func questions(dbx db.Context, media *mediaapp.Application) (*questionsapp.Application, *questionsrepo.Postgres) {
 	repo := questionsrepo.NewPostgres(dbx).WithMedia(adapters.QuestionMedia{})
-	return questionsapp.New(repo, adapters.MediaKinds{Media: media}), repo
+	return questionsapp.New(repo, adapters.MediaKinds{Media: media}).WithSets(repo, repo), repo
 }
 
 func questionsTransport(app *questionsapp.Application, media *mediaapp.Application) questionshttp.Questions {

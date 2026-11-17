@@ -312,5 +312,6 @@ func toAPIStudent(student domain.Student) openapi.StudentRow {
 		AccountStatus:      openapi.AccountStatus(student.Status()),
 		Classes:            classes,
 		Stats:              httpapi.StudentStats(student.Stats),
+		CanMessage:         student.CanMessage,
 	}
 }

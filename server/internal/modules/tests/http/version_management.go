@@ -27,6 +27,9 @@ func (h Tests) DeleteTestVersion(ctx context.Context, request openapi.DeleteTest
 	if errors.Is(err, domain.ErrNotFound) {
 		return openapi.DeleteTestVersion404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
 	}
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	if response, ok := versionConflict(ctx, err); ok {
 		return openapi.DeleteTestVersion409JSONResponse(response), nil
 	}
@@ -64,6 +67,9 @@ type versionChangeResponse struct {
 }
 
 func versionReply(ctx context.Context, result domain.Test, err error) (*versionChangeResponse, error) {
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return &versionChangeResponse{status: nethttp.StatusForbidden, problem: &refused.body}, nil
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		problem := httpapi.NotFound(ctx, msgTestNotFound(ctx))
 		return &versionChangeResponse{status: nethttp.StatusNotFound, problem: &problem}, nil
@@ -100,7 +106,7 @@ func versionConflict(ctx context.Context, err error) (openapi.ErrorResponse, boo
 	case errors.Is(err, domain.ErrArchived):
 		return httpapi.Error(ctx, openapi.TESTARCHIVED, httpx.Text(ctx, "Hãy khôi phục đề đã lưu trữ trước khi thay đổi phiên bản mặc định hoặc tạo bản nháp.", "Restore the archived test before changing the default version or creating a draft.")), true
 	case errors.Is(err, domain.ErrStaleWrite):
-		return httpapi.Error(ctx, openapi.STALEWRITE, httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi tiếp tục.", "The test was edited elsewhere. Please reload before continuing.")), true
+		return httpapi.StaleWrite(ctx, httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi tiếp tục.", "The test was edited elsewhere. Please reload before continuing."), err), true
 	case errors.Is(err, domain.ErrCurrentVersion):
 		return httpapi.Error(ctx, openapi.VERSIONISCURRENT, httpx.Text(ctx, "Hãy chọn một phiên bản mặc định khác trước khi xoá phiên bản này.", "Choose another default version before deleting this one.")), true
 	case errors.Is(err, domain.ErrReferenced):

@@ -18,6 +18,7 @@ const entityClass = "class"
 var classReferences = map[string]domain.Reference{
 	"assignment_classes_class_id_fkey": domain.ReferencedByAssignments,
 	"class_members_join_code_id_fkey":  domain.ReferencedByMembers,
+	"conversations_class_id_fkey":      domain.ReferencedByMessages,
 }
 
 // ClassReferencedBy names what a foreign key holds when it refuses a class's

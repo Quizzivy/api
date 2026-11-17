@@ -23,7 +23,11 @@ func (h Tests) ListTests(ctx context.Context, request openapi.ListTestsRequestOb
 		return nil, httpx.ErrNotImplemented
 	}
 
+	// The Tests page lists the caller's own tests for everyone, admins
+	// included (70 §4.1, DG-53); include=shared adds what is shared with the
+	// caller, for the assignment wizard.
 	in := domain.ListInput{Scope: httpapi.ScopeFromContext(ctx).Own()}
+	in.IncludeShared = request.Params.Include != nil && *request.Params.Include == openapi.Shared
 	if request.Params.Status != nil {
 		status := domain.Status(*request.Params.Status)
 		in.Status = &status
@@ -134,6 +138,9 @@ func (h Tests) UpdateTest(ctx context.Context, request openapi.UpdateTestRequest
 	t, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req, Input: toUpdateInput(*request.Body)})
 	switch {
 	case err == nil:
+	case errors.Is(err, domain.ErrReadOnly), errors.Is(err, domain.ErrOwnerOnly):
+		refused, _ := shareRefusal(ctx, err)
+		return refused, nil
 	case errors.Is(err, domain.ErrArchived):
 		return openapi.UpdateTest409JSONResponse(httpapi.Error(ctx, openapi.TESTARCHIVED,
 			httpx.Text(ctx, "Hãy khôi phục đề đã lưu trữ trước khi thay đổi cấu trúc.",
@@ -143,9 +150,9 @@ func (h Tests) UpdateTest(ctx context.Context, request openapi.UpdateTestRequest
 			httpx.Text(ctx, "Đề có nhóm ngữ liệu chung. Cần trình soạn đề hỗ trợ nhóm để thay đổi cấu trúc.",
 				"The test has groups with shared material. Changing its structure needs an editor that supports groups."))), nil
 	case errors.Is(err, domain.ErrStaleWrite):
-		return openapi.UpdateTest409JSONResponse(httpapi.Error(ctx, openapi.STALEWRITE,
+		return openapi.UpdateTest409JSONResponse(httpapi.StaleWrite(ctx,
 			httpx.Text(ctx, "Đề đã được sửa ở nơi khác. Vui lòng tải lại trước khi lưu.",
-				"The test was edited elsewhere. Please reload before saving."))), nil
+				"The test was edited elsewhere. Please reload before saving."), err)), nil
 	case errors.Is(err, domain.ErrNotFound):
 		return openapi.UpdateTest404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
@@ -180,6 +187,9 @@ func (h Tests) DuplicateTest(ctx context.Context, request openapi.DuplicateTestR
 	}
 
 	t, err := h.app.Commands.Duplicate.Handle(ctx, command.Duplicate{Request: req})
+	if refused, ok := shareRefusal(ctx, err); ok {
+		return refused, nil
+	}
 	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrUnknownQuestion) {
 		return openapi.DuplicateTest404JSONResponse{NotFoundJSONResponse: openapi.NotFoundJSONResponse(
 			httpapi.NotFound(ctx, msgTestNotFound(ctx)))}, nil
@@ -275,6 +285,9 @@ func toAPITest(t domain.Test) (openapi.Test, error) {
 		UpdatedAt:      t.UpdatedAt,
 		DeletedAt:      t.DeletedAt,
 		Sections:       make([]openapi.TestSection, len(t.Sections)),
+		Access:         openapi.ContentAccess(t.Access),
+		Owner:          openapi.PersonRef{Id: httpapi.ParseUUID(t.OwnerID), Name: t.OwnerName},
+		SharedWith:     t.SharedWith,
 	}
 	out.UnpublishedChanges = t.UnpublishedChanges
 	for i, skill := range t.Skills {

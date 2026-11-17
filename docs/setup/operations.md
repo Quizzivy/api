@@ -163,8 +163,8 @@ log is never swept. Retention uses UTC calendar arithmetic and a strict `<` agai
 | `keep_focus_events_months` | 6, 12, 13, 24 | 13 | Deletes `attempt_events` whose `received_at` is before the cutoff and whose assignment has closed for that attempt's student before it, with the same close as the answers rule: a later close a teacher gave that student holds their events back until it passes the cutoff too. The command it replaces read the assignment's own close alone, which predates the per-student close. One `integrity.retained` entry per batch. |
 | `anonymise_disabled_after_months` | 12, 24, or never | never | Anonymises accounts disabled before the cutoff, of any role. One `user.anonymized` entry per account. |
 
-An account that owns classes or content (a class it teaches, or a test, question, group, media file or
-assignment it owns) is skipped and counted (`skippedOwners`): transfer the content, then it is picked up on a
+An account that owns classes or content (a class it teaches, or a test, question, group, question set,
+media file or assignment it owns) is skipped and counted (`skippedOwners`): transfer the content, then it is picked up on a
 later run. Having created an account is not ownership: an Admin reaches it through the Users directory.
 An account with an attempt in progress is skipped for now (`skippedInProgress`). The last active Admin can never be anonymized. The three counts split the accounts that are due: `anonymise`, `skippedOwners` and `skippedInProgress` add up to them, an owner who also has an attempt in progress is counted once, as an owner, and a dry run's `anonymise` is what the apply anonymises. If a batch fails, its accounts are tried one by one, the others are anonymised, `failedAccounts` counts the ones that could not be, and the step ends with an error, so the job fails every night until someone looks at that account. Before the name is
 overwritten, in-app notifications that carry the account's full or display name are deleted
@@ -177,7 +177,13 @@ the maintenance role holds no storage credential. The daily housekeeping of the 
 under that prefix at its next run (where media storage is configured), so until then the object stays in
 storage with nothing pointing at it. A
 revoked link holds a hash of a random token, its purpose, its dates and the account's id, which is no
-personal data, and is as unusable as a deleted one; the daily housekeeping removes the row 30 days later.
+personal data, and is as unusable as a deleted one; the daily housekeeping removes the row 30 days later. In the
+same transaction the account's direct message threads are deleted (D17): their messages, read pointers,
+the rows of the files those messages carried, and the in-app message items both participants hold for
+them. Its rows in `messaging_ties` go too, so no teacher finds it as a former student. Its posts in class
+channels stay, under the placeholder name. The files' objects under `messages/` stay until the API's
+daily housekeeping, which removes objects that no file row names once they are a day old, for the same
+reason as the photo.
 Attempts, memberships and the audit trail stay, which is why this is **structured-identity
 anonymization**, not a guarantee that all personal information disappears: teacher notes, free
 text in answers kept under the settings, existing audit diffs, IPs and backups may retain
@@ -205,9 +211,14 @@ superuser, no `CREATE` anywhere) with the password in `QUIZZIVY_MAINTENANCE_PASS
 only this role (step 1 below). Migration `00139_grant_maintenance_role.sql` gives it
 exactly what the commands use, column by column, and fails when the role does not exist. It can
 read what the commands' predicates read, delete from `attempt_events`, `user_identities`,
-`refresh_tokens`, `notifications` and `ai_reservations`, write `payload` on `attempt_answers`,
-the identity columns on `users` (only to anonymise them, below), and insert into `audit_log`. It cannot `UPDATE` or `DELETE` the
-audit log, cannot touch `ai_usage_ledger`, and owns nothing.
+`refresh_tokens`, `notifications`, `ai_reservations` and the messaging tables (`messages`,
+`message_attachments`, `conversation_reads`, `conversations`, `messaging_ties`, granted with them and
+never their bodies, file names or storage keys), write `payload` on `attempt_answers`,
+the identity columns on `users` (only to anonymise them, below), and insert into `audit_log`. Since
+`00173` it also inserts into `email_outbox`, for the credit decision email of `ai-credits approve`
+and `decline` ("AI credits", below), and reads back only a row's id by its dedupe key. It cannot
+`UPDATE` or `DELETE` the audit log or the outbox, cannot touch `ai_usage_ledger` or
+`email_suppressions`, and owns nothing.
 `server/internal/platform/db/tests/privileges_test.go` pins the whole list; a command that needs
 more adds the grant in its own migration.
 
@@ -230,7 +241,16 @@ undone for that account's sign-in. It cannot sign in as anyone and cannot read a
 leave the account anonymised (the reserved address, no password hash, no phone, photo or display
 name, and disabled), so the role can set neither an email nor a password hash nor enable an
 account again, alone or together; and it holds no `INSERT` on `user_identities` or
-`set_password_tokens`, so it cannot reopen an anonymised row either. The database refuses to
+`set_password_tokens`, so it cannot reopen an anonymised row either. A second trigger, on
+`app.email_outbox` (migration `00173`), refuses every row the role inserts that is not a credit
+decision email, without a sealed secret, to an account at that account's own address, holding the
+request's id alone under the key the console writes, about a decided request of that account's.
+The outbox's unique key then allows one such row per decided request, so the role can neither take
+another email's key (which would keep that email from being queued) nor spend the email budget, and
+since the same migration narrows its `UPDATE` on `ai_credit_requests` to the decision's three
+columns, it cannot make new requests out of old ones. What the email says is read again when it is
+sent, so the role cannot mail an address Quizzivy does not hold or say anything a real decision did
+not. The database refuses to
 anonymise only the last active Admin; skipping an owner of classes or content, or an account with
 an attempt in progress, is the sweep's and `anonymize-user`'s rule, which direct SQL with the
 credential does not follow. It also cannot change a `role_id`, update or delete the
@@ -361,8 +381,8 @@ maintenance anonymize-user -user USER_UUID -apply
 
 `-batch` (default 500, 1 to 10000) is the rows in one batch. `retain-integrity` is the focus-events step alone, with the configured months and one batch per
 run; repeat until it reports zero rows. `anonymize-user` handles one account of any role on an
-explicit request (`anonymize-student -student UUID` is still accepted): it refuses an account
-that owns classes or content, an account with an attempt in progress and the last active Admin,
+explicit request (`anonymize-student -student UUID` is still accepted), with its direct threads as
+above: it refuses an account that owns classes or content, an account with an attempt in progress and the last active Admin,
 and is idempotent. Every command takes `-timeout <duration>` (default `1m`; `retention-sweep`
 takes `-budget` instead, which is also its timeout), and writes are dry runs until `-apply`. An
 unknown command or flag prints the usage line and changes nothing. The older order, flags before
@@ -747,7 +767,10 @@ their hash.
 ## Outgoing email
 
 Mail is sent from `email_outbox` by a dispatcher in the API and one in the
-worker, through Resend's HTTP API with `RESEND_API_KEY`. `EMAIL_FROM` and the
+worker, through Resend's HTTP API with `RESEND_API_KEY`. Each dispatcher runs at
+once for its own process's mail, when a held row falls due, and at least once a
+minute for mail another process queued (the maintenance console's credit
+decisions). `EMAIL_FROM` and the
 key are set together, and production refuses to start without both. A message's
 link points into one of the two web hosts ("The two web hosts", above): the
 staff host when the recipient's role, as the message is sent, opens the teacher
@@ -1084,8 +1107,12 @@ maintenance ai-reservations-sweep
   without it. The audit row names who approved. The product bills nobody; the extra is paid for
   outside Quizzivy (DG-196).
 - **`approve`** raises the teacher's allowance for the request's month by the amount and
-  **`decline`** changes nothing but the status; both tell the teacher. An earlier month's request
-  can only be declined.
+  **`decline`** changes nothing but the status; both tell the teacher, in the app and by email, as
+  the Admin's buttons do (the owner's decision of 2026-11-16). The command only queues the email in
+  `email_outbox`; the API's or the worker's dispatcher sends it on its next pass, which each runs
+  at least once a minute, so the teacher has it within about a minute. The command honours `NOTIFY_EMAIL_EVENTS` from its own environment as the API does, so
+  run it with the API's value (unset sends the email); a value the API would refuse fails every
+  `-apply` before it writes. An earlier month's request can only be declined.
 - **`set-rules`** takes any of `-default-allowance` (rewrites this month's allowances that are not
   custom, never below what a teacher has used), `-warn-percent` (50 to 99) and `-on-limit`
   (`pause`, or `request` to let a teacher ask for more).

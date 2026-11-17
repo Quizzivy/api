@@ -12,7 +12,7 @@ import (
 )
 
 func tests(dbx db.Context, questions *questionsrepo.Postgres, media *mediarepo.Postgres, mediaApp *mediaapp.Application) *testsapp.Application {
-	return testsapp.New(testsrepo.NewPostgres(dbx, questions, media).WithGroupQuestions(adapters.GroupQuestions{})).WithGroups(
+	return testsapp.New(testsrepo.NewPostgres(dbx, questions, media).WithGroupQuestions(adapters.GroupQuestions{}).WithQuestionWrites(adapters.QuestionWrites{})).WithGroups(
 		testsrepo.NewGroupsPostgres(dbx, adapters.GroupQuestions{}, media), adapters.MediaKinds{Media: mediaApp})
 }
 

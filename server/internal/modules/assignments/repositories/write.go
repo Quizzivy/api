@@ -302,6 +302,10 @@ func updateAction(in domain.WriteInput, current lockedRow) string {
 	}
 }
 
+// publishedTestFor is the live, published test whose version versionID a
+// scope may assign: any test the scope can read (visibility.TestAccess), its
+// owner's, scope.all's, and one shared with the scope at either level (D4).
+// Anything else is domain.ErrTestNotPublished.
 func publishedTestFor(ctx context.Context, tx pgx.Tx, scope access.Scope, versionID string) (string, error) {
 	var testID string
 	err := tx.QueryRow(ctx, `
@@ -309,7 +313,7 @@ func publishedTestFor(ctx context.Context, tx pgx.Tx, scope access.Scope, versio
 		  FROM app.test_versions v
 		  JOIN app.tests t ON t.id = v.test_id
 		 WHERE v.id = $1::uuid AND t.deleted_at IS NULL AND t.status = 'published'
-		   AND ($2::boolean OR t.owner_id = $3::uuid)`,
+		   AND `+visibility.TestAccess("t", 2, 3)+` IS NOT NULL`,
 		versionID, scope.All, opt.String(scope.UserID)).Scan(&testID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domain.ErrTestNotPublished

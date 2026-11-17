@@ -16,11 +16,11 @@ import (
 
 // media returns a nil application when object storage is not configured, which
 // is a supported deployment: everything but upload still works.
-func media(ctx context.Context, cfg config.Config, logger *slog.Logger, dbx db.Context) (*mediaapp.Application, *mediarepo.Postgres, error) {
+func media(ctx context.Context, cfg config.Config, logger *slog.Logger, dbx db.Context) (*mediaapp.Application, *mediarepo.Postgres, *storage.Client, error) {
 	repo := mediarepo.NewPostgres(dbx)
 	if !cfg.MediaEnabled() {
 		logger.Info("media storage disabled (no bucket configured)")
-		return nil, repo, nil
+		return nil, repo, nil, nil
 	}
 
 	objects, err := storage.New(ctx, storage.Config{
@@ -32,7 +32,7 @@ func media(ctx context.Context, cfg config.Config, logger *slog.Logger, dbx db.C
 		ForcePathStyle:  cfg.S3ForcePathStyle,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	logger.Info("media storage enabled", "bucket", cfg.S3Bucket, "endpoint", cfg.S3Endpoint)
 
@@ -41,7 +41,7 @@ func media(ctx context.Context, cfg config.Config, logger *slog.Logger, dbx db.C
 		WithSignedURLTTL(cfg.SignedURLTTL).
 		WithOwnerQuota(int64(cfg.MediaOwnerQuotaMiB) << 20).
 		WithLimits(limits.Reader{DB: dbx, Env: cfg.Limits})
-	return app, repo, nil
+	return app, repo, objects, nil
 }
 
 func mediaTransport(app *mediaapp.Application) mediahttp.Media {

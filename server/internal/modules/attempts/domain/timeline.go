@@ -212,3 +212,16 @@ func timelinePlace(e IntegrityEvent) int {
 		return 1
 	}
 }
+
+// FlaggedAttempt is an attempt the integrity rules flagged, as a staff
+// member's direct thread with its student shows it beside the messages
+// (T-R7.10b): the attempt, its assignment, the test's title, the focus
+// losses it counted, and its moment, when it was handed in, or started while
+// it is not.
+type FlaggedAttempt struct {
+	AttemptID    string
+	AssignmentID string
+	Title        string
+	FocusLost    int
+	At           time.Time
+}

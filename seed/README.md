@@ -32,13 +32,27 @@ What is here:
   IELTS criteria, and an image in one prompt and in its explanation. Three assignments to the
   class: one E2E 11 runs, one E2E 9 reads the session of, and one that hides the score, the
   answers and the explanations for E2E 9's result case. It relies on 01.
+- `11-dev-collaboration.sql` — sharing between teachers and Messages (R7, T-R7.24), shaped like
+  the Teacher deck's `SHARE_IN`, `SHARE_0`, `CONVS` and `MSGS` and the Student deck's `SCONVS`.
+  Lê Văn Minh (`giaovien2`) shares a test (Can edit) and his question set *Collocations* (Can
+  use) with Trần Thị Lan, and Ngô Thu Trang a test (Can edit); Lan shares *Mid-term Reading
+  Mock* with Minh (Can edit), *Vocabulary Quiz: Travel* with Trang and Đinh Quốc Bảo (Can use)
+  and her set *Travel vocabulary* with Minh (Can use). Minh's *Farm animals · Unit check* is
+  shared with no one and holds a question his draft *Farm animals quiz* holds too, so a
+  co-editor's edit of it forks. Lan's Messages: Lê Hoàng Nam's two unread messages after his
+  flagged Reading Mock attempt (the context card), Phạm Thu Hà's one, Đỗ Phương Thảo's thread,
+  her two messages to Nguyễn Gia Bảo, and an announcement in three of her classes, each seen by
+  some of the class. Đào Minh Khang, a student Minh created and no peer of the Admin's, is the
+  only member of Minh's class, with an announcement there and a direct thread with Minh, all
+  read. It relies on 06, 08 and 09.
 - `99-assert.sql` — runs last and refuses the seed if the rows above break a
   rule `publish` would have enforced, or if a user, class or owned row lacks
   the column R2's access model reads. The seed writes frozen version rows
   directly, which is the one path that skips publish's validation. Since R6 it also
   checks the new types' frozen shape: True / False / Not given's three options, "Choose N",
   matching's items and choices, rubric criteria only on essays, and that the media references
-  match the images and audio in the content.
+  match the images and audio in the content. Since R7 it checks 11's grants, sets and threads
+  as the API writes them, and the decks' unread counts and context card.
 
 ## Logins
 
@@ -49,7 +63,7 @@ Every account's password is `quizzivy-dev`.
 | `thuong@quizzivy.com` | Admin | `01` |
 | `hocvien@quizzivy.com` | Student | `01` |
 | `giaovien@quizzivy.com` | Teacher: a class, a draft test with one bank question, a bank group | `06` |
-| `giaovien2@quizzivy.com` | Teacher: its own class and draft test | `06` |
+| `giaovien2@quizzivy.com` | Teacher: its own class and draft test; shares with Lan both ways | `06`, `11` |
 | `trogiang@quizzivy.com` | Assistant | `06` |
 | `dung.hoang@example.com`, `trang.le@example.com` | Student | `03` |
 | `han.pham@example.com` | Student, Google only: no password | `03` |
@@ -63,6 +77,7 @@ Every account's password is `quizzivy-dev`.
 | `van.ly@quizzivy.com` | Teacher, disabled | `09` |
 | `bich.hoang@quizzivy.com` (disabled), `son.vu@quizzivy.com` (temporary password), `tam.truong@quizzivy.com` (never signed in), `an.lam@quizzivy.com`, `khoa.dinh@quizzivy.com`, `nhi.ta@quizzivy.com`, `phuc.luu@quizzivy.com`, `chi.mai@quizzivy.com` (Google only) | Student | `09` |
 | `hocvien.ielts65.01@quizzivy.com` … `hocvien.kids.59@quizzivy.com` | Student, fillers that bring the four classes to the deck's sizes | `08` |
+| `khang.dao@quizzivy.com` | Student: the only member of Minh's class, with a thread with him | `11` |
 
 ## `08`: the teacher workspace
 

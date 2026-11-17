@@ -13,11 +13,15 @@ import (
 
 func TestAUsersConstraintTheMapDoesNotNameIsOther(t *testing.T) {
 	for constraint, want := range map[string]domain.Reference{
-		"lesson_plans_author_id_fkey":      domain.ReferencedByOther,
-		"":                                 domain.ReferencedByOther,
-		"tests_owner_id_fkey":              domain.ReferencedByOwnedContent,
-		"attempts_student_id_fkey":         domain.ReferencedByAttempts,
-		"assignment_students_user_id_fkey": domain.ReferencedByAssignments,
+		"lesson_plans_author_id_fkey":          domain.ReferencedByOther,
+		"":                                     domain.ReferencedByOther,
+		"tests_owner_id_fkey":                  domain.ReferencedByOwnedContent,
+		"attempts_student_id_fkey":             domain.ReferencedByAttempts,
+		"assignment_students_user_id_fkey":     domain.ReferencedByAssignments,
+		"messages_sender_id_fkey":              domain.ReferencedByMessages,
+		"conversations_student_id_fkey":        domain.ReferencedByMessages,
+		"conversations_staff_id_fkey":          domain.ReferencedByMessages,
+		"message_attachments_uploaded_by_fkey": domain.ReferencedByMessages,
 	} {
 		if got := repositories.UserReferencedBy(constraint); got != want {
 			t.Errorf("%q answers %q, want %q", constraint, got, want)

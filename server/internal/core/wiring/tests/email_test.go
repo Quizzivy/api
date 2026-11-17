@@ -72,3 +72,28 @@ func TestEmailHeaderPassesOnAFailedSettingsReadAndLogsItsCode(t *testing.T) {
 		t.Fatalf("log: %s", out)
 	}
 }
+
+// TestTheWebhookIsBuiltOnlyWithItsSecretAndNeverLogsIt fails when a
+// deployment without RESEND_WEBHOOK_SECRET gets a webhook (it must answer
+// 501) or says nothing about it, when one with the secret gets none, or when
+// either log carries the secret.
+func TestTheWebhookIsBuiltOnlyWithItsSecretAndNeverLogsIt(t *testing.T) {
+	var logs strings.Builder
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	webhook, err := wiring.EmailWebhook(config.Config{}, db.NewContext(nil), logger)
+	if err != nil || webhook != nil {
+		t.Fatalf("without the secret: %v %v, want no webhook", webhook, err)
+	}
+	if !strings.Contains(logs.String(), "RESEND_WEBHOOK_SECRET") {
+		t.Errorf("without the secret nothing is logged: %s", logs.String())
+	}
+	secret := "whsec_MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3"
+	logs.Reset()
+	webhook, err = wiring.EmailWebhook(config.Config{Email: config.Email{WebhookSecret: config.Secret(secret)}}, db.NewContext(nil), logger)
+	if err != nil || webhook == nil {
+		t.Fatalf("with the secret: %v %v, want a webhook", webhook, err)
+	}
+	if out := logs.String(); strings.Contains(out, "MDEyMzQ1") || !strings.Contains(out, "email.bounced") {
+		t.Errorf("the log carries the secret, or not the events received: %s", out)
+	}
+}

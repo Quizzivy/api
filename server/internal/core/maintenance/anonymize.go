@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/retention"
 )
@@ -61,6 +62,24 @@ const anonymiseUsers = `
 	)
 	SELECT (SELECT count(*) FROM changed), (SELECT count(*) FROM notices)`
 
+const pickThreads = `
+	WITH targets AS (
+	  SELECT u.id FROM app.users u WHERE u.id = ANY($1::uuid[]) AND ` + retention.NotAnonymous + `
+	)
+	SELECT v.id::text, v.staff_id::text, v.student_id::text
+	  FROM app.conversations v
+	 WHERE v.kind = 'direct' AND v.staff_id IN (SELECT id FROM targets)
+	UNION
+	SELECT v.id::text, v.staff_id::text, v.student_id::text
+	  FROM app.conversations v
+	 WHERE v.kind = 'direct' AND v.student_id IN (SELECT id FROM targets)`
+
+const forgetTies = `
+	DELETE FROM app.messaging_ties t
+	 USING app.users u
+	 WHERE u.id = ANY($1::uuid[]) AND ` + retention.NotAnonymous + `
+	   AND (t.staff_id = u.id OR t.student_id = u.id)`
+
 type anonymised struct {
 	users   int64
 	notices int64
@@ -68,8 +87,57 @@ type anonymised struct {
 
 func anonymise(ctx context.Context, tx pgx.Tx, ids []string, reason string, cutoff *time.Time) (anonymised, error) {
 	var out anonymised
+	if err := forgetThreads(ctx, tx, ids); err != nil {
+		return out, err
+	}
 	err := tx.QueryRow(ctx, anonymiseUsers, ids, studentPlaceholder, userPlaceholder, reason, cutoff).Scan(&out.users, &out.notices)
 	return out, err
+}
+
+func forgetThreads(ctx context.Context, tx pgx.Tx, ids []string) error {
+	rows, err := tx.Query(ctx, pickThreads, ids)
+	if err != nil {
+		return fmt.Errorf("find direct threads: %w", err)
+	}
+	var threads, holders, keys []string
+	var id, staff, student string
+	if _, err := pgx.ForEachRow(rows, []any{&id, &staff, &student}, func() error {
+		threads = append(threads, id)
+		holders = append(holders, staff, student)
+		keys = append(keys, notificationsdomain.MessageKey(id), notificationsdomain.MessageKey(id))
+		return nil
+	}); err != nil {
+		return fmt.Errorf("find direct threads: %w", err)
+	}
+	if len(threads) > 0 {
+		rows, err := tx.Query(ctx, `DELETE FROM app.messages WHERE conversation_id = ANY($1::uuid[]) RETURNING attachment_id::text`, threads)
+		if err != nil {
+			return fmt.Errorf("delete direct messages: %w", err)
+		}
+		files, err := pgx.CollectRows(rows, pgx.RowTo[*string])
+		if err != nil {
+			return fmt.Errorf("delete direct messages: %w", err)
+		}
+		for _, statement := range []struct {
+			what string
+			sql  string
+			args []any
+		}{
+			{"delete the messages' files", `DELETE FROM app.message_attachments WHERE id = ANY($1::uuid[])`, []any{files}},
+			{"delete read pointers", `DELETE FROM app.conversation_reads WHERE conversation_id = ANY($1::uuid[])`, []any{threads}},
+			{"delete direct threads", `DELETE FROM app.conversations WHERE id = ANY($1::uuid[])`, []any{threads}},
+			{"delete the threads' notifications", `DELETE FROM app.notifications n USING unnest($1::uuid[], $2::text[]) AS k(user_id, dedupe_key)
+				WHERE n.user_id = k.user_id AND n.dedupe_key = k.dedupe_key`, []any{holders, keys}},
+		} {
+			if _, err := tx.Exec(ctx, statement.sql, statement.args...); err != nil {
+				return fmt.Errorf("%s: %w", statement.what, err)
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, forgetTies, ids); err != nil {
+		return fmt.Errorf("delete messaging ties: %w", err)
+	}
+	return nil
 }
 
 // AnonymizationReport names the account an anonymize-user run handled without exposing its previous identity.
@@ -79,7 +147,7 @@ type AnonymizationReport struct {
 }
 
 // AnonymizeUser removes an account's structured identity and login credentials on an explicit request, as the sweep does for a long-disabled account: its name becomes a placeholder, its email a reserved address, its photo reference, phone and password are cleared, its Google link and refresh tokens are removed and its unused set-password links are revoked.
-// Notifications that carry its name are deleted. Attempts, memberships and the append-only audit trail stay for historical review. It refuses an account that owns classes or content, or has an attempt in progress.
+// Notifications that carry its name are deleted. Its direct threads go in the same transaction (D17): their messages, read pointers and the rows of the files those messages carried, and the in-app items both participants hold for them, while the files' objects are left to the housekeeping's sweep of objects no row names, since this role holds no storage credentials; its messaging ties go too, so nobody finds it as a former student. Its posts in class channels stay, under the placeholder name. Attempts, memberships and the append-only audit trail stay for historical review. It refuses an account that owns classes or content, a question set included, or has an attempt in progress.
 func AnonymizeUser(ctx context.Context, conn db.Conn, userID string, apply bool) (AnonymizationReport, error) {
 	out := AnonymizationReport{UserID: userID}
 	if _, err := uuid.Parse(userID); err != nil {
