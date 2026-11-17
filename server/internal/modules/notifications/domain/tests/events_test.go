@@ -8,14 +8,16 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 )
 
-func theSix() []domain.Preference {
+// theSeven are a staff member's defaults, as the deck draws them.
+func theSeven() []domain.Preference {
 	return []domain.Preference{
 		{Event: domain.EventAttemptSubmitted, InApp: true},
-		{Event: domain.EventAttemptFlagged, InApp: true},
+		{Event: domain.EventAttemptFlagged, InApp: true, Email: true},
 		{Event: domain.EventAssignmentClosing, InApp: true},
-		{Event: domain.EventAssignmentDueSoon, InApp: true},
-		{Event: domain.EventResultReady, InApp: true},
-		{Event: domain.EventMessageReceived, InApp: true},
+		{Event: domain.EventAssignmentDueSoon, InApp: true, Email: true},
+		{Event: domain.EventResultReady, InApp: true, Email: true},
+		{Event: domain.EventMessageReceived, InApp: true, Email: true},
+		{Event: domain.EventSummaryWeekly, InApp: false, Email: true},
 	}
 }
 
@@ -41,14 +43,23 @@ func TestTheSwitchesAreTheContractsEventsInItsOrder(t *testing.T) {
 	}
 }
 
-func TestASwitchNeverSavedIsInTheAppAndNotByEmail(t *testing.T) {
-	got := domain.WithDefaults(nil)
-	if !slices.Equal(got, theSix()) {
-		t.Errorf("the defaults are %+v, want every switch in the app and none by email", got)
+// TestASwitchNeverSavedIsTheDecksDefault fails when a default drifts from
+// the deck's table (NotificationEvent): a teacher gets a flag, a message and
+// the weekly summary by email and not a submission or a closing, the weekly
+// summary is off in the app, and a student's email always follows the app.
+func TestASwitchNeverSavedIsTheDecksDefault(t *testing.T) {
+	if got := domain.WithDefaults(nil, domain.Staff); !slices.Equal(got, theSeven()) {
+		t.Errorf("a teacher's defaults are %+v, want %+v", got, theSeven())
+	}
+	for _, p := range domain.WithDefaults(nil, domain.Student) {
+		want := p.Event != domain.EventSummaryWeekly
+		if p.InApp != want || p.Email != want {
+			t.Errorf("a student's default for %s is %+v, want both channels %v", p.Event, p, want)
+		}
 	}
 	for _, event := range domain.Events() {
-		if p := domain.DefaultPreference(event); p != (domain.Preference{Event: event, InApp: true}) {
-			t.Errorf("the default for %s is %+v", event, p)
+		if got := domain.DefaultPreference(event, domain.Staff); got.InApp != domain.DefaultInApp(event) {
+			t.Errorf("the default for %s is %+v, DefaultInApp says %v", event, got, domain.DefaultInApp(event))
 		}
 	}
 }
@@ -56,19 +67,41 @@ func TestASwitchNeverSavedIsInTheAppAndNotByEmail(t *testing.T) {
 func TestASavedSwitchWinsOverItsDefault(t *testing.T) {
 	stored := []domain.Preference{
 		{Event: domain.EventResultReady, InApp: false, Email: true},
-		{Event: domain.EventAttemptFlagged, InApp: true, Email: true},
-		{Event: "summary.weekly", InApp: true, Email: true},
+		{Event: domain.EventAttemptFlagged, InApp: true, Email: false},
+		{Event: "class.joined", InApp: true, Email: true},
 	}
-	want := theSix()
-	want[1].Email = true
+	want := theSeven()
+	want[1].Email = false
 	want[4] = domain.Preference{Event: domain.EventResultReady, InApp: false, Email: true}
-	if got := domain.WithDefaults(stored); !slices.Equal(got, want) {
+	if got := domain.WithDefaults(stored, domain.Staff); !slices.Equal(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
 
+// TestAStudentsEmailIsTheirInAppSwitch fails when a student's stored or given
+// email can differ from the same switch in the app (DG-82): a row saved before
+// R7, with email false, still reads and sends as the app switch says.
+func TestAStudentsEmailIsTheirInAppSwitch(t *testing.T) {
+	stored := []domain.Preference{
+		{Event: domain.EventResultReady, InApp: true, Email: false},
+		{Event: domain.EventAssignmentDueSoon, InApp: false, Email: true},
+	}
+	for _, p := range domain.WithDefaults(stored, domain.Student) {
+		if p.Email != p.InApp {
+			t.Errorf("a student's %s reads %+v", p.Event, p)
+		}
+	}
+	kept := domain.Student.Keep(stored)
+	if kept[0].Email != true || kept[1].Email != false || stored[0].Email {
+		t.Errorf("Keep gives %+v and must not change what it was given (%+v)", kept, stored)
+	}
+	if got := domain.Staff.Keep(stored); !slices.Equal(got, stored) {
+		t.Errorf("a staff member's switches changed: %+v", got)
+	}
+}
+
 func TestAWholeSetHoldsEverySwitchExactlyOnce(t *testing.T) {
-	given := theSix()
+	given := theSeven()
 	given[0].InApp, given[3].Email = false, true
 	want := slices.Clone(given)
 	slices.Reverse(given)
@@ -77,21 +110,21 @@ func TestAWholeSetHoldsEverySwitchExactlyOnce(t *testing.T) {
 		t.Errorf("a reversed set gives %+v (%v), want it in the switches' order: %+v", got, err, want)
 	}
 
-	repeated := theSix()
+	repeated := theSeven()
 	repeated[4] = domain.Preference{Event: domain.EventAttemptSubmitted, InApp: false}
 	if _, err := domain.WholeSet(repeated); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("a repeated event: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	if _, err := domain.WholeSet(append(theSix(), theSix()[2])); !errors.Is(err, domain.ErrEventsNotOnceEach) {
-		t.Errorf("a sixth switch: err = %v, want ErrEventsNotOnceEach", err)
+	if _, err := domain.WholeSet(append(theSeven(), theSeven()[2])); !errors.Is(err, domain.ErrEventsNotOnceEach) {
+		t.Errorf("an eighth switch: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	if _, err := domain.WholeSet(theSix()[:4]); !errors.Is(err, domain.ErrEventsNotOnceEach) {
+	if _, err := domain.WholeSet(theSeven()[:4]); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("a missing event: err = %v, want ErrEventsNotOnceEach", err)
 	}
 	if _, err := domain.WholeSet(nil); !errors.Is(err, domain.ErrEventsNotOnceEach) {
 		t.Errorf("no switch at all: err = %v, want ErrEventsNotOnceEach", err)
 	}
-	unknown := theSix()
+	unknown := theSeven()
 	unknown[2].Event = "class.joined"
 	if _, err := domain.WholeSet(unknown); !errors.Is(err, domain.ErrUnknownEvent) {
 		t.Errorf("an event that is not a switch: err = %v, want ErrUnknownEvent", err)

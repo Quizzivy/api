@@ -19,5 +19,9 @@ type ReopenHandler struct {
 }
 
 func (s ReopenHandler) Handle(ctx context.Context, cmd Reopen) (domain.Assignment, error) {
-	return s.Repo.Reopen(ctx, cmd.Request, cmd.ClosesAt, cmd.Reason, cmd.Now)
+	reopened, err := s.Repo.Reopen(ctx, cmd.Request, cmd.ClosesAt, cmd.Reason, cmd.Now)
+	if err == nil {
+		s.Nudge()
+	}
+	return reopened, err
 }

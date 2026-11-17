@@ -1,0 +1,29 @@
+{{define "subject"}}{{.Org}}: Lượt làm bài của {{.Params.StudentName}} bị gắn cờ · {{.Params.Title}}{{end}}
+
+{{define "text"}}{{.Org}}
+
+{{if .Params.FullName}}Chào {{.Params.FullName}},{{else}}Chào bạn,{{end}}
+
+Lượt làm bài {{.Params.Title}} của {{.Params.StudentName}} đã bị gắn cờ{{if .Params.FocusLost}} vì học viên rời trang làm bài {{.Params.FocusLost}} lần{{end}}.
+
+Hãy mở lượt làm bài để xem lại:
+
+{{.Link}}
+
+--
+Chọn loại email bạn muốn nhận:
+{{.Settings}}{{end}}
+
+{{define "html"}}<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "subject" .}}</title></head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5">
+<p style="margin:0 0 24px;font-size:18px;font-weight:bold">{{.Org}}</p>
+<p>{{if .Params.FullName}}Chào {{.Params.FullName}},{{else}}Chào bạn,{{end}}</p>
+<p>Lượt làm bài {{.Params.Title}} của {{.Params.StudentName}} đã bị gắn cờ{{if .Params.FocusLost}} vì học viên rời trang làm bài {{.Params.FocusLost}} lần{{end}}.</p>
+<p>Hãy mở lượt làm bài để xem lại:</p>
+<p><a href="{{.Link}}">Mở lượt làm bài</a></p>
+<p style="font-size:14px;word-break:break-all">{{.Link}}</p>
+<p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Chọn loại email bạn muốn nhận</a></p>
+</body>
+</html>{{end}}

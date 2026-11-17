@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"quizzivy/internal/modules/notifications/application/command"
 	"quizzivy/internal/modules/notifications/domain"
@@ -77,5 +78,43 @@ func TestNotifyRefusesANoticeTheStoreCannotWrite(t *testing.T) {
 		if store.calls != 0 {
 			t.Errorf("%s: the store was called for a notice that was refused", label)
 		}
+	}
+}
+
+type mailer struct {
+	store   *fakeStore
+	notices []domain.Notice
+	err     error
+}
+
+func (m *mailer) Mail(_ context.Context, n domain.Notice, now time.Time) error {
+	if m.store.calls != 1 || now.IsZero() {
+		m.store.t.Errorf("the email channel ran before the in-app write, or without a clock (%d writes, %v)", m.store.calls, now)
+	}
+	m.notices = append(m.notices, n)
+	return m.err
+}
+
+// TestNotifyHandsEachWrittenNoticeToTheEmailChannel fails when Notify sends a
+// notice's email before its in-app write, sends one for a notice it refused,
+// or hides the email channel's failure.
+func TestNotifyHandsEachWrittenNoticeToTheEmailChannel(t *testing.T) {
+	store := only(t, "Upsert")
+	m := &mailer{store: store}
+	app := over(store).WithMail(m)
+	cmd := submitted(domain.Add)
+	if _, err := app.Commands.Notify.Handle(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.notices) != 1 || m.notices[0].DedupeKey != cmd.DedupeKey || m.notices[0].UserID != reader {
+		t.Errorf("the email channel was handed %+v", m.notices)
+	}
+	if _, err := app.Commands.Notify.Handle(context.Background(), submitted(0)); err == nil || len(m.notices) != 1 {
+		t.Errorf("a refused notice reached the email channel (%v)", err)
+	}
+	store.calls = 0
+	m.err = errors.New("outbox gone")
+	if _, err := app.Commands.Notify.Handle(context.Background(), cmd); !errors.Is(err, m.err) {
+		t.Errorf("the email channel's failure answered %v", err)
 	}
 }

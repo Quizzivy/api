@@ -24,6 +24,7 @@ import (
 	questionshttp "quizzivy/internal/modules/questions/http"
 	sharinghttp "quizzivy/internal/modules/sharing/http"
 	testshttp "quizzivy/internal/modules/tests/http"
+	"quizzivy/internal/platform/email"
 	"quizzivy/internal/platform/httpx"
 )
 
@@ -49,6 +50,7 @@ type Server struct {
 	sharinghttp.Sharing
 	messaginghttp.Staff
 	messaginghttp.Student
+	EmailEvents
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger
@@ -68,6 +70,9 @@ type Deps struct {
 	// LandingOrigins are the landing site's origins (LANDING_URL), each of
 	// which may call LandingOperations without credentials; none admits none.
 	LandingOrigins []string
+	// EmailWebhook receives Resend's delivery events; nil without
+	// RESEND_WEBHOOK_SECRET, when receiveEmailEvents answers 501.
+	EmailWebhook *email.Webhook
 }
 
 var _ openapi.StrictServerInterface = (*Server)(nil)

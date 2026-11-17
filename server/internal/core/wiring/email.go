@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"time"
 
+	"quizzivy/internal/core/adapters"
 	"quizzivy/internal/core/jobs"
+	notificationsemail "quizzivy/internal/modules/notifications/application/email"
+	notificationsrepo "quizzivy/internal/modules/notifications/repositories"
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
 	organizationquery "quizzivy/internal/modules/organization/application/query"
 	"quizzivy/internal/platform/config"
@@ -23,6 +26,7 @@ const (
 	emailRetry               = time.Minute
 	emailBusy                = 10 * time.Second
 	emailFloor               = time.Second
+	emailIdle                = time.Minute
 )
 
 // Mail is the outgoing mail of one process: the outbox its modules enqueue
@@ -33,12 +37,16 @@ type Mail struct {
 	Dispatcher *email.Dispatcher
 }
 
-// Run dispatches until ctx ends, on this process's enqueues and on the
-// earliest pending row's due time.
+// Run dispatches until ctx ends, on this process's enqueues, on the earliest
+// pending row's due time and at least once a minute: the maintenance console
+// queues a credit decision email without a dispatcher of its own and cannot
+// wake this one, so the minute is the longest that email waits, against the
+// Admin operation's wake within the same process. On an empty outbox the
+// minute costs each process one dispatch pass and one NextDue query.
 func (m Mail) Run(ctx context.Context, logger *slog.Logger) {
 	jobs.RunEmail(ctx, logger, m.Dispatcher, jobs.EmailSchedule{
 		Wake:  m.Outbox.Wake(),
-		Retry: emailRetry, Busy: emailBusy, Floor: emailFloor,
+		Retry: emailRetry, Busy: emailBusy, Floor: emailFloor, Idle: emailIdle,
 	})
 }
 
@@ -51,7 +59,9 @@ type Branding = cqrs.QueryHandler[organizationquery.Branding, organizationmodel.
 // recipient belongs at. Every header names the centre by branding's short name, else
 // its name, else Quizzivy; until the settings have been read once, a batch
 // fails and logs ORGANIZATION_SETTINGS_UNAVAILABLE. A missing SECRETS_KEY leaves the outbox unable to
-// seal a secret and every sealed row failing closed.
+// seal a secret and every sealed row failing closed. The dispatcher holds the
+// notification emails' Preparers (T-R7.13), so the API's and the worker's
+// both send them, and it logs which of them NOTIFY_EMAIL_EVENTS leaves on.
 func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slog.Logger) (Mail, error) {
 	var sealer *secrets.Sealer
 	if cfg.SecretsKey != nil {
@@ -70,6 +80,7 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 	} else {
 		logger.Warn("email goes to the sink directory, not to a provider", "dir", cfg.Email.SinkDir)
 	}
+	logger.Info("notification emails", "events", cfg.Email.NotifyEvents())
 	return Mail{
 		Outbox: email.NewOutbox(sealer),
 		Dispatcher: &email.Dispatcher{
@@ -77,8 +88,26 @@ func BuildMail(cfg config.Config, dbx db.Context, branding Branding, logger *slo
 			Org: organizationName(branding, logger), Hosts: cfg.Hosts, ReplyTo: cfg.Email.ReplyTo,
 			Limits: cfg.Limits, Interval: cfg.Email.SendInterval(),
 			Location: cfg.AppLocation, Logger: logger,
+			Prepare: adapters.NotificationPreparers(notificationsrepo.NewMail(dbx, nil), cfg.Email.Sends),
 		},
 	}, nil
+}
+
+// EmailWebhook is Resend's webhook over cfg's RESEND_WEBHOOK_SECRET, which
+// lists the recipients of hard bounces and complaints for the dispatcher to
+// skip (T-R7.15). Without the secret it is nil, receiveEmailEvents answers
+// 501, and the API logs that bounces and complaints are not received.
+func EmailWebhook(cfg config.Config, dbx db.Context, logger *slog.Logger) (*email.Webhook, error) {
+	if !cfg.Email.ReceivesEvents() {
+		logger.Warn("email bounces and complaints are not received; POST /public/email-events answers 501", "setting", "RESEND_WEBHOOK_SECRET")
+		return nil, nil
+	}
+	webhook, err := email.NewWebhook(cfg.Email.WebhookSecret.Reveal(), dbx, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("email bounces and complaints are received", "events", []string{email.EventBounced, email.EventComplained})
+	return webhook, nil
 }
 
 func organizationName(branding Branding, logger *slog.Logger) func(context.Context) (string, error) {
@@ -95,4 +124,11 @@ func organizationName(branding Branding, logger *slog.Logger) func(context.Conte
 		}
 		return fallbackOrganizationName, nil
 	}
+}
+
+// NotificationMail is the notifications module's email channel over mail's
+// outbox: Notify enqueues each notice's email there, under the recipient's
+// switch and NOTIFY_EMAIL_EVENTS.
+func NotificationMail(cfg config.Config, dbx db.Context, mail Mail) notificationsemail.Mailer {
+	return notificationsemail.Mailer{Outbox: notificationsrepo.NewMail(dbx, mail.Outbox), Sends: cfg.Email.Sends}
 }

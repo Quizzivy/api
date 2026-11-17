@@ -31,4 +31,7 @@ var (
 	// ErrEventsNotOnceEach is a set of preferences that does not hold every
 	// event exactly once.
 	ErrEventsNotOnceEach = errors.New("notifications: every event must appear exactly once")
+	// ErrNoSchedule is a scheduled run in an application built without the
+	// scheduler's store.
+	ErrNoSchedule = errors.New("notifications: the scheduler's store is not wired")
 )

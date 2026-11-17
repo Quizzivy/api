@@ -2131,3 +2131,34 @@ func TestATieIsBetweenTwoAccountsOnceAndGoesWithEither(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------- email suppressions
+
+// TestTheSuppressionListHoldsOneTrimmedLowerCasedAddressPerEvent fails when
+// app.email_suppressions (00172) takes an address in another form than the
+// dispatcher compares, a reason other than a bounce or a complaint, an
+// address twice, or one Resend event twice.
+func TestTheSuppressionListHoldsOneTrimmedLowerCasedAddressPerEvent(t *testing.T) {
+	conn := migrated(t)
+	insert := `INSERT INTO app.email_suppressions (address, reason, provider_event_id) VALUES ($1, $2, $3)`
+	for _, c := range map[string]struct {
+		address, reason, constraint string
+	}{
+		"an upper-case address": {"Nam@Example.com", "bounced", "email_suppressions_address_check"},
+		"a padded address":      {" nam@example.com", "complained", "email_suppressions_address_check"},
+		"an unknown reason":     {"nam@example.com", "unsubscribed", "email_suppressions_reason_check"},
+		"a delayed delivery":    {"nam@example.com", "delivery_delayed", "email_suppressions_reason_check"},
+	} {
+		withTx(t, conn, func(tx *sql.Tx, f fixture) {
+			rejectsWith(t, tx, c.constraint, insert, strings.Replace(c.address, "nam", "nam-"+f.adminID, 1), c.reason, "msg_"+f.adminID)
+		})
+	}
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, insert, f.adminID+"@example.com", "bounced", "msg_"+f.adminID)
+		rejectsWith(t, tx, "email_suppressions_pkey", insert, f.adminID+"@example.com", "complained", "msg_2"+f.adminID)
+	})
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		mustExec(t, tx, insert, f.adminID+"@example.com", "bounced", "msg_"+f.adminID)
+		rejectsWith(t, tx, "email_suppressions_provider_event_id_key", insert, "other-"+f.adminID+"@example.com", "bounced", "msg_"+f.adminID)
+	})
+}

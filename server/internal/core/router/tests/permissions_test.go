@@ -65,8 +65,8 @@ func TestEveryNonOpenOperationDeclaresAPermission(t *testing.T) {
 func TestOpenOperationsDeclareNone(t *testing.T) {
 	spec := freshSpec(t)
 	open := openPatterns(spec)
-	if len(open) != 12 {
-		t.Errorf("%d open operations, want the twelve of theOpenTwelve", len(open))
+	if len(open) != len(theOpenThirteen) {
+		t.Errorf("%d open operations, want the thirteen of theOpenThirteen", len(open))
 	}
 	eachOperation(spec, func(pattern string, op *openapi3.Operation) {
 		if _, isOpen := open[pattern]; !isOpen {

@@ -48,7 +48,7 @@ func notices(m domain.Milestones, brief domain.Briefing, now time.Time) []notifi
 	var out []notificationscommand.Notify
 	for _, reader := range brief.Readers {
 		if m.HandedIn {
-			out = append(out, submitted(reader, brief, now))
+			out = append(out, submitted(reader, m, brief, now))
 		}
 		if m.Flagged {
 			out = append(out, flagged(reader, m, brief))
@@ -60,7 +60,7 @@ func notices(m domain.Milestones, brief domain.Briefing, now time.Time) []notifi
 	return out
 }
 
-func submitted(reader string, brief domain.Briefing, now time.Time) notificationscommand.Notify {
+func submitted(reader string, m domain.Milestones, brief domain.Briefing, now time.Time) notificationscommand.Notify {
 	toGrade := 0
 	if brief.ToGrade {
 		toGrade = 1
@@ -72,6 +72,7 @@ func submitted(reader string, brief domain.Briefing, now time.Time) notification
 		Target:    &notificationsdomain.Target{Route: notificationsdomain.RouteAssignment, AssignmentID: brief.AssignmentID},
 		DedupeKey: notificationsdomain.SubmittedKey(brief.AssignmentID, now),
 		Merge:     notificationsdomain.Add,
+		AttemptID: m.AttemptID,
 	}
 }
 

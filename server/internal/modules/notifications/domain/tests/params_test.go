@@ -44,6 +44,7 @@ var everyKind = []struct {
 	{domain.MessageNotice{SenderName: "Lê Hà My", Count: 2, Excerpt: "Em nộp bài muộn được không ạ?"}, domain.MessageReceived, []string{"count", "excerpt", "senderName"}},
 	{domain.TeacherMessageNotice{SenderName: "Cô Thương", Count: 1, Excerpt: "bai-tap.pdf"}, domain.MessageFromTeacher, []string{"count", "excerpt", "senderName"}},
 	{domain.TeacherMessageNotice{SenderName: "Cô Thương", Count: 3, Excerpt: "Lớp nghỉ thứ Sáu", ClassName: &announcedIn}, domain.MessageFromTeacher, []string{"className", "count", "excerpt", "senderName"}},
+	{domain.Weekly{Count: 1, ToGrade: 1, Flagged: 0, ClassNames: []string{"Lớp A", "Lớp B"}}, domain.SummaryWeekly, []string{"classNames", "count", "flagged", "toGrade"}},
 }
 
 var announcedIn = "IELTS Foundation A"

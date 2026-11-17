@@ -3,16 +3,18 @@ package config_test
 import (
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"quizzivy/internal/platform/config"
+	"quizzivy/internal/platform/email"
 )
 
 var emailVariables = []string{
 	"RESEND_API_KEY", "EMAIL_FROM", "EMAIL_REPLY_TO", "EMAIL_DAILY_LIMIT", "EMAIL_SEND_RATE",
-	"EMAIL_SINK_DIR", "SECRETS_KEY", "APP_TIMEZONE",
+	"EMAIL_SINK_DIR", "SECRETS_KEY", "APP_TIMEZONE", "NOTIFY_EMAIL_EVENTS", "RESEND_WEBHOOK_SECRET",
 }
 
 var secretsKey = base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
@@ -130,5 +132,94 @@ func TestTheImportWorkerLoadsTheSameEmailGroup(t *testing.T) {
 	workerEnvironment(t, map[string]string{"APP_ENV": "production"})
 	if _, err := config.LoadImportWorker(); err == nil {
 		t.Error("a production worker without the email group started")
+	}
+}
+
+// TestNotifyEmailEventsTurnsEachNotificationEmailOffByName fails when the
+// kill switch's default stops being every notification email, when "none"
+// sends something, or when a name it does not know is accepted (a typo would
+// leave an email on).
+func TestNotifyEmailEventsTurnsEachNotificationEmailOffByName(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Email.Events, email.NotifyEvents()) || !cfg.Email.Sends("message.received") {
+		t.Errorf("unset, the events are %v, want all of %v", cfg.Email.Events, email.NotifyEvents())
+	}
+	for raw, want := range map[string][]string{
+		"   ":             email.NotifyEvents(),
+		"none":            {},
+		"attempt.flagged": {"attempt.flagged"},
+		" result.ready , message.received,,result.ready ": {"result.ready", "message.received"},
+	} {
+		cfg, err := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": raw})
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if !slices.Equal(cfg.Email.Events, want) {
+			t.Errorf("%q gives %v, want %v", raw, cfg.Email.Events, want)
+		}
+	}
+	if !(config.Email{}).Sends("summary.weekly") || !slices.Equal((config.Email{}).NotifyEvents(), email.NotifyEvents()) {
+		t.Error("a Config built without Load sends no notification email")
+	}
+	if none, _ := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": "none"}); none.Email.Sends("attempt.flagged") || len(none.Email.NotifyEvents()) != 0 {
+		t.Error("none still sends a notification email")
+	}
+	cfg, _ = loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": "attempt.flagged"})
+	if cfg.Email.Sends("message.received") || !cfg.Email.Sends("attempt.flagged") {
+		t.Errorf("Sends does not follow the list: %v", cfg.Email.Events)
+	}
+	for _, raw := range []string{"message.recieved", "attempt.flagged,all", "message.from_teacher"} {
+		if _, err := loadWith(t, map[string]string{"NOTIFY_EMAIL_EVENTS": raw}); err == nil || !strings.Contains(err.Error(), "NOTIFY_EMAIL_EVENTS") {
+			t.Errorf("%q: err = %v, want NOTIFY_EMAIL_EVENTS refused", raw, err)
+		}
+	}
+}
+
+// webhookSecret is a signing secret in the form Resend's dashboard shows.
+var webhookSecret = "whsec_" + base64.StdEncoding.EncodeToString([]byte("0123456789abcdef01234567"))
+
+// TestTheWebhookSecretIsOptionalCheckedAndNeverPrinted fails when an unset
+// RESEND_WEBHOOK_SECRET stops the API (it only turns the webhook off; the
+// committed production config boots without it, as
+// TestTheCommittedProductionConfigBootsWithTheDocumentedSecrets shows),
+// when a secret that is not a signing key starts one, or when the secret
+// reaches an error or a printed config.
+func TestTheWebhookSecretIsOptionalCheckedAndNeverPrinted(t *testing.T) {
+	cfg, err := loadWith(t, fullEmail())
+	if err != nil {
+		t.Fatalf("without the webhook secret: %v", err)
+	}
+	if cfg.Email.ReceivesEvents() {
+		t.Error("without the secret the webhook is on")
+	}
+	for _, raw := range []string{webhookSecret, strings.TrimPrefix(webhookSecret, "whsec_"), " " + webhookSecret + " "} {
+		cfg, err := loadWith(t, merge(fullEmail(), map[string]string{"RESEND_WEBHOOK_SECRET": raw}))
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if !cfg.Email.ReceivesEvents() || strings.TrimSpace(cfg.Email.WebhookSecret.Reveal()) != strings.TrimSpace(raw) {
+			t.Errorf("%q: the secret is lost: %v", raw, cfg.Email.ReceivesEvents())
+		}
+		if printed := fmt.Sprintf("%v %+v %#v", cfg.Email.WebhookSecret, cfg.Email, cfg.Email); strings.Contains(printed, "MDEyMzQ1") {
+			t.Errorf("the secret is printed: %s", printed)
+		}
+	}
+	for name, raw := range map[string]string{
+		"not base64":           "whsec_not base64!",
+		"too short":            "whsec_" + base64.StdEncoding.EncodeToString([]byte("short")),
+		"the API key's form":   "re_secret_value",
+		"url-safe base64 only": "whsec_" + base64.URLEncoding.EncodeToString([]byte{0xfb, 0xff, 0xfe, 0xfd, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}),
+	} {
+		_, err := loadWith(t, merge(fullEmail(), map[string]string{"RESEND_WEBHOOK_SECRET": raw}))
+		if err == nil {
+			t.Errorf("%s was accepted", name)
+			continue
+		}
+		if strings.Contains(err.Error(), strings.TrimPrefix(raw, "whsec_")) || !strings.Contains(err.Error(), "RESEND_WEBHOOK_SECRET") {
+			t.Errorf("%s: the error repeats the secret or does not name it: %v", name, err)
+		}
 	}
 }

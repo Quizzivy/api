@@ -13875,7 +13875,7 @@
       },
       "NotificationKind": {
         "type": "string",
-        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n| `message.received` | a teacher | `senderName`, `count`, `excerpt` |\n| `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |\n\nA message item is one per reader per thread: it is written again,\nunread, with the new `count` while the thread stays unread, and marked\nread when the reader's pointer passes it. Each write gives it a new\n`id` and `createdAt`, so it lists first, and once it was read its\n`count` starts again from the next message. `excerpt` is the newest\nmessage's first 80 characters; it lives only in the reader's own bell.\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
+        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n| `message.received` | a teacher | `senderName`, `count`, `excerpt` |\n| `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |\n| `summary.weekly` | a teacher | `count`, `toGrade`, `flagged`, `classNames` |\n\nA message item is one per reader per thread: it is written again,\nunread, with the new `count` while the thread stays unread, and marked\nread when the reader's pointer passes it. Each write gives it a new\n`id` and `createdAt`, so it lists first, and once it was read its\n`count` starts again from the next message. `excerpt` is the newest\nmessage's first 80 characters; it lives only in the reader's own bell.\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
         "enum": [
           "attempt.submitted",
           "attempt.flagged",
@@ -13894,7 +13894,8 @@
           "content.shared",
           "test.published_by_collaborator",
           "message.received",
-          "message.from_teacher"
+          "message.from_teacher",
+          "summary.weekly"
         ]
       },
       "NotificationAudience": {
@@ -13907,14 +13908,15 @@
       },
       "NotificationEvent": {
         "type": "string",
-        "description": "One switch of the notification settings. `attempt.submitted`,\n`attempt.flagged` and `assignment.closing` are the teacher's;\n`assignment.due_soon` and `result.ready` the student's;\n`message.received` both (\"New message\" for a teacher, \"Messages from\nteachers\" for a student). A switch governs the kind of the same name,\n`assignment.due_soon` also governs `assignment.opened` and\n`assignment.extended`, and `message.received` also governs\n`message.from_teacher`. `class.joined`\n`join_codes.rotated`, `class.teacher_changed`, `content.shared` and\n`test.published_by_collaborator` have no switch: the sharer's \"Send a\nnotification\" decides the first, and the owner always hears of the\nsecond.\n",
+        "description": "One switch of the notification settings. `attempt.submitted`,\n`attempt.flagged` and `assignment.closing` are the teacher's;\n`assignment.due_soon` and `result.ready` the student's;\n`message.received` both (\"New message\" for a teacher, \"Messages from\nteachers\" for a student). A switch governs the kind of the same name,\n`assignment.due_soon` also governs `assignment.opened` and\n`assignment.extended`, and `message.received` also governs\n`message.from_teacher`. `summary.weekly` is the teacher's Monday\nsummary, by email and, when its in-app switch is on, in the bell.\n\nEach switch covers both channels for a student (DG-82): a student's\n`inApp` and `email` are always equal. A teacher's two columns are\nseparate, with the deck's defaults: in app on and email off for\n`attempt.submitted` and `assignment.closing`, both on for\n`attempt.flagged` and `message.received`, in app off and email on\nfor `summary.weekly`. `class.joined`\n`join_codes.rotated`, `class.teacher_changed`, `content.shared` and\n`test.published_by_collaborator` have no switch: the sharer's \"Send a\nnotification\" decides the first, and the owner always hears of the\nsecond.\n",
         "enum": [
           "attempt.submitted",
           "attempt.flagged",
           "assignment.closing",
           "assignment.due_soon",
           "result.ready",
-          "message.received"
+          "message.received",
+          "summary.weekly"
         ]
       },
       "NotificationParams": {
@@ -13931,7 +13933,7 @@
           "count": {
             "type": "integer",
             "minimum": 0,
-            "description": "Papers handed in (`attempt.submitted`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`)."
+            "description": "Papers handed in (`attempt.submitted`, and last week's on the teacher's classes for `summary.weekly`), classes whose pre-v0.8.0 join code was replaced at start-up (`join_codes.rotated`, no longer written), or classes, tests, questions, question groups, media and assignments given to the reader (`content.transferred`)."
           },
           "toGrade": {
             "type": "integer",
@@ -13966,7 +13968,7 @@
               "minLength": 1,
               "maxLength": 200
             },
-            "description": "At most five names; `count` holds how many classes there are."
+            "description": "At most five names. For `join_codes.rotated`, `count` holds how many classes there are; for `summary.weekly`, they are the classes the week's figures cover."
           },
           "closesAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -14046,6 +14048,11 @@
             "minLength": 1,
             "maxLength": 80,
             "description": "The newest message's first 80 characters, or its file's name (`message.*`)."
+          },
+          "flagged": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Attempts flagged last week (`summary.weekly`)."
           }
         }
       },
@@ -14059,7 +14066,7 @@
         "properties": {
           "route": {
             "type": "string",
-            "description": "`assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`,\n`test` and `messages` are pages of the teaching workspace;\n`result`, `studentAssignment` and `studentMessages` are the\nstudent's result, the student's page of an assignment and the\nstudent's Messages.\n",
+            "description": "`assignment`, `attempt`, `grading`, `classes`, `sharedWithMe`,\n`test`, `messages` and `dashboard` are pages of the teaching workspace;\n`result`, `studentAssignment` and `studentMessages` are the\nstudent's result, the student's page of an assignment and the\nstudent's Messages.\n",
             "enum": [
               "assignment",
               "attempt",
@@ -14070,7 +14077,8 @@
               "sharedWithMe",
               "test",
               "messages",
-              "studentMessages"
+              "studentMessages",
+              "dashboard"
             ]
           },
           "assignmentId": {
@@ -14160,15 +14168,15 @@
           },
           "email": {
             "type": "boolean",
-            "description": "Stored and returned. Nothing is sent by email yet."
+            "description": "While false, no email this switch governs is sent to the caller.\nA student's write stores it equal to `inApp`, whatever it says\n(DG-82). An email never carries a message's body, a join code, a\npassword or a score the review policy does not yet show.\n"
           }
         }
       },
       "NotificationPreferences": {
         "type": "array",
         "description": "Every `NotificationEvent` once. The server answers them in the enum's order.",
-        "minItems": 6,
-        "maxItems": 6,
+        "minItems": 7,
+        "maxItems": 7,
         "items": {
           "$ref": "#/components/schemas/NotificationPreference"
         }
@@ -16590,6 +16598,101 @@
           "perIp": {
             "perMinute": 3,
             "perHour": 10
+          }
+        }
+      }
+    },
+    "/public/email-events": {
+      "post": {
+        "operationId": "receiveEmailEvents",
+        "tags": [
+          "public"
+        ],
+        "security": [],
+        "summary": "Resend's delivery events (bounces and complaints)",
+        "description": "The webhook Resend calls (O-R5.2, T-R7.15). It accepts only Resend's\nsigned deliveries: the Svix signature in `svix-id`, `svix-timestamp`\nand `svix-signature`, an HMAC-SHA256 over `{id}.{timestamp}.{body}`\nwith the decoded `RESEND_WEBHOOK_SECRET`, within five minutes of the\ntimestamp. A hard bounce (`email.bounced`) or a complaint\n(`email.complained`) puts the recipient's address on the suppression\nlist, and no more mail goes to it; every other event type is accepted\nand ignored. A replayed `svix-id` changes nothing.\n\nThe three headers are optional in the schema so that a request\nwithout them is refused by the signature check, `401`, after the\nrate limit has counted it, and not by parameter binding.\n\n**Leak review (§6.5).** A body that is not a JSON object, or a header\nover its length, is refused with `400` by request validation before\nthe signature is read, as on every operation. Past that, the answer\nis `204` or `401`, both empty, whatever the body says: nothing tells\na caller whether an address is\nknown or already suppressed. A forged request cannot suppress an\naddress, because it cannot sign; the address stored is one Quizzivy\nalready sent to. The limit is per address: 120 a minute.\n",
+        "parameters": [
+          {
+            "name": "svix-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Resend's delivery id; without it the answer is `401`."
+          },
+          {
+            "name": "svix-timestamp",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "description": "Unix seconds; without it the answer is `401`."
+          },
+          {
+            "name": "svix-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "description": "One or more `v1,\u003cbase64\u003e` signatures; without it the answer is `401`."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Resend's event, read only for `type` and the recipient. Anything else in it is ignored.",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Received."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "The signature is missing, wrong or stale. No body."
+          },
+          "413": {
+            "description": "The body is over 64 KiB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "501": {
+            "description": "No webhook secret is configured, so no delivery can be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-max-body-bytes": 65536,
+        "x-rate-limit": {
+          "perIp": {
+            "perMinute": 120
           }
         }
       }

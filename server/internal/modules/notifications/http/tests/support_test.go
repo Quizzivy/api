@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"quizzivy/internal/platform/httpx"
+	"quizzivy/internal/shared/access"
 )
 
 const caller = "01935000-0000-7000-8000-0000000000c3"
@@ -15,9 +16,15 @@ type serving func(ctx context.Context, w http.ResponseWriter) error
 
 func answered(t *testing.T, acceptLanguage string, serve serving) *httptest.ResponseRecorder {
 	t.Helper()
+	return answeredAs(t, access.BuiltinTeacher, acceptLanguage, serve)
+}
+
+// answeredAs serves as the caller holding the built-in role role.
+func answeredAs(t *testing.T, role access.Builtin, acceptLanguage string, serve serving) *httptest.ResponseRecorder {
+	t.Helper()
 	handler := httpx.WithRequestMeta(func(*http.Request) string { return "203.0.113.9" })(
 		httpx.RequireAuth(nil, func(string) (httpx.Principal, error) {
-			return httpx.Principal{UserID: caller}, nil
+			return httpx.Principal{UserID: caller, Access: access.Principal{UserID: caller, BuiltinKey: role}}, nil
 		})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if err := serve(r.Context(), w); err != nil {
 				t.Fatal(err)

@@ -8,9 +8,11 @@ import (
 )
 
 // Preferences reads every switch for UserID in domain.Events' order: the
-// saved value where there is one, the default where there is not.
+// saved value where there is one, Recipient's default where there is not, and
+// for a student each email equal to its switch in the app (DG-82).
 type Preferences struct {
-	UserID string
+	UserID    string
+	Recipient domain.Recipient
 }
 
 type PreferencesHandler struct {
@@ -25,5 +27,5 @@ func (s PreferencesHandler) Handle(ctx context.Context, q Preferences) ([]domain
 	if err != nil {
 		return nil, err
 	}
-	return domain.WithDefaults(stored), nil
+	return domain.WithDefaults(stored, q.Recipient), nil
 }

@@ -2,8 +2,11 @@ package db_test
 
 import (
 	"database/sql"
+	"maps"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -495,6 +498,301 @@ func TestTheTieFileDeletesTheAnonymisedAccountsTiesAndRollsBack(t *testing.T) {
 		t.Error("after down the member trigger still leaves an anonymised member out, want 00167's body back")
 	}
 	if err := goose.UpTo(conn, dir, tieFile); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+}
+
+// TestTheWidenedSwitchesTakeTheWeeklySummaryAndRollBack runs 00170, T-R7.13's
+// widen_notification_preference_events, over saved switches. Up admits
+// summary.weekly beside 00162's message.received, which is the plan's
+// seven-key list. Its Down deletes the summary.weekly rows and keeps the
+// message.received ones under 00162's six keys; 00162's own Down then deletes
+// those and restores R4's five, so the two Downs together are the plan's one.
+func TestTheWidenedSwitchesTakeTheWeeklySummaryAndRollBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, widened, beforeSixth int64 = 169, 170, 161
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, student string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, student = f.adminID, f.studentID
+		mustExec(t, tx, `INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES
+			($1, 'attempt.flagged', true, false), ($2, 'message.received', false, false)`, teacher, student)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	weekly := func() error {
+		_, err := conn.Exec(`INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES ($1, 'summary.weekly', false, true)`, teacher)
+		return err
+	}
+	if err := weekly(); !db.IsCheckViolation(err, "notification_preferences_event_check") {
+		t.Fatalf("before 00170 summary.weekly is %v, want the check to refuse it", err)
+	}
+	if err := goose.UpTo(conn, dir, widened); err != nil {
+		t.Fatalf("up over saved switches: %v", err)
+	}
+	if err := weekly(); err != nil {
+		t.Fatalf("after 00170 summary.weekly is refused: %v", err)
+	}
+	var definition string
+	if err := conn.QueryRow(`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'notification_preferences_event_check'`).Scan(&definition); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"attempt.submitted", "attempt.flagged", "assignment.closing", "assignment.due_soon", "result.ready", "message.received", "summary.weekly"} {
+		if !strings.Contains(definition, "'"+event+"'") {
+			t.Errorf("the widened check %s lacks %s", definition, event)
+		}
+	}
+	if strings.Contains(definition, "NOT VALID") {
+		t.Errorf("the widened check was left unvalidated: %s", definition)
+	}
+	events := func() []string {
+		t.Helper()
+		rows, err := conn.Query(`SELECT event FROM app.notification_preferences WHERE user_id IN ($1, $2) ORDER BY event`, teacher, student)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, e)
+		}
+		return out
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if got := events(); !slices.Equal(got, []string{"attempt.flagged", "message.received"}) {
+		t.Errorf("after 00170's down the switches are %v, want the weekly summary's row gone and the others kept", got)
+	}
+	if err := weekly(); !db.IsCheckViolation(err, "notification_preferences_event_check") {
+		t.Errorf("after 00170's down summary.weekly is %v, want 00162's check to refuse it", err)
+	}
+	if err := goose.DownTo(conn, dir, beforeSixth); err != nil {
+		t.Fatalf("down past 00162: %v", err)
+	}
+	if got := events(); !slices.Equal(got, []string{"attempt.flagged"}) {
+		t.Errorf("after both downs the switches are %v, want R4's alone", got)
+	}
+	if err := goose.UpTo(conn, dir, widened); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	if err := weekly(); err != nil {
+		t.Errorf("after the second up summary.weekly is refused: %v", err)
+	}
+}
+
+// TestThePreR7SwitchesGetTheDecksEmailAndUpRunsAgain runs 00171 over the rows
+// R4's settings page saved, each with email false. A staff member's switches
+// whose email the deck draws on are turned on, those it draws off stay off,
+// and a row set to true through the API is kept. A student's email becomes
+// their in-app switch. Down leaves the rows, and up runs a second time.
+func TestThePreR7SwitchesGetTheDecksEmailAndUpRunsAgain(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, reset int64 = 170, 171
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, student string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, student = f.adminID, f.studentID
+		mustExec(t, tx, `INSERT INTO app.notification_preferences (user_id, event, in_app, email) VALUES
+			($1, 'attempt.flagged', true, false), ($1, 'message.received', false, false), ($1, 'attempt.submitted', true, false),
+			($1, 'assignment.closing', true, true), ($2, 'result.ready', true, false), ($2, 'assignment.due_soon', false, true)`, teacher, student)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	emails := func() map[string]bool {
+		t.Helper()
+		rows, err := conn.Query(`SELECT CASE WHEN user_id = $1 THEN 'staff ' ELSE 'student ' END || event, email
+			FROM app.notification_preferences WHERE user_id IN ($1, $2)`, teacher, student)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]bool{}
+		for rows.Next() {
+			var key string
+			var on bool
+			if err := rows.Scan(&key, &on); err != nil {
+				t.Fatal(err)
+			}
+			out[key] = on
+		}
+		return out
+	}
+	want := map[string]bool{
+		"staff attempt.flagged": true, "staff message.received": true, "staff attempt.submitted": false,
+		"staff assignment.closing": true, "student result.ready": true, "student assignment.due_soon": false,
+	}
+	if err := goose.UpTo(conn, dir, reset); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if got := emails(); !maps.Equal(got, want) {
+		t.Errorf("after 00171 the email switches are %v, want %v", got, want)
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if got := emails(); !maps.Equal(got, want) {
+		t.Errorf("after 00171's down the email switches are %v, want them left as up wrote them", got)
+	}
+	if err := goose.UpTo(conn, dir, reset); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+}
+
+// TestTheSuppressionListComesAndGoesWithItsMigration runs 00172 up, down and
+// up again on a database whose outbox already holds mail: Down drops the
+// table, rows included, and leaves the outbox alone.
+func TestTheSuppressionListComesAndGoesWithItsMigration(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, suppressions int64 = 171, 172
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO app.email_outbox (to_address, template, locale) VALUES ('waiting@example.com', 'account_invite', 'vi')`); err != nil {
+		t.Fatal(err)
+	}
+	present := func() bool {
+		t.Helper()
+		var table *string
+		if err := conn.QueryRow(`SELECT to_regclass('app.email_suppressions')::text`).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		return table != nil
+	}
+	if present() {
+		t.Fatal("the list exists before 00172")
+	}
+	if err := goose.UpTo(conn, dir, suppressions); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO app.email_suppressions (address, reason, provider_event_id) VALUES ('waiting@example.com', 'bounced', 'msg_1')`); err != nil {
+		t.Fatalf("after up a suppression is refused: %v", err)
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	var waiting int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.email_outbox WHERE to_address = 'waiting@example.com'`).Scan(&waiting); err != nil || waiting != 1 || present() {
+		t.Errorf("after down: list present %v, outbox rows %d %v; want the list gone and the outbox kept", present(), waiting, err)
+	}
+	if err := goose.UpTo(conn, dir, suppressions); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	var listed int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.email_suppressions`).Scan(&listed); err != nil || listed != 0 {
+		t.Errorf("after the second up the list holds %d rows (%v), want an empty table", listed, err)
+	}
+}
+
+// TestTheDecisionEmailGrantsComeAndGoWithTheirMigration runs 00173 up, down
+// and up again: Down revokes exactly what Up granted, so the maintenance role
+// holds 00172's grants again, and drops the outbox guard with its function.
+func TestTheDecisionEmailGrantsComeAndGoWithTheirMigration(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	const before, grants int64 = 172, 173
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	held := func() map[string]string {
+		t.Helper()
+		rows, err := conn.Query(maintenanceGrantsQuery, maintenanceRole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]string{}
+		for rows.Next() {
+			var table, priv, columns string
+			if err := rows.Scan(&table, &priv, &columns); err != nil {
+				t.Fatal(err)
+			}
+			out[table+" "+priv] = columns
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	guarded := func() bool {
+		t.Helper()
+		var guard *string
+		if err := conn.QueryRow(`SELECT to_regprocedure('app.email_outbox_maintenance_guard()')::text`).Scan(&guard); err != nil {
+			t.Fatal(err)
+		}
+		return guard != nil
+	}
+	if err := goose.UpTo(conn, dir, before); err != nil {
+		t.Fatal(err)
+	}
+	was := held()
+	if err := goose.UpTo(conn, dir, grants); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if now := held(); now["email_outbox INSERT"] == "" || !guarded() {
+		t.Fatalf("after up the role holds %v and the guard exists %v", now, guarded())
+	}
+	if err := goose.DownTo(conn, dir, before); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if after := held(); !maps.Equal(after, was) || guarded() {
+		t.Errorf("after down the role holds %v, want %v; the guard exists %v", after, was, guarded())
+	}
+	if err := goose.UpTo(conn, dir, grants); err != nil {
 		t.Fatalf("second up: %v", err)
 	}
 }
