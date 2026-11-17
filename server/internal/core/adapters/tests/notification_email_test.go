@@ -24,6 +24,21 @@ func (f *facts) Recipient(_ context.Context, _ string, sw *notificationsdomain.E
 	return "Cô Lan", f.on, f.err
 }
 
+func (f *facts) AllowanceWarning(_ context.Context, _ string, p email.AIAllowanceWarningParams, _ time.Time) (email.AIAllowanceWarningParams, bool, error) {
+	p.Used, p.Allowance = 16_500, 20_000
+	return p, f.found, nil
+}
+
+func (f *facts) CreditRequest(_ context.Context, _ string, p email.AICreditRequestParams, _ time.Time) (email.AICreditRequestParams, bool, error) {
+	p.TeacherName, p.Credits = "Nguyễn Thị Lan", 5_000
+	return p, f.found, nil
+}
+
+func (f *facts) CreditDecision(_ context.Context, _ string, p email.AICreditRequestDecidedParams, _ time.Time) (email.AICreditRequestDecidedParams, bool, error) {
+	p.Credits, p.Decision = 5_000, email.CreditsApproved
+	return p, f.found, nil
+}
+
 func (f *facts) Flagged(_ context.Context, _ string, p email.AttemptFlaggedParams, _ time.Time) (email.AttemptFlaggedParams, bool, error) {
 	p.Title, p.StudentName = "Đề", "Nam"
 	return p, f.found, nil
@@ -85,12 +100,58 @@ func TestEveryNotificationEmailHasAPreparerAndTheModulesName(t *testing.T) {
 		string(notificationsdomain.EmailAttemptFlagged), string(notificationsdomain.EmailAssignmentExtended), string(notificationsdomain.EmailAssignmentDueSoon),
 		string(notificationsdomain.EmailAssignmentClosing), string(notificationsdomain.EmailResultReady), string(notificationsdomain.EmailContentShared),
 		string(notificationsdomain.EmailClassTeacherChanged), string(notificationsdomain.EmailSubmissionsDigest), string(notificationsdomain.EmailMessageReceived),
-		string(notificationsdomain.EmailWeeklySummary),
+		string(notificationsdomain.EmailWeeklySummary), string(notificationsdomain.EmailAIAllowanceWarning),
+		string(notificationsdomain.EmailAICreditRequest), string(notificationsdomain.EmailAICreditRequestDecided),
 	}
 	if !slices.Equal(prepared, module) {
 		t.Errorf("the platform's notification emails are %v, the module's %v", prepared, module)
 	}
 	if email.DigestBucket != notificationsdomain.SubmittedBucket {
 		t.Errorf("the digest's bucket is %v, the in-app item's %v", email.DigestBucket, notificationsdomain.SubmittedBucket)
+	}
+}
+
+// TestTheAIEmailsAskNoSwitchAndDropWhatIsNoLongerTrue fails when one of the
+// AI assistant's emails (T-R7.23) is held to a switch, which none of them
+// has, is sent once its read no longer finds it true or NOTIFY_EMAIL_EVENTS
+// names it off, or is sent without what its read filled in.
+func TestTheAIEmailsAskNoSwitchAndDropWhatIsNoLongerTrue(t *testing.T) {
+	const reader, request = "0192a7c0-0000-7000-8000-0000000000a1", "0192a7c0-0000-7000-8000-0000000000a3"
+	november := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		params email.Params
+		filled func(email.Params) bool
+	}{
+		{email.AIAllowanceWarningParams{Month: november}, func(p email.Params) bool {
+			w := p.(email.AIAllowanceWarningParams)
+			return w.Used == 16_500 && w.Allowance == 20_000 && w.Month.Equal(november)
+		}},
+		{email.AICreditRequestParams{RequestID: request}, func(p email.Params) bool {
+			r := p.(email.AICreditRequestParams)
+			return r.TeacherName == "Nguyễn Thị Lan" && r.Credits == 5_000 && r.RequestID == request
+		}},
+		{email.AICreditRequestDecidedParams{RequestID: request}, func(p email.Params) bool {
+			d := p.(email.AICreditRequestDecidedParams)
+			return d.Decision == email.CreditsApproved && d.Credits == 5_000 && d.RequestID == request
+		}},
+	} {
+		tmpl := c.params.Template()
+		draft := email.Draft{ToUserID: reader, Params: c.params}
+		f := &facts{on: true, found: true}
+		p, send, err := adapters.NotificationPreparers(f, nil)[tmpl].Prepare(context.Background(), draft)
+		if err != nil || !send || p.Template() != tmpl || !c.filled(p) {
+			t.Errorf("%s prepares as %+v (send %v, err %v)", tmpl, p, send, err)
+			continue
+		}
+		if f.asked != nil {
+			t.Errorf("%s asked about the switch %v, want none", tmpl, *f.asked)
+		}
+		if _, send, _ := adapters.NotificationPreparers(&facts{on: true, found: false}, nil)[tmpl].Prepare(context.Background(), draft); send {
+			t.Errorf("%s is sent once its read finds it no longer true", tmpl)
+		}
+		off := func(event string) bool { return event != email.Event(tmpl) }
+		if _, send, _ := adapters.NotificationPreparers(&facts{on: true, found: true}, off)[tmpl].Prepare(context.Background(), draft); send {
+			t.Errorf("%s is sent while NOTIFY_EMAIL_EVENTS leaves %s out", tmpl, email.Event(tmpl))
+		}
 	}
 }

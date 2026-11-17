@@ -141,6 +141,31 @@ func SharedOf(key string) (kind, resourceID string, ok bool) {
 	return kind, resourceID, ok && kind != "" && resourceID != ""
 }
 
+// AllowanceWarningOf is the month an AllowanceWarningKey names, its first day
+// as 00:00 UTC, and false for a key that is not an allowance warning's.
+func AllowanceWarningOf(key string) (time.Time, bool) {
+	month, ok := strings.CutPrefix(key, "ai_warning:")
+	if !ok {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.DateOnly, month)
+	return at, err == nil && at.Day() == 1
+}
+
+// CreditRequestOf is the request a CreditRequestKey names, and false for a
+// key that is not one.
+func CreditRequestOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "ai_request:")
+	return id, ok && id != ""
+}
+
+// CreditDecisionOf is the request a CreditDecisionKey names, and false for a
+// key that is not one.
+func CreditDecisionOf(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, "ai_decision:")
+	return id, ok && id != ""
+}
+
 // TeacherChangedOf is the class a TeacherChangedKey names, and false for a
 // key that is not a change of teacher's.
 func TeacherChangedOf(key string) (string, bool) {

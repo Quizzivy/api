@@ -386,6 +386,15 @@ func StaffRole(role string) string {
 		` AND rk.permission_key IN (` + strings.Join(quoted, ", ") + `)))`
 }
 
+// RoleHolds is the condition that a role id, the SQL expression role, holds
+// key: the built-in Admin role holds every key by being the wildcard and
+// stores no grants, so it is named; any other role holds key by a stored
+// grant.
+func RoleHolds(role string, key access.Key) string {
+	return `(EXISTS (SELECT 1 FROM app.roles rh WHERE rh.id = ` + role + ` AND rh.builtin_key = 'admin')` +
+		` OR EXISTS (SELECT 1 FROM app.role_permissions rh WHERE rh.role_id = ` + role + ` AND rh.permission_key = '` + string(key) + `'))`
+}
+
 // TeacherRoles returns the ids of the roles that take a teacher place.
 func TeacherRoles(ctx context.Context, q Querier) (map[string]struct{}, error) {
 	var ids []string

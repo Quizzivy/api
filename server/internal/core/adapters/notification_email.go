@@ -17,7 +17,9 @@ import (
 // the email is no longer true: the paper was voided or unflagged, the
 // assignment closed or was handed in, the result is no longer shown, the
 // grant was revoked, the class changed hands again, no paper came in, the
-// thread was read, or the recipient no longer reaches what it names.
+// thread was read, the teacher is no longer past the warning share, the
+// request was decided or its manager lost ai.credits.manage, or the
+// recipient no longer reaches what it names.
 type NotificationFacts interface {
 	Recipient(ctx context.Context, userID string, sw *notificationsdomain.Event) (string, bool, error)
 	Flagged(ctx context.Context, userID string, p email.AttemptFlaggedParams, now time.Time) (email.AttemptFlaggedParams, bool, error)
@@ -29,12 +31,15 @@ type NotificationFacts interface {
 	TeacherChanged(ctx context.Context, userID string, p email.ClassTeacherChangedParams, now time.Time) (email.ClassTeacherChangedParams, bool, error)
 	Digest(ctx context.Context, userID string, p email.SubmissionsDigestParams, now time.Time) (email.SubmissionsDigestParams, bool, error)
 	Message(ctx context.Context, userID string, p email.MessageReceivedParams, now time.Time) (email.MessageReceivedParams, bool, error)
+	AllowanceWarning(ctx context.Context, userID string, p email.AIAllowanceWarningParams, now time.Time) (email.AIAllowanceWarningParams, bool, error)
+	CreditRequest(ctx context.Context, userID string, p email.AICreditRequestParams, now time.Time) (email.AICreditRequestParams, bool, error)
+	CreditDecision(ctx context.Context, userID string, p email.AICreditRequestDecidedParams, now time.Time) (email.AICreditRequestDecidedParams, bool, error)
 }
 
 type notificationRead[P email.Params] func(ctx context.Context, userID string, p P, now time.Time) (P, bool, error)
 
-// NotificationPreparers are the Preparer of every notification email (T-R7.13)
-// for R5's dispatcher. Each drops the row when NOTIFY_EMAIL_EVENTS (sends)
+// NotificationPreparers are the Preparer of every notification email (T-R7.13,
+// and the AI assistant's three of T-R7.23) for R5's dispatcher. Each drops the row when NOTIFY_EMAIL_EVENTS (sends)
 // turned its email off, when the recipient turned its switch off or was
 // disabled since it was written, or when facts finds it no longer true, and
 // otherwise fills it with the recipient's name and what it says. The weekly
@@ -83,6 +88,21 @@ func NotificationPreparers(facts NotificationFacts, sends func(event string) boo
 			}),
 		email.WeeklySummary: notificationPreparer(facts, sends, sw(notificationsdomain.EventSummaryWeekly), nil,
 			func(p email.WeeklySummaryParams, name string) email.WeeklySummaryParams { p.FullName = name; return p }),
+		email.AIAllowanceWarning: notificationPreparer(facts, sends, nil, facts.AllowanceWarning,
+			func(p email.AIAllowanceWarningParams, name string) email.AIAllowanceWarningParams {
+				p.FullName = name
+				return p
+			}),
+		email.AICreditRequest: notificationPreparer(facts, sends, nil, facts.CreditRequest,
+			func(p email.AICreditRequestParams, name string) email.AICreditRequestParams {
+				p.FullName = name
+				return p
+			}),
+		email.AICreditRequestDecided: notificationPreparer(facts, sends, nil, facts.CreditDecision,
+			func(p email.AICreditRequestDecidedParams, name string) email.AICreditRequestDecidedParams {
+				p.FullName = name
+				return p
+			}),
 	}
 }
 

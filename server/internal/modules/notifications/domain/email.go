@@ -24,12 +24,21 @@ const (
 	EmailWeeklySummary       EmailTemplate = "weekly_summary"
 )
 
+// The AI assistant's notification emails (T-R7.23). No switch governs them.
+const (
+	EmailAIAllowanceWarning     EmailTemplate = "ai_allowance_warning"
+	EmailAICreditRequest        EmailTemplate = "ai_credit_request"
+	EmailAICreditRequestDecided EmailTemplate = "ai_credit_request_decided"
+)
+
 var killSwitch = map[EmailTemplate]string{
 	EmailAttemptFlagged: "attempt.flagged", EmailAssignmentExtended: "assignment.extended",
 	EmailAssignmentDueSoon: "assignment.due_soon", EmailAssignmentClosing: "assignment.closing",
 	EmailResultReady: "result.ready", EmailContentShared: "content.shared",
 	EmailClassTeacherChanged: "class.teacher_changed", EmailSubmissionsDigest: "attempt.submitted",
 	EmailMessageReceived: "message.received", EmailWeeklySummary: "summary.weekly",
+	EmailAIAllowanceWarning: "ai.allowance_warning", EmailAICreditRequest: "ai.credit_request",
+	EmailAICreditRequestDecided: "ai.credit_request.decided",
 }
 
 // Event is the NOTIFY_EMAIL_EVENTS name that turns t off for everyone.
@@ -45,8 +54,8 @@ const (
 )
 
 // EmailIDs are what a notification email's outbox row holds: ids, and the
-// three facts that are not names (the bucket's start, whether a teacher is the
-// one a class left, a reminder's lead). Everything the email says is read when
+// four facts that are not names (the bucket's start, whether a teacher is the
+// one a class left, a reminder's lead, an allowance warning's month). Everything the email says is read when
 // it is sent. A digest's AttemptID is the paper its notice announced; the
 // store adds each later paper of the bucket to the row.
 type EmailIDs struct {
@@ -58,15 +67,17 @@ type EmailIDs struct {
 	ClassID        string
 	ContentKind    string
 	ResourceID     string
+	RequestID      string
 	From           time.Time
+	Month          time.Time
 	Previous       bool
 	Lead           Lead
 }
 
 // Email is one notification email to enqueue for UserID: its template and
 // ids, the switch whose email column governs it (nil for an email no switch
-// governs, a share or a change of teacher), its dedupe key, and when it falls
-// due (zero is now). Thread is a message email's conversation: it is sent at
+// governs: a share, a change of teacher, the AI assistant's), its dedupe key,
+// and when it falls due (zero is now). Thread is a message email's conversation: it is sent at
 // most once per MessageEmailSpacing per thread and reader, so the store adds
 // to DedupeKey the last such email it closed and holds DeliverAfter until
 // MessageEmailSpacing after the last one sent. Summary is a weekly
@@ -85,7 +96,8 @@ type Email struct {
 
 // PlanEmail is the email n calls for when Notify writes it at now, and false
 // for a notice that sends none: the flag on a paper, a moved close, a result
-// shown when it is graded, a share, a change of teacher, the papers of a
+// shown when it is graded, a share, a change of teacher, the AI assistant's
+// warning, request and decision (T-R7.23), the papers of a
 // fifteen-minute bucket, due at its end, and a message, due
 // MessageEmailDelay later. A paper falls in the bucket its in-app item does
 // (the notice's SubmittedKey, the moment it was announced), not the one its
@@ -144,6 +156,31 @@ func switchlessEmail(e Email, n Notice, now time.Time) (Email, bool) {
 		changed, _ := n.Params.(TeacherChanged)
 		return e.of(EmailClassTeacherChanged, EmailIDs{ClassID: id, Previous: changed.TeacherName != nil}, id,
 			"teacher_changed:"+id+":"+n.UserID+":"+minute)
+	}
+	return aiEmail(e, n)
+}
+
+// aiEmail is the email of the AI assistant's three notices, which no switch
+// governs (T-R7.23): the allowance warning, once a month per teacher as its
+// item is; a request, to each holder of ai.credits.manage its item goes to;
+// a decision, to the teacher who asked.
+func aiEmail(e Email, n Notice) (Email, bool) {
+	switch n.Kind {
+	case AIAllowanceWarning:
+		month, ok := AllowanceWarningOf(n.DedupeKey)
+		if !ok {
+			return Email{}, false
+		}
+		day := month.Format(time.DateOnly)
+		return e.of(EmailAIAllowanceWarning, EmailIDs{Month: month}, day, "ai_warning:"+n.UserID+":"+day)
+	case AICreditRequest:
+		if id, ok := CreditRequestOf(n.DedupeKey); ok {
+			return e.of(EmailAICreditRequest, EmailIDs{RequestID: id}, id, "ai_request:"+id+":"+n.UserID)
+		}
+	case AICreditRequestDecided:
+		if id, ok := CreditDecisionOf(n.DedupeKey); ok {
+			return e.of(EmailAICreditRequestDecided, EmailIDs{RequestID: id}, id, "ai_decision:"+id+":"+n.UserID)
+		}
 	}
 	return Email{}, false
 }

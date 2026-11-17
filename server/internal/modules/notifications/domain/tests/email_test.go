@@ -15,6 +15,7 @@ const (
 	mailThread     = "0192a7c0-0000-7000-8000-0000000000a4"
 	mailStudent    = "0192a7c0-0000-7000-8000-0000000000a5"
 	mailClass      = "0192a7c0-0000-7000-8000-0000000000a6"
+	mailRequest    = "0192a7c0-0000-7000-8000-0000000000a7"
 )
 
 var mailNow = time.Date(2026, 11, 17, 9, 7, 30, 0, time.UTC)
@@ -58,6 +59,15 @@ func TestEachNoticeThatEmailsPlansItsTemplateIdsTimeAndSwitch(t *testing.T) {
 		{domain.Notice{Kind: domain.ClassTeacherChanged, Params: domain.TeacherChanged{ClassName: "Lớp", TeacherName: &previous},
 			Target: &domain.Target{Route: domain.RouteClasses}, DedupeKey: domain.TeacherChangedKey(mailClass)},
 			domain.EmailClassTeacherChanged, "", domain.EmailIDs{ClassID: mailClass, Previous: true}, time.Time{}},
+		{domain.Notice{Kind: domain.AIAllowanceWarning, Params: domain.AllowanceWarning{Used: 16_500, Allowance: 20_000},
+			DedupeKey: domain.AllowanceWarningKey("2026-11-01"), Merge: domain.Replace},
+			domain.EmailAIAllowanceWarning, "", domain.EmailIDs{Month: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, time.Time{}},
+		{domain.Notice{Kind: domain.AICreditRequest, Params: domain.CreditRequest{TeacherName: "Lan", Credits: 5_000},
+			DedupeKey: domain.CreditRequestKey(mailRequest), Merge: domain.Replace},
+			domain.EmailAICreditRequest, "", domain.EmailIDs{RequestID: mailRequest}, time.Time{}},
+		{domain.Notice{Kind: domain.AICreditRequestDecided, Params: domain.CreditRequestDecided{Credits: 5_000, Decision: domain.DecisionDeclined},
+			DedupeKey: domain.CreditDecisionKey(mailRequest), Merge: domain.Replace},
+			domain.EmailAICreditRequestDecided, "", domain.EmailIDs{RequestID: mailRequest}, time.Time{}},
 	} {
 		c.notice.UserID = mailReader
 		e, ok := domain.PlanEmail(c.notice, mailNow)
@@ -111,7 +121,10 @@ func TestNoticesThatEmailNothingPlanNothing(t *testing.T) {
 		{Kind: domain.AssignmentOpened, Params: domain.Opened{Title: "Đề", ClosesAt: mailNow}, DedupeKey: domain.OpenedKey(mailAssignment)},
 		{Kind: domain.AssignmentDueSoon, Params: domain.DueSoon{Title: "Đề", ClosesAt: mailNow}, DedupeKey: domain.DueSoonKey(mailAssignment, mailNow, domain.LeadDay)},
 		{Kind: domain.AssignmentClosing, Params: domain.Closing{Title: "Đề", NotSubmitted: 1}, DedupeKey: domain.ClosingKey(mailAssignment, mailNow)},
-		{Kind: domain.AIAllowanceWarning, Params: domain.AllowanceWarning{Used: 1, Allowance: 2}, DedupeKey: domain.AllowanceWarningKey("2026-11-01")},
+		{Kind: domain.AIAllowanceWarning, Params: domain.AllowanceWarning{Used: 1, Allowance: 2}, DedupeKey: domain.AllowanceWarningKey("2026-11-17")},
+		{Kind: domain.AIAllowanceWarning, Params: domain.AllowanceWarning{Used: 1, Allowance: 2}, DedupeKey: "ai_warning:"},
+		{Kind: domain.AICreditRequest, Params: domain.CreditRequest{TeacherName: "Lan", Credits: 5_000}, DedupeKey: "ai_request:"},
+		{Kind: domain.AICreditRequestDecided, Params: domain.CreditRequestDecided{Credits: 5_000, Decision: domain.DecisionApproved}, DedupeKey: domain.CreditRequestKey(mailRequest)},
 		{Kind: domain.TestPublishedByCollaborator, Params: domain.PublishedByCollaborator{EditorName: "Khoa", Title: "Đề", Version: 2},
 			DedupeKey: domain.CollaboratorPublishedKey(mailAssignment, 2)},
 		{Kind: domain.AttemptFlagged, Params: domain.Flagged{StudentName: "Nam", Title: "Đề"}, DedupeKey: domain.FlaggedKey(mailAttempt)},
@@ -132,6 +145,8 @@ func TestEachEmailHasItsKillSwitchName(t *testing.T) {
 	for template, want := range map[domain.EmailTemplate]string{
 		domain.EmailAttemptFlagged: "attempt.flagged", domain.EmailSubmissionsDigest: "attempt.submitted",
 		domain.EmailMessageReceived: "message.received", domain.EmailWeeklySummary: "summary.weekly",
+		domain.EmailAIAllowanceWarning: "ai.allowance_warning", domain.EmailAICreditRequest: "ai.credit_request",
+		domain.EmailAICreditRequestDecided: "ai.credit_request.decided",
 	} {
 		if got := template.Event(); got != want {
 			t.Errorf("%s is turned off by %q, want %q", template, got, want)
@@ -139,5 +154,59 @@ func TestEachEmailHasItsKillSwitchName(t *testing.T) {
 	}
 	if domain.MessageEmailDelay != 10*time.Minute || domain.MessageEmailSpacing != 30*time.Minute {
 		t.Errorf("a message email waits %v and is spaced %v, want 10 and 30 minutes", domain.MessageEmailDelay, domain.MessageEmailSpacing)
+	}
+}
+
+// TestTheAIEmailsGoOnceAMonthOncePerManagerAndOncePerDecision fails when an
+// AI notice's email is keyed so that a second warning in the month, or two
+// managers told of one request, share a row, or one request's decision is
+// keyed like another's.
+func TestTheAIEmailsGoOnceAMonthOncePerManagerAndOncePerDecision(t *testing.T) {
+	other := "0192a7c0-0000-7000-8000-0000000000b1"
+	plan := func(n domain.Notice) string {
+		t.Helper()
+		e, ok := domain.PlanEmail(n, mailNow)
+		if !ok {
+			t.Fatalf("%s plans no email", n.Kind)
+		}
+		return e.DedupeKey
+	}
+	warning := func(user, month string) domain.Notice {
+		return domain.Notice{UserID: user, Kind: domain.AIAllowanceWarning, Params: domain.AllowanceWarning{Used: 1, Allowance: 2}, DedupeKey: domain.AllowanceWarningKey(month)}
+	}
+	if a, b := plan(warning(mailReader, "2026-11-01")), plan(warning(mailReader, "2026-11-01")); a != b {
+		t.Errorf("one teacher's two warnings in a month are keyed %q and %q, want one row", a, b)
+	}
+	if a, b := plan(warning(mailReader, "2026-11-01")), plan(warning(mailReader, "2026-12-01")); a == b {
+		t.Errorf("two months' warnings share the key %q", a)
+	}
+	if a, b := plan(warning(mailReader, "2026-11-01")), plan(warning(other, "2026-11-01")); a == b {
+		t.Errorf("two teachers' warnings share the key %q", a)
+	}
+	request := func(user string) domain.Notice {
+		return domain.Notice{UserID: user, Kind: domain.AICreditRequest, Params: domain.CreditRequest{TeacherName: "Lan", Credits: 5_000}, DedupeKey: domain.CreditRequestKey(mailRequest)}
+	}
+	if a, b := plan(request(mailReader)), plan(request(other)); a == b {
+		t.Errorf("two managers told of one request share the key %q", a)
+	}
+	decided := func(id string) domain.Notice {
+		return domain.Notice{UserID: mailReader, Kind: domain.AICreditRequestDecided, Params: domain.CreditRequestDecided{Credits: 5_000, Decision: domain.DecisionApproved}, DedupeKey: domain.CreditDecisionKey(id)}
+	}
+	if a, b := plan(decided(mailRequest)), plan(decided(other)); a == b {
+		t.Errorf("two requests' decisions share the key %q", a)
+	}
+	if got, ok := domain.AllowanceWarningOf(domain.AllowanceWarningKey("2026-11-01")); !ok || !got.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("the warning's key reads %v %v", got, ok)
+	}
+	for _, key := range []string{"ai_warning:2026-11-17", "ai_warning:x", domain.CreditRequestKey(mailRequest)} {
+		if _, ok := domain.AllowanceWarningOf(key); ok {
+			t.Errorf("%q reads as a warning's month", key)
+		}
+	}
+	if id, ok := domain.CreditRequestOf(domain.CreditRequestKey(mailRequest)); !ok || id != mailRequest {
+		t.Errorf("the request's key reads %q %v", id, ok)
+	}
+	if id, ok := domain.CreditDecisionOf(domain.CreditDecisionKey(mailRequest)); !ok || id != mailRequest {
+		t.Errorf("the decision's key reads %q %v", id, ok)
 	}
 }

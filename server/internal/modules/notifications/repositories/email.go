@@ -11,7 +11,9 @@ import (
 	"quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/platform/email"
+	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/answered"
+	"quizzivy/internal/shared/limits"
 	"quizzivy/internal/shared/schedule"
 	"quizzivy/internal/shared/visibility"
 )
@@ -144,6 +146,12 @@ func paramsOf(e domain.Email) (email.Params, error) {
 		return email.AssignmentDueSoonParams{AssignmentID: ids.AssignmentID, Lead: string(ids.Lead)}, nil
 	case domain.EmailAssignmentClosing:
 		return email.AssignmentClosingParams{AssignmentID: ids.AssignmentID}, nil
+	case domain.EmailAIAllowanceWarning:
+		return email.AIAllowanceWarningParams{Month: ids.Month}, nil
+	case domain.EmailAICreditRequest:
+		return email.AICreditRequestParams{RequestID: ids.RequestID}, nil
+	case domain.EmailAICreditRequestDecided:
+		return email.AICreditRequestDecidedParams{RequestID: ids.RequestID}, nil
 	case domain.EmailWeeklySummary:
 		if s := e.Summary; s != nil {
 			return email.WeeklySummaryParams{WeekOf: s.Week.Monday(), Count: s.Count, ToGrade: s.ToGrade, Flagged: s.Flagged, ClassNames: s.ClassNames}, nil
@@ -411,5 +419,46 @@ func (m *Mail) Message(ctx context.Context, userID string, p email.MessageReceiv
 	if className != nil {
 		p.ClassName = *className
 	}
+	return p, ok, err
+}
+
+// AllowanceWarning reads how much of their allowance for p's month userID
+// has used, while it is still at or past the centre's warning share: an
+// allowance raised since (an approved request, an Admin's change) or a
+// warning share raised past it drops the email.
+func (m *Mail) AllowanceWarning(ctx context.Context, userID string, p email.AIAllowanceWarningParams, _ time.Time) (email.AIAllowanceWarningParams, bool, error) {
+	ok, err := one(m.QueryRow(ctx, `
+		SELECT t.used_credits, t.allowance_credits
+		  FROM app.ai_teacher_credits t
+		  CROSS JOIN app.ai_settings s
+		 WHERE t.month = $2::date AND t.user_id = $1::uuid AND t.warned_at IS NOT NULL
+		   AND t.used_credits * 100 >= t.allowance_credits * s.warn_percent`,
+		userID, p.Month.Format(time.DateOnly)).Scan(&p.Used, &p.Allowance), "allowance warning")
+	return p, ok, err
+}
+
+// CreditRequest reads who asked for credits and how many, while the request
+// is still waiting for a decision and userID holds ai.credits.manage, the
+// rule its in-app item was written by: a request another manager decided
+// first, or a recipient whose role lost the key, drops the email.
+func (m *Mail) CreditRequest(ctx context.Context, userID string, p email.AICreditRequestParams, _ time.Time) (email.AICreditRequestParams, bool, error) {
+	ok, err := one(m.QueryRow(ctx, `
+		SELECT u.full_name, r.amount_credits
+		  FROM app.ai_credit_requests r
+		  JOIN app.users u ON u.id = r.user_id
+		 WHERE r.id = $2::uuid AND r.status = 'pending'
+		   AND EXISTS (SELECT 1 FROM app.users m WHERE m.id = $1::uuid AND `+limits.RoleHolds("m.role_id", access.AICreditsManage)+`)`,
+		userID, p.RequestID).Scan(&p.TeacherName, &p.Credits), "credit request")
+	return p, ok, err
+}
+
+// CreditDecision reads how userID's own request was decided, how many
+// credits it asked for and the month whose allowance an approval raised.
+func (m *Mail) CreditDecision(ctx context.Context, userID string, p email.AICreditRequestDecidedParams, _ time.Time) (email.AICreditRequestDecidedParams, bool, error) {
+	ok, err := one(m.QueryRow(ctx, `
+		SELECT r.amount_credits, r.status, r.month
+		  FROM app.ai_credit_requests r
+		 WHERE r.id = $2::uuid AND r.user_id = $1::uuid AND r.status IN ('approved', 'declined')`,
+		userID, p.RequestID).Scan(&p.Credits, &p.Decision, &p.Month), "credit decision")
 	return p, ok, err
 }
