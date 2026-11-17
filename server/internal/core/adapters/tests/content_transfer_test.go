@@ -557,7 +557,7 @@ func (w *transferWorld) insert(t *testing.T, sql string, args ...any) string {
 
 func (w *transferWorld) texts(t *testing.T, sql string, args ...any) []string {
 	t.Helper()
-	rows, err := w.pool.Query(context.Background(), sql, args...)
+	rows, err := w.q.Query(context.Background(), sql, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,6 +583,7 @@ func (w *transferWorld) grant(t *testing.T, kind, resource, grantee, access, by 
 // is deleted and audited as share.revoked by the actor of the transfer.
 func TestATransferDeletesTheRecipientsOwnGrantsAndLeavesTheRestUnwritten(t *testing.T) {
 	w := newTransferWorld(t)
+	w.rolledBack(t)
 	from, fromRole := w.user(t, "teacher", true)
 	to, _ := w.user(t, "teacher", false)
 	third, _ := w.user(t, "teacher", false)

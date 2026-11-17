@@ -1032,11 +1032,10 @@ maintenance role stops the deploy on its own; the sending domain has to be check
   off (`dns.md`, "Email (Resend)"). Without it the API starts and every message
   fails at Resend.
 - **The `quizzivy_maintenance` role**, created by `scripts/provision-db.sh`
-  (`operations.md`, "The nightly workflow", step 1). `00139_grant_maintenance_role.sql`
+  (`operations.md`, "Setting up the sweep", step 1). `00139_grant_maintenance_role.sql`
   fails while the role is missing, so the release command stops and the previous
-  version keeps serving. Create the `production-maintenance` environment as step 2
-  says, and leave `RETENTION_SWEEP_ENABLED` unset until the first dry run on
-  production has been read.
+  version keeps serving. Leave `RETENTION_SWEEP_ENABLED` unset until the first dry
+  run on production has been read.
 
 Two changes need a check rather than a setting:
 
@@ -1110,9 +1109,10 @@ While v0.11.11 runs on the v0.12.0 schema, either during the rolling deploy or a
   hours). Queued imports and exports wait for the v0.12.0 worker. `last_active_at` and
   `user_activity_days` stop moving, so the Overview's chart has a gap for those days, and the
   daily housekeeping does not run.
-- The nightly retention workflow builds `cmd/maintenance` from the repository in GitHub
-  Actions (`.github/workflows/retention-sweep.yml`), not from the API's image, so a rollback of
-  the API does not change it; it applies only once `RETENTION_SWEEP_ENABLED` is set.
+- The nightly retention sweep runs `/app/maintenance` from the image the API runs, started by
+  the server's systemd timer (`operations.md`, "Where the sweep runs"), so a rollback of the API
+  changes the sweep too, and an image without `/app/maintenance` cannot run it; it applies only while `RETENTION_SWEEP_ENABLED=true` is in the
+  server's `compose.env`.
 
 ## Interrupted index build in v0.12.0 (R5)
 

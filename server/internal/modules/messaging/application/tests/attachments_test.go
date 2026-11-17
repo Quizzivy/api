@@ -633,6 +633,11 @@ func TestTwoPostsOfOneFileSendItOnce(t *testing.T) {
 	// announcement checks it. The check passes, as nobody has sent it yet;
 	// the announcement's INSERT waits on the UNIQUE of attachment_id and,
 	// once the other commits, answers the file as missing, not a 500.
+	// The races above leave no direct thread when the announcement won all
+	// four, so a plain message opens it first.
+	if _, err := p.app.Commands.PostDirect.Handle(context.Background(), command.PostDirect{Actor: hanh, StudentID: student, ClientID: uuid.NewString(), Body: text("Cô gửi bài tập.")}); err != nil {
+		t.Fatal(err)
+	}
 	file := p.upload(teacher)
 	thread := p.id(`SELECT id::text FROM app.conversations WHERE kind = 'direct' AND staff_id = $1::uuid AND student_id = $2::uuid`, teacher, student)
 	holder := p.begin()

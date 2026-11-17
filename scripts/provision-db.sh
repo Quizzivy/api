@@ -136,7 +136,7 @@ BEGIN
   END IF;
 
   -- What cmd/maintenance connects as, from the operator's machine and from the
-  -- nightly retention workflow (T-R5.17a, D16). Owns nothing, creates nothing,
+  -- server's nightly retention sweep (T-R5.17a, D16). Owns nothing, creates nothing,
   -- and holds only the grants the migration that names it gives it. Its
   -- credential is never set on the API.
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'quizzivy_maintenance') THEN
