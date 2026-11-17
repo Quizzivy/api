@@ -23,7 +23,10 @@ const (
 	someTeacher    = "0192a7c0-0000-7000-8000-000000000015"
 	someThread     = "0192a7c0-0000-7000-8000-000000000016"
 	someTest       = "0192a7c0-0000-7000-8000-000000000017"
+	someRequest    = "0192a7c0-0000-7000-8000-000000000018"
 )
+
+var november = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 
 var closesAt = time.Date(2026, 11, 20, 14, 30, 0, 0, time.UTC)
 
@@ -33,16 +36,19 @@ const studentURL = "https://my.quizzivy.com"
 // noticeLinks is the page each notification email's fixture links to, on the
 // host the dispatcher sends it from.
 var noticeLinks = map[email.Template]string{
-	email.AttemptFlagged:      "/teacher/attempts/" + someAttempt,
-	email.AssignmentExtended:  "/assignments/" + someAssignment,
-	email.AssignmentDueSoon:   "/assignments/" + someAssignment,
-	email.AssignmentClosing:   "/teacher/assignments/" + someAssignment,
-	email.ResultReady:         "/attempts/" + someAttempt + "/result",
-	email.ContentShared:       "/teacher/shared-with-me",
-	email.ClassTeacherChanged: "/teacher/classes/" + someClass,
-	email.SubmissionsDigest:   "/teacher/assignments/" + someAssignment,
-	email.MessageReceived:     "/teacher/messages/student/" + someStudent,
-	email.WeeklySummary:       "/teacher",
+	email.AttemptFlagged:         "/teacher/attempts/" + someAttempt,
+	email.AssignmentExtended:     "/assignments/" + someAssignment,
+	email.AssignmentDueSoon:      "/assignments/" + someAssignment,
+	email.AssignmentClosing:      "/teacher/assignments/" + someAssignment,
+	email.ResultReady:            "/attempts/" + someAttempt + "/result",
+	email.ContentShared:          "/teacher/shared-with-me",
+	email.ClassTeacherChanged:    "/teacher/classes/" + someClass,
+	email.SubmissionsDigest:      "/teacher/assignments/" + someAssignment,
+	email.MessageReceived:        "/teacher/messages/student/" + someStudent,
+	email.WeeklySummary:          "/teacher",
+	email.AIAllowanceWarning:     "/teacher/settings/ai",
+	email.AICreditRequest:        "/admin/ai",
+	email.AICreditRequestDecided: "/teacher/settings/ai",
 }
 
 // noticeFixture is tmpl's params as its Preparer fills them, for a recipient
@@ -70,6 +76,12 @@ func noticeFixture(t *testing.T, tmpl email.Template, name string) email.Params 
 		return email.MessageReceivedParams{ConversationID: someThread, StudentID: someStudent, FullName: name, SenderName: "Lê Hà My", Count: 1}
 	case email.WeeklySummary:
 		return email.WeeklySummaryParams{WeekOf: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), Count: 12, ToGrade: 3, Flagged: 1, ClassNames: []string{"IELTS Foundation A", "TOEIC 2"}, FullName: name}
+	case email.AIAllowanceWarning:
+		return email.AIAllowanceWarningParams{Month: november, FullName: name, Used: 16_500, Allowance: 20_000}
+	case email.AICreditRequest:
+		return email.AICreditRequestParams{RequestID: someRequest, FullName: name, TeacherName: "Nguyễn Thị Lan", Credits: 5_000}
+	case email.AICreditRequestDecided:
+		return email.AICreditRequestDecidedParams{RequestID: someRequest, FullName: name, Credits: 5_000, Decision: email.CreditsApproved, Month: november}
 	}
 	t.Fatalf("no fixture for template %q", tmpl)
 	return nil
@@ -85,14 +97,16 @@ func notices() []email.Template {
 	return out
 }
 
-// TestTheTenNotificationEmailsArePreparedAndEachHasItsKillSwitch fails when a
-// notification email is added without being Prepared (its row holds ids, so
-// it cannot render without its Preparer), or when the names
-// NOTIFY_EMAIL_EVENTS takes drift from the plan's ten.
-func TestTheTenNotificationEmailsArePreparedAndEachHasItsKillSwitch(t *testing.T) {
+// TestTheThirteenNotificationEmailsArePreparedAndEachHasItsKillSwitch fails
+// when a notification email is added without being Prepared (its row holds
+// ids, so it cannot render without its Preparer), or when the names
+// NOTIFY_EMAIL_EVENTS takes drift from the plan's ten of T-R7.13 and the AI
+// assistant's three of T-R7.23.
+func TestTheThirteenNotificationEmailsArePreparedAndEachHasItsKillSwitch(t *testing.T) {
 	want := []email.Template{
 		email.AttemptFlagged, email.AssignmentExtended, email.AssignmentDueSoon, email.AssignmentClosing, email.ResultReady,
 		email.ContentShared, email.ClassTeacherChanged, email.SubmissionsDigest, email.MessageReceived, email.WeeklySummary,
+		email.AIAllowanceWarning, email.AICreditRequest, email.AICreditRequestDecided,
 	}
 	if got := notices(); !slices.Equal(got, want) {
 		t.Errorf("the Prepared templates are %v, want %v", got, want)
@@ -100,6 +114,7 @@ func TestTheTenNotificationEmailsArePreparedAndEachHasItsKillSwitch(t *testing.T
 	events := []string{
 		"attempt.flagged", "assignment.extended", "assignment.due_soon", "assignment.closing", "result.ready",
 		"content.shared", "class.teacher_changed", "attempt.submitted", "message.received", "summary.weekly",
+		"ai.allowance_warning", "ai.credit_request", "ai.credit_request.decided",
 	}
 	if got := email.NotifyEvents(); !slices.Equal(got, events) {
 		t.Errorf("NOTIFY_EMAIL_EVENTS takes %v, want %v", got, events)
@@ -112,6 +127,11 @@ func TestTheTenNotificationEmailsArePreparedAndEachHasItsKillSwitch(t *testing.T
 	for _, tmpl := range want {
 		if email.NeedsSecret(tmpl) {
 			t.Errorf("%s carries a secret", tmpl)
+		}
+	}
+	for _, tmpl := range []email.Template{email.AIAllowanceWarning, email.AICreditRequest, email.AICreditRequestDecided} {
+		if !email.StaffOnly(tmpl) {
+			t.Errorf("%s links into the student host", tmpl)
 		}
 	}
 }
@@ -267,6 +287,9 @@ func golden(t *testing.T) map[string]email.Letter {
 	one := noticeFixture(t, email.SubmissionsDigest, "Nguyễn Văn An").(email.SubmissionsDigestParams)
 	one.Count, one.ToGrade = 1, 0
 	add("submissions_digest.one", one, true)
+	declined := noticeFixture(t, email.AICreditRequestDecided, "Nguyễn Văn An").(email.AICreditRequestDecidedParams)
+	declined.Decision = email.CreditsDeclined
+	add("ai_credit_request_decided.declined", declined, true)
 	return out
 }
 
@@ -313,5 +336,65 @@ func TestNotificationEmailsMatchTheirGoldenRenders(t *testing.T) {
 	}
 	if len(files) != len(golden(t)) {
 		t.Errorf("%d golden files for %d renders: remove the files no render writes", len(files), len(golden(t)))
+	}
+}
+
+func TestCreditsAreGroupedByThousands(t *testing.T) {
+	for c, want := range map[email.Credits]string{0: "0", 7: "7", 999: "999", 1_000: "1.000", 16_500: "16.500", 100_000: "100.000", 20_000_000: "20.000.000", -1_500: "-1.500"} {
+		if got := c.Grouped("."); got != want {
+			t.Errorf("%d is written %q, want %q", c, got, want)
+		}
+	}
+}
+
+// TestTheAIEmailsWriteTheirFiguresAndMonthInTheReadersLanguage fails when an
+// AI email writes a number of credits without its thousands grouped as the
+// reader's language groups them, names the wrong month, or tells a declined
+// teacher that their allowance grew.
+func TestTheAIEmailsWriteTheirFiguresAndMonthInTheReadersLanguage(t *testing.T) {
+	r, err := email.NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(p email.Params, locale string) email.Rendered {
+		t.Helper()
+		got, err := r.Render(email.Letter{Locale: locale, Org: "Trung tâm", AppURL: appURL, Params: p, Staff: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	warning := noticeFixture(t, email.AIAllowanceWarning, "An")
+	for locale, says := range map[string][]string{
+		"vi": {"16.500 trên 20.000 tín dụng AI trong tháng 11/2026"},
+		"en": {"16,500 of your 20,000 AI credits for November 2026"},
+	} {
+		got := render(warning, locale)
+		for _, want := range says {
+			if !strings.Contains(got.Subject, want) || !strings.Contains(got.Text, want) {
+				t.Errorf("%s: the warning lacks %q:\n%s\n%s", locale, want, got.Subject, got.Text)
+			}
+		}
+	}
+	request := noticeFixture(t, email.AICreditRequest, "An")
+	for locale, want := range map[string]string{"vi": "Nguyễn Thị Lan xin thêm 5.000 tín dụng AI", "en": "Nguyễn Thị Lan asked for 5,000 more AI credits"} {
+		if got := render(request, locale); !strings.Contains(got.Subject, want) {
+			t.Errorf("%s: the request's subject is %q, want %q", locale, got.Subject, want)
+		}
+	}
+	decided := noticeFixture(t, email.AICreditRequestDecided, "An").(email.AICreditRequestDecidedParams)
+	for _, c := range []struct {
+		decision, locale, says, never string
+	}{
+		{email.CreditsApproved, "vi", "đã được cộng vào hạn mức tháng 11/2026", "không thay đổi"},
+		{email.CreditsApproved, "en", "added to your allowance for November 2026", "has not changed"},
+		{email.CreditsDeclined, "vi", "đã bị từ chối. Hạn mức của bạn không thay đổi.", "được cộng"},
+		{email.CreditsDeclined, "en", "was declined. Your allowance has not changed.", "added"},
+	} {
+		decided.Decision = c.decision
+		got := render(decided, c.locale)
+		if !strings.Contains(got.Text, c.says) || strings.Contains(got.Text, c.never) {
+			t.Errorf("%s/%s: the decision email does not say %q, or says %q:\n%s", c.decision, c.locale, c.says, c.never, got.Text)
+		}
 	}
 }

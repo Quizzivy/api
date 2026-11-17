@@ -2,6 +2,7 @@ package email
 
 import (
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -22,6 +23,10 @@ const (
 	SubmissionsDigest   Template = "submissions_digest"
 	MessageReceived     Template = "message_received"
 	WeeklySummary       Template = "weekly_summary"
+	// The AI assistant's three (T-R7.23), which no switch governs.
+	AIAllowanceWarning     Template = "ai_allowance_warning"
+	AICreditRequest        Template = "ai_credit_request"
+	AICreditRequestDecided Template = "ai_credit_request_decided"
 )
 
 // The values of ContentSharedParams.Kind and .Access, as the contract's
@@ -31,6 +36,13 @@ const (
 	SharedQuestionSet = "question_set"
 	SharedUse         = "use"
 	SharedEdit        = "edit"
+)
+
+// The values of AICreditRequestDecidedParams.Decision, as the contract's
+// NotificationParams.decision.
+const (
+	CreditsApproved = "approved"
+	CreditsDeclined = "declined"
 )
 
 // The leads of AssignmentDueSoonParams, as the notifications module's.
@@ -167,6 +179,63 @@ type WeeklySummaryParams struct {
 	FullName   string    `json:"fullName,omitempty"`
 }
 
+// Credits is a number of AI credits, which an email writes with its
+// thousands grouped, as the app does.
+type Credits int64
+
+// Grouped writes c with sep between each group of three digits: "." in
+// Vietnamese, "," in English.
+func (c Credits) Grouped(sep string) string {
+	digits := strconv.FormatInt(int64(c), 10)
+	sign := ""
+	if c < 0 {
+		sign, digits = "-", digits[1:]
+	}
+	out := digits[:len(digits)%3]
+	for i := len(digits) % 3; i < len(digits); i += 3 {
+		if out != "" {
+			out += sep
+		}
+		out += digits[i : i+3]
+	}
+	return sign + out
+}
+
+// AIAllowanceWarningParams tell a teacher that they have used the share of
+// their month's AI allowance the centre warns at, once a month. The outbox
+// holds Month, the month's first day as 00:00 UTC; FullName, Used and
+// Allowance are read when it is sent.
+type AIAllowanceWarningParams struct {
+	Month     time.Time `json:"month"`
+	FullName  string    `json:"fullName,omitempty"`
+	Used      Credits   `json:"used,omitempty"`
+	Allowance Credits   `json:"allowance,omitempty"`
+}
+
+// AICreditRequestParams tell a holder of ai.credits.manage that a teacher
+// asked for more AI credits. The outbox holds RequestID; FullName,
+// TeacherName and Credits are read when it is sent. It does not carry the
+// teacher's reason, which the Admin page shows.
+type AICreditRequestParams struct {
+	RequestID   string  `json:"requestId"`
+	FullName    string  `json:"fullName,omitempty"`
+	TeacherName string  `json:"teacherName,omitempty"`
+	Credits     Credits `json:"credits,omitempty"`
+}
+
+// AICreditRequestDecidedParams tell a teacher how their request for more AI
+// credits was decided, as CreditsApproved or CreditsDeclined. The outbox
+// holds RequestID; FullName, Credits, Decision and Month, the month whose
+// allowance an approval raised (its first day as 00:00 UTC), are read when it
+// is sent.
+type AICreditRequestDecidedParams struct {
+	RequestID string    `json:"requestId"`
+	FullName  string    `json:"fullName,omitempty"`
+	Credits   Credits   `json:"credits,omitempty"`
+	Decision  string    `json:"decision,omitempty"`
+	Month     time.Time `json:"month,omitzero"`
+}
+
 // DigestBucket is how long the papers one SubmissionsDigestParams counts
 // were announced over: the notifications module's fifteen-minute bucket.
 const DigestBucket = 15 * time.Minute
@@ -194,11 +263,21 @@ func (MessageReceivedParams) Template() Template { return MessageReceived }
 
 func (WeeklySummaryParams) Template() Template { return WeeklySummary }
 
+func (AIAllowanceWarningParams) Template() Template { return AIAllowanceWarning }
+
+func (AICreditRequestParams) Template() Template { return AICreditRequest }
+
+func (AICreditRequestDecidedParams) Template() Template { return AICreditRequestDecided }
+
 // The paths of the app's pages the notification emails link to: the teacher
 // workspace on the staff host and the student's pages on the student host.
+// The AI emails open Settings › AI assistant and Admin › AI credits, both on
+// the staff host.
 const (
 	staffSettingsPath   = "/teacher/settings/notifications"
 	studentSettingsPath = "/settings/notifications"
+	aiSettingsPath      = "/teacher/settings/ai"
+	aiCreditsPath       = "/admin/ai"
 )
 
 func idPath(prefix string, id func(Params) string) func(string, Params, string) string {
@@ -253,6 +332,12 @@ var noticeDefinitions = map[Template]definition{
 	MessageReceived: {prepared: true, event: "message.received", decode: decoder[MessageReceivedParams](), link: messageLink},
 	WeeklySummary: {staff: true, prepared: true, event: "summary.weekly", decode: decoder[WeeklySummaryParams](),
 		link: fixedLink("/teacher")},
+	AIAllowanceWarning: {staff: true, prepared: true, event: "ai.allowance_warning", decode: decoder[AIAllowanceWarningParams](),
+		link: fixedLink(aiSettingsPath)},
+	AICreditRequest: {staff: true, prepared: true, event: "ai.credit_request", decode: decoder[AICreditRequestParams](),
+		link: fixedLink(aiCreditsPath)},
+	AICreditRequestDecided: {staff: true, prepared: true, event: "ai.credit_request.decided", decode: decoder[AICreditRequestDecidedParams](),
+		link: fixedLink(aiSettingsPath)},
 }
 
 // noticeTemplates lists the notification emails in the order Templates
@@ -260,6 +345,7 @@ var noticeDefinitions = map[Template]definition{
 var noticeTemplates = []Template{
 	AttemptFlagged, AssignmentExtended, AssignmentDueSoon, AssignmentClosing, ResultReady,
 	ContentShared, ClassTeacherChanged, SubmissionsDigest, MessageReceived, WeeklySummary,
+	AIAllowanceWarning, AICreditRequest, AICreditRequestDecided,
 }
 
 // Prepared reports whether t's outbox rows hold ids alone, so that a
