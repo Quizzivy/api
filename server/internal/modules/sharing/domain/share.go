@@ -165,12 +165,12 @@ type Candidate struct {
 	Granted  bool
 }
 
-// Skip is why c gets no grant to a resource owned by ownerID that actorID
+// SkipReason is why c gets no grant to a resource owned by ownerID that actorID
 // shares, and false when c gets one. The owner and the sharer are SELF, an
 // account that is missing or lacks the teacher workspace is NOT_A_TEACHER, a
 // holder of a grant is ALREADY_SHARED and a disabled account DISABLED, in
 // that order.
-func Skip(c Candidate, ownerID, actorID string) (SkipCode, bool) {
+func SkipReason(c Candidate, ownerID, actorID string) (SkipCode, bool) {
 	switch {
 	case c.UserID == ownerID || c.UserID == actorID:
 		return SkipSelf, true
