@@ -26,24 +26,64 @@ func (w *reachWorld) flexibleClosingSoon(t *testing.T, closesIn time.Duration) s
 	return w.create(t, as(w.a, false), in)
 }
 
-func (w *reachWorld) movesOf(t *testing.T, attempt string) map[string]string {
+// attemptMove is one attempt.extended audit row of an attempt.
+type attemptMove struct {
+	reason, window, cause, actor string
+	old, new                     time.Time
+}
+
+// movesOf returns the attempt.extended rows of attempt, in the order the
+// deadline moved.
+func (w *reachWorld) movesOf(t *testing.T, attempt string) []attemptMove {
 	t.Helper()
 	rows, err := w.tx.Query(context.Background(), `
-		SELECT diff->>'reason', coalesce(diff->>'windowId', '') FROM app.audit_log
-		 WHERE action = 'attempt.extended' AND entity_id = $1::uuid`, attempt)
+		SELECT diff->>'reason', coalesce(diff->>'windowId', ''), coalesce(diff->>'cause', ''),
+		       coalesce(actor_user_id::text, ''),
+		       (diff->'deadline_at'->>'old')::timestamptz, (diff->'deadline_at'->>'new')::timestamptz
+		  FROM app.audit_log
+		 WHERE action = 'attempt.extended' AND entity_id = $1::uuid
+		 ORDER BY (diff->'deadline_at'->>'new')::timestamptz, (diff->'deadline_at'->>'old')::timestamptz`, attempt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	var out []attemptMove
 	for rows.Next() {
-		var reason, window string
-		if err := rows.Scan(&reason, &window); err != nil {
+		var m attemptMove
+		if err := rows.Scan(&m.reason, &m.window, &m.cause, &m.actor, &m.old, &m.new); err != nil {
 			t.Fatal(err)
 		}
-		out[reason] = window
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	return out
+}
+
+// wantMoves checks that attempt's audited moves are exactly want, in order.
+func (w *reachWorld) wantMoves(t *testing.T, what, attempt string, want ...attemptMove) {
+	t.Helper()
+	got := w.movesOf(t, attempt)
+	if len(got) != len(want) {
+		t.Errorf("%s: %d attempt.extended rows %+v, want %d %+v", what, len(got), got, len(want), want)
+		return
+	}
+	for i := range want {
+		g, x := got[i], want[i]
+		if g.reason != x.reason || g.window != x.window || g.cause != x.cause || g.actor != x.actor || !g.old.Equal(x.old) || !g.new.Equal(x.new) {
+			t.Errorf("%s: move %d is audited as %+v, want %+v", what, i, g, x)
+		}
+	}
+}
+
+func (w *reachWorld) extendBy(t *testing.T, assignment string, minutes int) {
+	t.Helper()
+	req := as(w.a, false)
+	req.ID = assignment
+	if _, err := w.store.Extend(context.Background(), req, minutes, false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // F1, "Maintenance treats a flexible attempt by its close": an extension that
@@ -53,7 +93,6 @@ func (w *reachWorld) movesOf(t *testing.T, attempt string) map[string]string {
 // moved as before, by its rule alone.
 func TestAnExtensionIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T) {
 	w := newReachWorld(t)
-	ctx := context.Background()
 	base := time.Now().Truncate(time.Second)
 	window := w.windowAhead(t, base.Add(40*time.Minute), base.Add(100*time.Minute))
 
@@ -66,26 +105,32 @@ func TestAnExtensionIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T
 	// flexible attempts.
 	strictAttempt := w.sitting(t, strict, w.classmate(t, w.classA, w.a), time.Minute, w.closesAt(t, strict), "in_progress")
 
-	for _, id := range []string{flexible, strict} {
-		req := as(w.a, false)
-		req.ID = id
-		if _, err := w.store.Extend(ctx, req, 30, false, time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
+	closes := w.closesAt(t, flexible)
+	w.extendBy(t, flexible, 30)
+	w.extendBy(t, strict, 30)
 
-	if got, want := w.deadlineOf(t, flexibleAttempt), w.closesAt(t, flexible).Add(time.Hour); !got.Equal(want) {
+	want := closes.Add(30*time.Minute + time.Hour)
+	if got := w.deadlineOf(t, flexibleAttempt); !got.Equal(want) {
 		t.Errorf("the flexible attempt has deadline %v after its close moved into the window, want the close plus the window's hour, %v", got, want)
 	}
-	if moves := w.movesOf(t, flexibleAttempt); moves["assignment_extended"] != "" || moves["maintenance"] != window || len(moves) != 2 {
-		t.Errorf("the flexible attempt's moves are audited as %v, want one for the extension and one for window %s", moves, window)
-	}
+	w.wantMoves(t, "the flexible attempt", flexibleAttempt,
+		attemptMove{reason: "assignment_extended", actor: w.a, old: closes, new: closes.Add(30 * time.Minute)},
+		attemptMove{reason: "maintenance", window: window, cause: "assignment_extended", actor: w.a, old: closes.Add(30 * time.Minute), new: want})
 	if got, want := w.deadlineOf(t, strictAttempt), w.startedOf(t, strictAttempt).Add(45*time.Minute); !got.Equal(want) {
 		t.Errorf("the strict attempt has deadline %v, want its start plus 45 minutes, %v, as before", got, want)
 	}
-	if moves := w.movesOf(t, strictAttempt); len(moves) != 1 || moves["maintenance"] != "" {
-		t.Errorf("the strict attempt's moves are audited as %v, want the extension's alone", moves)
+	w.wantMoves(t, "the strict attempt", strictAttempt,
+		attemptMove{reason: "assignment_extended", actor: w.a, old: w.closesAt(t, strict).Add(-30 * time.Minute), new: w.startedOf(t, strictAttempt).Add(45 * time.Minute)})
+
+	// A later write that changes nothing leaves the attempt where the window
+	// put it, and audits no move.
+	w.extendBy(t, flexible, 0)
+	if got := w.deadlineOf(t, flexibleAttempt); !got.Equal(want) {
+		t.Errorf("an extension by nothing moved the flexible attempt to %v, want it kept at %v", got, want)
 	}
+	w.wantMoves(t, "the flexible attempt after an extension by nothing", flexibleAttempt,
+		attemptMove{reason: "assignment_extended", actor: w.a, old: closes, new: closes.Add(30 * time.Minute)},
+		attemptMove{reason: "maintenance", window: window, cause: "assignment_extended", actor: w.a, old: closes.Add(30 * time.Minute), new: want})
 }
 
 // An override whose close falls inside a window already scheduled moves the
@@ -95,7 +140,7 @@ func TestAnOverrideIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T)
 	w := newReachWorld(t)
 	ctx := context.Background()
 	base := time.Now().Truncate(time.Second)
-	w.windowAhead(t, base.Add(40*time.Minute), base.Add(100*time.Minute))
+	window := w.windowAhead(t, base.Add(40*time.Minute), base.Add(100*time.Minute))
 
 	flexible := w.flexibleClosingSoon(t, 20*time.Minute)
 	closes := w.closesAt(t, flexible)
@@ -117,4 +162,57 @@ func TestAnOverrideIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T)
 	if got := w.deadlineOf(t, otherAttempt); !got.Equal(closes) {
 		t.Errorf("another student's attempt moved to %v, want it kept at %v", got, closes)
 	}
+	w.wantMoves(t, "the named student's attempt", namedAttempt,
+		attemptMove{reason: "student_override", actor: w.a, old: closes, new: own},
+		attemptMove{reason: "maintenance", window: window, cause: "student_override", actor: w.a, old: own, new: own.Add(time.Hour)})
+	w.wantMoves(t, "another student's attempt", otherAttempt)
+}
+
+// F1: an update that moves a flexible assignment's close into a window
+// already scheduled moves its attempts in progress past the window, audited
+// with the update as the cause.
+func TestAnUpdateIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T) {
+	w := newReachWorld(t)
+	ctx := context.Background()
+	base := time.Now().Truncate(time.Second)
+	window := w.windowAhead(t, base.Add(40*time.Minute), base.Add(100*time.Minute))
+	flexible := w.flexibleClosingSoon(t, 20*time.Minute)
+	closes := w.closesAt(t, flexible)
+	attempt := w.sitting(t, flexible, w.classmate(t, w.classA, w.a), 5*time.Minute, closes, "in_progress")
+
+	req := as(w.a, false)
+	req.ID = flexible
+	inside := base.Add(60 * time.Minute)
+	if _, err := w.store.Update(ctx, req, w.updateWindow(t, inside)); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got, want := w.deadlineOf(t, attempt), inside.Add(time.Hour); !got.Equal(want) {
+		t.Errorf("the flexible attempt has deadline %v after the update moved its close into the window, want %v", got, want)
+	}
+	w.wantMoves(t, "the flexible attempt", attempt,
+		attemptMove{reason: "assignment_updated", actor: w.a, old: closes, new: inside},
+		attemptMove{reason: "maintenance", window: window, cause: "assignment_updated", actor: w.a, old: inside, new: inside.Add(time.Hour)})
+}
+
+// F1: a writer moves a flexible attempt through every window ahead, the
+// earliest first: a deadline the first window moves into the second moves
+// again, and each move is audited with its own window.
+func TestAWriterMovesAFlexibleAttemptThroughEveryWindowAhead(t *testing.T) {
+	w := newReachWorld(t)
+	base := time.Now().Truncate(time.Second)
+	first := w.windowAhead(t, base.Add(40*time.Minute), base.Add(100*time.Minute))
+	second := w.windowAhead(t, base.Add(105*time.Minute), base.Add(165*time.Minute))
+	flexible := w.flexibleClosingSoon(t, 20*time.Minute)
+	closes := w.closesAt(t, flexible)
+	attempt := w.sitting(t, flexible, w.classmate(t, w.classA, w.a), 5*time.Minute, closes, "in_progress")
+
+	w.extendBy(t, flexible, 30)
+	extended, throughFirst, throughSecond := closes.Add(30*time.Minute), closes.Add(90*time.Minute), closes.Add(150*time.Minute)
+	if got := w.deadlineOf(t, attempt); !got.Equal(throughSecond) {
+		t.Errorf("the flexible attempt has deadline %v, want %v: moved by the first window into the second, and by the second", got, throughSecond)
+	}
+	w.wantMoves(t, "the flexible attempt", attempt,
+		attemptMove{reason: "assignment_extended", actor: w.a, old: closes, new: extended},
+		attemptMove{reason: "maintenance", window: first, cause: "assignment_extended", actor: w.a, old: extended, new: throughFirst},
+		attemptMove{reason: "maintenance", window: second, cause: "assignment_extended", actor: w.a, old: throughFirst, new: throughSecond})
 }
