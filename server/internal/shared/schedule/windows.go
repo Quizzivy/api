@@ -14,10 +14,12 @@ import (
 // inside the window and was not closed early; and the student's override
 // close, moved so when it falls inside the window. It is never earlier than
 // the deadline. Scheduling a window applies it to every flexible attempt in
-// progress (core/maintenance, ScheduleWindow), and ThroughWindows to an
-// attempt that starts, or a deadline that a writer moves, after the window was
-// scheduled, so that a flexible attempt ends where it would have if it had
-// been running when the window was scheduled.
+// progress (core/maintenance, ScheduleWindow); after the window was scheduled,
+// ThroughWindows applies it to an attempt that starts, RecomputeDeadlines to
+// the attempts whose deadline an assignment-level writer (Extend, Update,
+// Reopen, SetOverrides) moves, and MoveAttemptThroughWindows to an attempt a
+// teacher extends by hand, so that a flexible attempt ends where it would have
+// if it had been running when the window was scheduled.
 const FlexibleWindowDeadline = `greatest(
        a.deadline_at + CASE WHEN a.deadline_at < $2::timestamptz
                             THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END,
@@ -100,11 +102,12 @@ func ThroughWindows(ctx context.Context, tx Execer, in FlexibleStart) (time.Time
 }
 
 // moveThroughWindows moves, for each window ahead, earliest first, the
-// deadline of each flexible attempt in progress that in names and that the
-// window lets run longer (FlexibleWindowDeadline), and audits each move as in's
-// actor with the reason maintenance and the window's id. It returns the ids of
-// the attempts it moved.
-func moveThroughWindows(ctx context.Context, tx Execer, in Recompute, students any) ([]string, error) {
+// deadline of each flexible attempt in progress on in's assignment that
+// students and attempt name (nil names every one) and that the window lets
+// run longer (FlexibleWindowDeadline), and audits each move as in's actor
+// with the reason maintenance and the window's id. It returns the ids of the
+// attempts it moved.
+func moveThroughWindows(ctx context.Context, tx Execer, in Recompute, students, attempt any) ([]string, error) {
 	windows, err := WindowsAhead(ctx, tx, nil)
 	if err != nil {
 		return nil, err
@@ -121,6 +124,7 @@ func moveThroughWindows(ctx context.Context, tx Execer, in Recompute, students a
 			     AND a.assignment_id = $3::uuid AND a.status = 'in_progress'
 			     AND a.deadline_at > now() AND a.deadline_at > $1::timestamptz
 			     AND ($4::uuid[] IS NULL OR a.student_id = ANY($4::uuid[]))
+			     AND ($11::uuid IS NULL OR a.id = $11::uuid)
 			     AND `+FlexibleWindowDeadline+` > a.deadline_at
 			  RETURNING a.id, old.deadline_at AS prev_deadline, new.deadline_at AS next_deadline
 			), logged AS (
@@ -133,11 +137,44 @@ func moveThroughWindows(ctx context.Context, tx Execer, in Recompute, students a
 			    FROM moved
 			)
 			SELECT coalesce(array_agg(id::text), '{}') FROM moved`,
-			w.StartsAt, w.EndsAt, in.AssignmentID, students, in.ActorID, in.Now, in.IP, in.UserAgent, w.ID, in.Cause).Scan(&ids)
+			w.StartsAt, w.EndsAt, in.AssignmentID, students, in.ActorID, in.Now, in.IP, in.UserAgent, w.ID, in.Cause, attempt).Scan(&ids)
 		if err != nil {
 			return nil, fmt.Errorf("schedule: move deadlines through window %s: %w", w.ID, err)
 		}
 		moved = append(moved, ids...)
 	}
 	return moved, nil
+}
+
+// AttemptMove names one attempt in progress whose deadline a teacher moved by
+// hand (the attempts module's Extend), on AssignmentID. Cause is the short
+// word for the audit entry of a move through a window, written as ActorID,
+// with IP and UserAgent, at Now.
+type AttemptMove struct {
+	AttemptID    string
+	AssignmentID string
+	ActorID      string
+	IP           string
+	UserAgent    string
+	Cause        string
+	Now          time.Time
+}
+
+// MoveAttemptThroughWindows moves the one attempt in names, when its
+// assignment is flexible, through every maintenance window ahead that was
+// already scheduled, as RecomputeDeadlines moves the attempts of an
+// assignment-level writer, so that a teacher's extension of that attempt into
+// a scheduled window is kept past the window as scheduling the window after
+// the extension would have kept it. It reports whether the attempt moved. A
+// strict attempt is not moved, as RecomputeDeadlines does not move one. tx
+// must hold the maintenance-windows lock (LockWindows), taken before the
+// attempt row.
+func MoveAttemptThroughWindows(ctx context.Context, tx Execer, in AttemptMove) (bool, error) {
+	moved, err := moveThroughWindows(ctx, tx, Recompute{
+		AssignmentID: in.AssignmentID, ActorID: in.ActorID, IP: in.IP, UserAgent: in.UserAgent, Cause: in.Cause, Now: in.Now,
+	}, nil, in.AttemptID)
+	if err != nil {
+		return false, err
+	}
+	return len(moved) > 0, nil
 }

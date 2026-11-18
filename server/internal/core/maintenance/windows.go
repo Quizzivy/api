@@ -54,9 +54,11 @@ type WindowReport struct {
 // moved as the same statement moves them, and never earlier than it was. A
 // flexible deadline that itself falls inside the window, which only a
 // teacher's extension past the close can leave there, moves by the window's
-// length too, so the extension is kept. An attempt that starts after the
-// window is scheduled, and a deadline a writer moves after it, go through the
-// same expression (schedule.ThroughWindows, schedule.RecomputeDeadlines).
+// length too, so the extension is kept. After the window is scheduled, an
+// attempt that starts (schedule.ThroughWindows), the attempts an
+// assignment-level writer moves (schedule.RecomputeDeadlines) and an attempt a
+// teacher extends by hand (schedule.MoveAttemptThroughWindows) go through the
+// same expression.
 const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN ` + schedule.FlexibleWindowDeadline + `
      ELSE a.deadline_at + ($2::timestamptz - $1::timestamptz) END`
 

@@ -113,7 +113,7 @@ func RecomputeDeadlines(ctx context.Context, tx Execer, in Recompute) (int, erro
 	if err != nil {
 		return 0, fmt.Errorf("schedule: recompute deadlines: %w", err)
 	}
-	through, err := moveThroughWindows(ctx, tx, in, students)
+	through, err := moveThroughWindows(ctx, tx, in, students, nil)
 	if err != nil {
 		return 0, err
 	}
