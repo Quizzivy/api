@@ -38,7 +38,7 @@ func (s *Reviews) Get(ctx context.Context, scope access.Scope, attemptID string)
 	err := s.QueryRow(ctx, `
 		SELECT at.id::text, at.assignment_id::text, at.student_id::text, at.test_version_id::text,
 		       at.attempt_no, at.status, at.started_at, at.deadline_at, at.submitted_at, at.graded_at,
-		       at.focus_loss_count, at.flagged, at.score_total, at.teacher_note,
+		       at.focus_loss_count, at.flagged, at.score_total, at.teacher_note, at.active_ms / 1000,
 		       asg.max_attempts + coalesce(o.extra_attempts, 0), t.title, v.published_at,
 		       `+bands.OfPaper("at")+`
 		  FROM app.attempts at
@@ -51,7 +51,7 @@ func (s *Reviews) Get(ctx context.Context, scope access.Scope, attemptID string)
 		attemptID, scope.All, opt.String(scope.UserID)).Scan(
 		&a.ID, &a.AssignmentID, &a.StudentID, &a.TestVersionID,
 		&a.AttemptNo, &a.Status, &a.StartedAt, &a.DeadlineAt, &a.SubmittedAt, &a.GradedAt,
-		&a.FocusLossCount, &a.Flagged, &total, &out.TeacherNote,
+		&a.FocusLossCount, &a.Flagged, &total, &out.TeacherNote, &out.ActiveSeconds,
 		&out.MaxAttempts, &out.TestTitle, &out.PublishedAt, &out.Score.Band)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Review{}, domain.ErrPaperNotFound

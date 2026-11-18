@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/shared/schedule"
 )
 
 // WindowLockKey is the advisory-lock key, in the 73819 namespace, that orders
@@ -46,8 +47,27 @@ type WindowReport struct {
 	Applied bool   `json:"applied"`
 }
 
-const movingAttempts = `SELECT count(id) FROM app.attempts
- WHERE status = 'in_progress' AND deadline_at > $1`
+// windowDeadline is the deadline a window from $1 to $2 gives a running
+// attempt aliased a, on its assignment aliased s: a strict attempt's moves by
+// the window's length, and a flexible one's is schedule.FlexibleWindowDeadline,
+// recomputed from its student's close, the assignment's and the override's
+// moved as the same statement moves them, and never earlier than it was. A
+// flexible deadline that itself falls inside the window, which only a
+// teacher's extension past the close can leave there, moves by the window's
+// length too, so the extension is kept. After the window is scheduled, an
+// attempt that starts (schedule.ThroughWindows), the attempts an
+// assignment-level writer moves (schedule.RecomputeDeadlines) and an attempt a
+// teacher extends by hand (schedule.MoveAttemptThroughWindows) go through the
+// same expression.
+const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN ` + schedule.FlexibleWindowDeadline + `
+     ELSE a.deadline_at + ($2::timestamptz - $1::timestamptz) END`
+
+// moving is the running attempts a window from $1 to $2 extends, over
+// app.attempts aliased a and its assignment aliased s.
+const moving = `s.id = a.assignment_id AND a.status = 'in_progress' AND a.deadline_at > $1::timestamptz
+   AND ` + windowDeadline + ` > a.deadline_at`
+
+const movingAttempts = `SELECT count(a.id) FROM app.attempts a, app.assignments s WHERE ` + moving
 
 const movingAssignments = `SELECT count(id) FROM app.assignments
  WHERE closed_at IS NULL AND published_at IS NOT NULL AND closes_at >= $1 AND closes_at < $2`
@@ -57,15 +77,24 @@ const movingOverrides = `SELECT count(*) FROM app.assignment_student_overrides o
  WHERE s.published_at IS NOT NULL AND o.closes_at >= $1 AND o.closes_at < $2`
 
 // ScheduleWindow schedules a window from startsAt to endsAt, no earlier than a
-// minute ago, and in the same statement extends by its length the deadline of
-// every running attempt that would still be running when it starts, the close
-// of every published, open assignment that would close inside it, and the close
-// of every override on a published assignment that would close inside it, an
+// minute ago, and in the same statement moves the deadline of every running
+// attempt that would still be running when it starts, the close of every
+// published, open assignment that would close inside it, and the close of
+// every override on a published assignment that would close inside it, an
 // early-closed assignment's too, because that override is what keeps its
-// student in. Every change is audited as System, with no actor. A dry run reports the
-// counts and refusals and changes nothing, taking no lock. Applying holds the
-// maintenance-windows advisory lock, which the start guard takes shared, so
-// no attempt starts between the check and the write.
+// student in. A strict attempt's deadline moves by the window's length. A
+// flexible one's becomes the latest of: itself, moved by the window's length
+// when it falls inside the window; its assignment's close, moved so when that
+// falls inside it and the assignment was not closed early; and its student's
+// override close, moved so when that falls inside it (windowDeadline). It
+// never moves earlier, and it can move when the student's close is outside
+// the window: when the assignment closes inside the window and the student's
+// override after it, the deadline moves to the assignment's moved close when
+// that is later, by less than the window's length. Every change is audited as
+// System, with no actor. A dry run reports the counts and refusals and changes
+// nothing, taking no lock. Applying holds the maintenance-windows advisory
+// lock, which the start guard takes shared, so no attempt starts between the
+// check and the write.
 func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Time, apply bool) (ScheduleReport, error) {
 	out := ScheduleReport{StartsAt: startsAt, EndsAt: endsAt}
 	if !endsAt.After(startsAt) {
@@ -104,9 +133,9 @@ func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Tim
 		  RETURNING id, starts_at, ends_at, ends_at - starts_at AS length
 		), attempts AS (
 		  UPDATE app.attempts a
-		     SET deadline_at = a.deadline_at + w.length
-		    FROM scheduled w
-		   WHERE a.status = 'in_progress' AND a.deadline_at > w.starts_at
+		     SET deadline_at = `+windowDeadline+`
+		    FROM scheduled w, app.assignments s
+		   WHERE `+moving+`
 		  RETURNING a.id, old.deadline_at AS before, new.deadline_at AS after, w.id AS window_id
 		), assignments AS (
 		  UPDATE app.assignments s
@@ -159,7 +188,7 @@ func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Tim
 }
 
 func countMoves(ctx context.Context, tx pgx.Tx, out ScheduleReport) (ScheduleReport, error) {
-	if err := tx.QueryRow(ctx, movingAttempts, out.StartsAt).Scan(&out.Attempts); err != nil {
+	if err := tx.QueryRow(ctx, movingAttempts, out.StartsAt, out.EndsAt).Scan(&out.Attempts); err != nil {
 		return out, err
 	}
 	if err := tx.QueryRow(ctx, movingAssignments, out.StartsAt, out.EndsAt).Scan(&out.Assignments); err != nil {

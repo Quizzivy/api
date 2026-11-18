@@ -4084,6 +4084,9 @@
                 "minimum": 1,
                 "maximum": 600
               },
+              "mode": {
+                "$ref": "#/components/schemas/AssignmentMode"
+              },
               "shuffleQuestions": {
                 "type": "boolean"
               },
@@ -5022,6 +5025,7 @@
           "id",
           "testTitle",
           "status",
+          "mode",
           "opensAt",
           "closesAt",
           "durationMinutes",
@@ -5058,6 +5062,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/AssignmentStatus"
+          },
+          "mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode"
+              }
+            ],
+            "description": "The intro states the rules of this mode (§10.2). See StudentAssignmentCard."
           },
           "opensAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -10883,6 +10895,14 @@
           }
         }
       },
+      "AssignmentMode": {
+        "type": "string",
+        "enum": [
+          "strict",
+          "flexible"
+        ],
+        "description": "How the assignment times an attempt and what leaving the paper does\n(F1, `docs/plan/77f-f1-assignment-modes.md`).\n\n- `strict`: an attempt's deadline is\n  `min(startedAt + durationMinutes, the student's close)`, and the\n  integrity policy's `maxFocusLoss` and `onLimitExceeded` decide what\n  a counted absence does. Every assignment made before F1 is strict.\n- `flexible`: an attempt's deadline is the student's close, so a\n  student can stop, take a break and come back on any device until\n  then. Every signal is recorded as under strict. The first counted\n  absence flags the attempt and tells the teacher, and later ones tell\n  the teacher again at most once per attempt every 15 minutes. No\n  absence submits or locks the paper. `durationMinutes`,\n  `maxFocusLoss` and `onLimitExceeded` are stored and not applied.\n"
+      },
       "AssignmentStatus": {
         "type": "string",
         "enum": [
@@ -10988,7 +11008,7 @@
             "type": "integer",
             "minimum": -1,
             "default": 0,
-            "description": "-1 = no away episodes allowed; 0 = unlimited; positive values = allowed counted episodes."
+            "description": "-1 = no away episodes allowed; 0 = unlimited; positive values = allowed counted episodes. Stored and not applied when the assignment is `flexible`."
           },
           "onLimitExceeded": {
             "type": "string",
@@ -10998,7 +11018,7 @@
               "auto_submit"
             ],
             "default": "flag",
-            "description": "`auto_submit` immediately submits after the allowed number of counted away episodes is exceeded, preserving answers and recording the violation."
+            "description": "`auto_submit` immediately submits after the allowed number of counted away episodes is exceeded, preserving answers and recording the violation. Stored and not applied when the assignment is `flexible`: there, a counted absence flags the attempt and tells the teacher, and nothing submits it."
           },
           "minAwayMs": {
             "type": "integer",
@@ -11020,6 +11040,7 @@
           "window",
           "publishedAt",
           "updatedAt",
+          "mode",
           "durationMinutes",
           "maxAttempts",
           "shuffleQuestions",
@@ -11141,7 +11162,10 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 600,
-            "description": "Server-enforced. An attempt's deadline is\n`min(startedAt + duration, closesAt)`, so starting late does not buy\na full duration and does not cut the student off mid-window (O-05).\n"
+            "description": "Server-enforced under `strict`. An attempt's deadline is\n`min(startedAt + duration, closesAt)`, so starting late does not buy\na full duration and does not cut the student off mid-window (O-05).\nUnder `flexible` it is stored and not applied: the deadline is the\nstudent's close, and a switch back to strict before the open finds\nthe teacher's value.\n"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AssignmentMode"
           },
           "maxAttempts": {
             "type": "integer",
@@ -11563,7 +11587,8 @@
           "serverTime",
           "audioPlays",
           "answers",
-          "integrity"
+          "integrity",
+          "mode"
         ],
         "additionalProperties": false,
         "properties": {
@@ -11640,6 +11665,14 @@
           },
           "integrity": {
             "$ref": "#/components/schemas/IntegrityPolicy"
+          },
+          "mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode"
+              }
+            ],
+            "description": "The assignment's mode. Under `flexible` the engine never submits\nfor leaving, whatever `integrity.onLimitExceeded` says, and\n`attempt.deadlineAt` is the student's close.\n"
           }
         }
       },
@@ -11702,13 +11735,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 40,
-            "description": "Not an enum: an append-only telemetry log reliably gains kinds, and a\nnewer client must not fail against an older server. Unknown kinds are\nstored, not rejected. Known set is §10.1.\n",
+            "description": "Not an enum: an append-only telemetry log reliably gains kinds, and a\nnewer client must not fail against an older server. Unknown kinds are\nstored, not rejected. Known set is §10.1, plus `paper_left`: the\nstudent left the paper by its ✕ (a break under `flexible`).\n",
             "examples": [
               "tab_hidden",
               "window_blur",
               "paste",
               "audio_play",
-              "network_offline"
+              "network_offline",
+              "paper_left"
             ]
           },
           "occurredAt": {
@@ -11735,6 +11769,12 @@
             "additionalProperties": true
           }
         }
+      },
+      "ActiveMsInput": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 600000,
+        "description": "Milliseconds the paper was visible in this tab since the session's\nprevious report (F1). The server credits at most the time that has\npassed since that report plus 5 seconds, only while the attempt is in\nprogress and only from its current session; a report from a session\nanother tab replaced is dropped. Omitted, nothing is credited.\n"
       },
       "IntegrityEvent": {
         "type": "object",
@@ -11916,6 +11956,9 @@
               "null"
             ]
           },
+          "activeSeconds": {
+            "$ref": "#/components/schemas/ActiveSeconds"
+          },
           "flagged": {
             "type": "boolean"
           },
@@ -11932,6 +11975,14 @@
             "description": "This student's own close, when an override of theirs reaches past the assignment's own: \"Extended to …\". Absent or null when they have none, or theirs is no later. While it is ahead of `serverTime` the student can still start or carry on, even if the assignment has closed early or its window has ended."
           }
         }
+      },
+      "ActiveSeconds": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "description": "Time on the paper: the seconds the engine reported the paper visible,\nadded up over every sitting (F1), rounded down. Null for an attempt\nstarted before F1 and for a row with no attempt. Teacher-only: no\n`/app/*` payload carries it.\n"
       },
       "AttemptListRow": {
         "type": "object",
@@ -12314,6 +12365,7 @@
           "id",
           "testTitle",
           "status",
+          "mode",
           "opensAt",
           "closesAt",
           "durationMinutes",
@@ -12354,6 +12406,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/AssignmentStatus"
+          },
+          "mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode"
+              }
+            ],
+            "description": "Under `flexible` the student may stop and resume until `closesAt`; `durationMinutes` does not apply."
           },
           "opensAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -13875,7 +13935,7 @@
       },
       "NotificationKind": {
         "type": "string",
-        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n| `message.received` | a teacher | `senderName`, `count`, `excerpt` |\n| `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |\n| `summary.weekly` | a teacher | `count`, `toGrade`, `flagged`, `classNames` |\n\nA message item is one per reader per thread: it is written again,\nunread, with the new `count` while the thread stays unread, and marked\nread when the reader's pointer passes it. Each write gives it a new\n`id` and `createdAt`, so it lists first, and once it was read its\n`count` starts again from the next message. `excerpt` is the newest\nmessage's first 80 characters; it lives only in the reader's own bell.\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
+        "description": "What a notification is about. The server sends no sentence: the client\nwords the item from `kind` and `params` in the reader's language.\n\nEach kind carries exactly these `params`:\n\n| Kind | For | Params |\n|---|---|---|\n| `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |\n| `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` (under a `flexible` assignment, written again with the new count at most once per attempt every 15 minutes) |\n| `assignment.closing` | a teacher | `title`, `notSubmitted` |\n| `class.joined` | a teacher | `studentName`, `className` |\n| `join_codes.rotated` | a teacher | `count`, `classNames` |\n| `assignment.opened` | a student | `title`, `closesAt` |\n| `assignment.due_soon` | a student | `title`, `closesAt` |\n| `assignment.extended` | a student | `title`, `closesAt` |\n| `result.ready` | a student | `title` |\n| `ai.allowance_warning` | a teacher | `used`, `allowance` |\n| `ai.credit_request` | a teacher | `teacherName`, `credits` |\n| `ai.credit_request.decided` | a teacher | `credits`, `decision` |\n| `content.transferred` | a teacher | `teacherName`, `count` |\n| `class.teacher_changed` | a teacher | `className`, and `teacherName` for the class's previous teacher |\n| `content.shared` | a teacher | `sharerName`, `contentKind`, `name`, `access`, and `message` when the sharer wrote one |\n| `test.published_by_collaborator` | a teacher | `editorName`, `title`, `version` |\n| `message.received` | a teacher | `senderName`, `count`, `excerpt` |\n| `message.from_teacher` | a student | `senderName`, `count`, `excerpt`, and `className` for an announcement |\n| `summary.weekly` | a teacher | `count`, `toGrade`, `flagged`, `classNames` |\n\nA message item is one per reader per thread: it is written again,\nunread, with the new `count` while the thread stays unread, and marked\nread when the reader's pointer passes it. Each write gives it a new\n`id` and `createdAt`, so it lists first, and once it was read its\n`count` starts again from the next message. `excerpt` is the newest\nmessage's first 80 characters; it lives only in the reader's own bell.\n\nThe three `ai.*` kinds are for the teacher's bell. `ai.credit_request`\nis written for every holder of `ai.credits.manage`, who reads it in the\nteacher workspace until the Admin console has a bell of its own.\n\n`join_codes.rotated` was written by the one-time start-up rotation of\npre-v0.8.0 join codes, which v0.12.0 removed. Nothing writes it now;\nthe kind stays so that the notifications it wrote still read.\n",
         "enum": [
           "attempt.submitted",
           "attempt.flagged",
@@ -16222,7 +16282,16 @@
           "durationMinutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 600
+            "maximum": 600,
+            "description": "Required in both modes; stored and not applied under `flexible`."
+          },
+          "mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode"
+              }
+            ],
+            "description": "Omitted, a create is `strict` and a PATCH keeps the stored mode.\nChanging it answers `409 ASSIGNMENT_LOCKED` while the assignment is\nopen or once any attempt exists, as the time limit does.\n"
           },
           "maxAttempts": {
             "type": "integer",
@@ -23820,7 +23889,7 @@
         "tags": [
           "teacher-assignments"
         ],
-        "description": "`testVersionId` may be changed **only while no attempt exists**.\nRe-pointing an untouched assignment at a corrected version is a\nlegitimate workflow; doing it once students have started is not.\nExisting attempts always carry their own version regardless (§7).\n\nWhile the assignment is `open`, a **change** to `testVersionId`,\n`durationMinutes` or `maxAttempts` is refused with `ASSIGNMENT_LOCKED`\n(DG-65: only \"Test \u0026 timing\" locks); sending the stored value passes,\nand every other field stays editable. Outside `open` the version check\nabove is the only one.\n\nA **closed** assignment, by its window or by an early close, at the\nmoment of the request, stays closed: a `window` that would make it\n`scheduled` or `open` again, or that opens after the early close the\nassignment keeps, is refused with `ASSIGNMENT_CLOSED`, because that is\na reopening and `reopenAssignment` does it, asking for a reason and\nwriting its own audit entry. A request that leaves it closed passes:\nthe stored window, an earlier `closesAt`, `closeNow` (while `opensAt`\nis not ahead of now) and every other field. An early close is never\nlifted here.\n\n`review.release`, `review.showClassAverage` and `studentNote` are\npartial: omitted, they keep what is stored. `studentNote: null` clears\nthe note. Every other field is replaced as before.\n\nAn attempt already in progress moves with a later close, in the same\ntransaction: its deadline becomes the earlier of its start plus the\nstudent's time limit and the student's own close, when that is later\nthan the deadline it has. A deadline never moves earlier, so a shorter\nclose, or `closeNow`, leaves every attempt in progress where it is, and\nan attempt whose deadline has already passed is over and is not\nrevived. Each attempt moved is audited as `attempt.extended`.\n",
+        "description": "`testVersionId` may be changed **only while no attempt exists**.\nRe-pointing an untouched assignment at a corrected version is a\nlegitimate workflow; doing it once students have started is not.\nExisting attempts always carry their own version regardless (§7).\n\nWhile the assignment is `open`, a **change** to `testVersionId`,\n`durationMinutes` or `maxAttempts` is refused with `ASSIGNMENT_LOCKED`\n(DG-65: only \"Test \u0026 timing\" locks); sending the stored value passes,\nand every other field stays editable. Outside `open` the version check\nabove is the only one, except for `mode`: a change to it is refused\nwith `ASSIGNMENT_LOCKED` while the assignment is open **or** once any\nattempt exists, so an attempt never changes mode under a student (F1).\n\nA **closed** assignment, by its window or by an early close, at the\nmoment of the request, stays closed: a `window` that would make it\n`scheduled` or `open` again, or that opens after the early close the\nassignment keeps, is refused with `ASSIGNMENT_CLOSED`, because that is\na reopening and `reopenAssignment` does it, asking for a reason and\nwriting its own audit entry. A request that leaves it closed passes:\nthe stored window, an earlier `closesAt`, `closeNow` (while `opensAt`\nis not ahead of now) and every other field. An early close is never\nlifted here.\n\n`review.release`, `review.showClassAverage` and `studentNote` are\npartial: omitted, they keep what is stored. `studentNote: null` clears\nthe note. Every other field is replaced as before.\n\nAn attempt already in progress moves with a later close, in the same\ntransaction: its deadline becomes the earlier of its start plus the\nstudent's time limit and the student's own close (under `flexible`,\nthe student's own close), when that is later\nthan the deadline it has. A deadline never moves earlier, so a shorter\nclose, or `closeNow`, leaves every attempt in progress where it is, and\nan attempt whose deadline has already passed is over and is not\nrevived. Each attempt moved is audited as `attempt.extended`.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -23849,7 +23918,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`ASSIGNMENT_LOCKED` — the assignment is open, so the version, the\nduration and the attempts cannot be changed; `ASSIGNMENT_CLOSED` —\nthe assignment is closed and the window would open it again, so it\nis reopened with `reopenAssignment`; `VERSION_LOCKED` — attempts\nexist, so the version cannot be changed; or `TEST_NOT_PUBLISHED`.\n",
+            "description": "`ASSIGNMENT_LOCKED` — the assignment is open, so the version, the\nduration, the attempts and the mode cannot be changed, or an\nattempt exists, so the mode cannot; `ASSIGNMENT_CLOSED` —\nthe assignment is closed and the window would open it again, so it\nis reopened with `reopenAssignment`; `VERSION_LOCKED` — attempts\nexist, so the version cannot be changed; or `TEST_NOT_PUBLISHED`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -24773,6 +24842,9 @@
                     },
                     "integrity": {
                       "$ref": "#/components/schemas/IntegritySummary"
+                    },
+                    "activeSeconds": {
+                      "$ref": "#/components/schemas/ActiveSeconds"
                     },
                     "teacherNote": {
                       "type": [
@@ -30789,6 +30861,9 @@
                       "$ref": "#/components/schemas/IntegrityEventInput"
                     },
                     "maxItems": 500
+                  },
+                  "activeMs": {
+                    "$ref": "#/components/schemas/ActiveMsInput"
                   }
                 }
               }
@@ -30902,6 +30977,9 @@
                       "$ref": "#/components/schemas/IntegrityEventInput"
                     },
                     "maxItems": 500
+                  },
+                  "activeMs": {
+                    "$ref": "#/components/schemas/ActiveMsInput"
                   }
                 }
               }
@@ -30909,7 +30987,7 @@
             "text/plain": {
               "schema": {
                 "type": "string",
-                "description": "JSON encoded as text: `{ beaconToken, sessionId, events }`. Sent\nas a `Blob` with type `text/plain` from `navigator.sendBeacon`.\n"
+                "description": "JSON encoded as text: `{ beaconToken, sessionId, events,\nactiveMs? }`. Sent as a `Blob` with type `text/plain` from\n`navigator.sendBeacon`.\n"
               }
             }
           }

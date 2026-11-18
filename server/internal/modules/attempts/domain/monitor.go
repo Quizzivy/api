@@ -26,6 +26,9 @@ type MonitorRow struct {
 	AnsweredCount  *int
 	Score          *Score
 	FocusLossCount *int
+	// ActiveSeconds is the attempt's time on the paper, rounded down; nil
+	// when it was not measured (an attempt started before F1).
+	ActiveSeconds  *int
 	Flagged        bool
 	AudioOverLimit bool
 	// ExtendedTo is the student's own close when an override of theirs reaches

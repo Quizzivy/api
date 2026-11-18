@@ -2293,6 +2293,7 @@ components:
           additionalProperties: false
           properties:
             durationMinutes: { type: integer, minimum: 1, maximum: 600 }
+            mode: { $ref: '#/components/schemas/AssignmentMode' }
             shuffleQuestions: { type: boolean }
             showScore: { type: boolean }
             blockCopyPaste: { type: boolean }
@@ -2831,7 +2832,7 @@ components:
         plain Vietnamese before the student starts. The window it states is the
         student's own, as in StudentAssignmentCard.
       required:
-        [id, testTitle, status, opensAt, closesAt, durationMinutes,
+        [id, testTitle, status, mode, opensAt, closesAt, durationMinutes,
          attemptsUsed, maxAttempts, questionCount, totalPoints, review,
          integrity, hasAudio, showsTranscript]
       additionalProperties: false
@@ -2843,6 +2844,9 @@ components:
           type: [string, 'null']
           description: The assignment's author.
         status: { $ref: '#/components/schemas/AssignmentStatus' }
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AssignmentMode' }]
+          description: The intro states the rules of this mode (§10.2). See StudentAssignmentCard.
         opensAt: { $ref: '#/components/schemas/Timestamp' }
         closesAt: { $ref: '#/components/schemas/Timestamp' }
         durationMinutes: { type: integer, minimum: 1 }
@@ -5934,6 +5938,25 @@ components:
 
     # ------------------------------------------------------------- assignments
 
+    AssignmentMode:
+      type: string
+      enum: [strict, flexible]
+      description: |
+        How the assignment times an attempt and what leaving the paper does
+        (F1, `docs/plan/77f-f1-assignment-modes.md`).
+
+        - `strict`: an attempt's deadline is
+          `min(startedAt + durationMinutes, the student's close)`, and the
+          integrity policy's `maxFocusLoss` and `onLimitExceeded` decide what
+          a counted absence does. Every assignment made before F1 is strict.
+        - `flexible`: an attempt's deadline is the student's close, so a
+          student can stop, take a break and come back on any device until
+          then. Every signal is recorded as under strict. The first counted
+          absence flags the attempt and tells the teacher, and later ones tell
+          the teacher again at most once per attempt every 15 minutes. No
+          absence submits or locks the paper. `durationMinutes`,
+          `maxFocusLoss` and `onLimitExceeded` are stored and not applied.
+
     AssignmentStatus:
       type: string
       enum: [draft, scheduled, open, closed]
@@ -6003,12 +6026,12 @@ components:
       properties:
         requireFullscreen: { type: boolean, default: false }
         blockCopyPaste: { type: boolean, default: true }
-        maxFocusLoss: { type: integer, minimum: -1, default: 0, description: '-1 = no away episodes allowed; 0 = unlimited; positive values = allowed counted episodes.' }
+        maxFocusLoss: { type: integer, minimum: -1, default: 0, description: '-1 = no away episodes allowed; 0 = unlimited; positive values = allowed counted episodes. Stored and not applied when the assignment is `flexible`.' }
         onLimitExceeded:
           type: string
           enum: [warn, flag, auto_submit]
           default: flag
-          description: '`auto_submit` immediately submits after the allowed number of counted away episodes is exceeded, preserving answers and recording the violation.'
+          description: '`auto_submit` immediately submits after the allowed number of counted away episodes is exceeded, preserving answers and recording the violation. Stored and not applied when the assignment is `flexible`: there, a counted absence flags the attempt and tells the teacher, and nothing submits it.'
         minAwayMs:
           type: integer
           minimum: 0
@@ -6021,7 +6044,7 @@ components:
       type: object
       required:
         [id, testId, testVersionId, testVersion, testTitle, targets, window,
-         publishedAt, updatedAt, durationMinutes, maxAttempts, shuffleQuestions,
+         publishedAt, updatedAt, mode, durationMinutes, maxAttempts, shuffleQuestions,
          shuffleOptions, review, integrity, studentNote, status]
       additionalProperties: false
       properties:
@@ -6074,9 +6097,13 @@ components:
           minimum: 1
           maximum: 600
           description: |
-            Server-enforced. An attempt's deadline is
+            Server-enforced under `strict`. An attempt's deadline is
             `min(startedAt + duration, closesAt)`, so starting late does not buy
             a full duration and does not cut the student off mid-window (O-05).
+            Under `flexible` it is stored and not applied: the deadline is the
+            student's close, and a switch back to strict before the open finds
+            the teacher's value.
+        mode: { $ref: '#/components/schemas/AssignmentMode' }
         maxAttempts: { type: integer, minimum: 1 }
         shuffleQuestions: { type: boolean }
         shuffleOptions: { type: boolean }
@@ -6285,7 +6312,7 @@ components:
       description: |
         Returned when an attempt is created, resumed or read. Everything the
         engine needs to run authoritatively.
-      required: [attempt, testTitle, sections, questions, sessionId, beaconToken, serverTime, audioPlays, answers, integrity]
+      required: [attempt, testTitle, sections, questions, sessionId, beaconToken, serverTime, audioPlays, answers, integrity, mode]
       additionalProperties: false
       properties:
         remainingAttempts: { type: integer, minimum: 0, description: "Additional attempts available after this one, excluding voided attempts." }
@@ -6355,6 +6382,12 @@ components:
           additionalProperties: { $ref: '#/components/schemas/Answer' }
           description: Keyed by question id. The base for the resume merge.
         integrity: { $ref: '#/components/schemas/IntegrityPolicy' }
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AssignmentMode' }]
+          description: |
+            The assignment's mode. Under `flexible` the engine never submits
+            for leaving, whatever `integrity.onLimitExceeded` says, and
+            `attempt.deadlineAt` is the student's close.
 
     GroupAudioPlayInput:
       type: object
@@ -6388,8 +6421,9 @@ components:
           description: |
             Not an enum: an append-only telemetry log reliably gains kinds, and a
             newer client must not fail against an older server. Unknown kinds are
-            stored, not rejected. Known set is §10.1.
-          examples: [tab_hidden, window_blur, paste, audio_play, network_offline]
+            stored, not rejected. Known set is §10.1, plus `paper_left`: the
+            student left the paper by its ✕ (a break under `flexible`).
+          examples: [tab_hidden, window_blur, paste, audio_play, network_offline, paper_left]
         occurredAt: { $ref: '#/components/schemas/Timestamp' }
         clientSeq:
           type: integer
@@ -6407,6 +6441,17 @@ components:
             that takes events.
         questionId: { type: [string, 'null'], format: uuid }
         meta: { type: [object, 'null'], additionalProperties: true }
+
+    ActiveMsInput:
+      type: integer
+      minimum: 0
+      maximum: 600000
+      description: |
+        Milliseconds the paper was visible in this tab since the session's
+        previous report (F1). The server credits at most the time that has
+        passed since that report plus 5 seconds, only while the attempt is in
+        progress and only from its current session; a report from a session
+        another tab replaced is dropped. Omitted, nothing is credited.
 
     IntegrityEvent:
       type: object
@@ -6468,6 +6513,7 @@ components:
             `questionCount` (G-02's progress column).
         score: { oneOf: [{ $ref: '#/components/schemas/AttemptScore' }, { type: 'null' }] }
         focusLossCount: { type: [integer, 'null'] }
+        activeSeconds: { $ref: '#/components/schemas/ActiveSeconds' }
         flagged: { type: boolean }
         audioOverLimit: { type: boolean, description: "Reported, never enforced (§11.4)." }
         extendedTo:
@@ -6479,6 +6525,15 @@ components:
             or theirs is no later. While it is ahead of `serverTime` the student
             can still start or carry on, even if the assignment has closed early
             or its window has ended.
+
+    ActiveSeconds:
+      type: [integer, 'null']
+      minimum: 0
+      description: |
+        Time on the paper: the seconds the engine reported the paper visible,
+        added up over every sitting (F1), rounded down. Null for an attempt
+        started before F1 and for a row with no attempt. Teacher-only: no
+        `/app/*` payload carries it.
 
     AttemptListRow:
       type: object
@@ -6649,7 +6704,7 @@ components:
         reads `open` here while the student's close is still ahead. Nothing in
         the card says an override exists or why.
       required:
-        [id, testTitle, status, opensAt, closesAt, durationMinutes,
+        [id, testTitle, status, mode, opensAt, closesAt, durationMinutes,
          attemptsUsed, maxAttempts, questionCount, totalPoints]
       additionalProperties: false
       properties:
@@ -6672,6 +6727,9 @@ components:
             not archived, so each class card can name its next paper. Empty for
             a student targeted only by name.
         status: { $ref: '#/components/schemas/AssignmentStatus' }
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AssignmentMode' }]
+          description: Under `flexible` the student may stop and resume until `closesAt`; `durationMinutes` does not apply.
         opensAt: { $ref: '#/components/schemas/Timestamp' }
         closesAt: { $ref: '#/components/schemas/Timestamp' }
         durationMinutes: { type: integer }
@@ -7420,7 +7478,7 @@ components:
         | Kind | For | Params |
         |---|---|---|
         | `attempt.submitted` | a teacher | `title`, `count`, `toGrade` |
-        | `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` |
+        | `attempt.flagged` | a teacher | `studentName`, `title`, `focusLost` (under a `flexible` assignment, written again with the new count at most once per attempt every 15 minutes) |
         | `assignment.closing` | a teacher | `title`, `notSubmitted` |
         | `class.joined` | a teacher | `studentName`, `className` |
         | `join_codes.rotated` | a teacher | `count`, `classNames` |
@@ -8559,7 +8617,17 @@ components:
           properties:
             opensAt: { $ref: '#/components/schemas/Timestamp' }
             closesAt: { $ref: '#/components/schemas/Timestamp' }
-        durationMinutes: { type: integer, minimum: 1, maximum: 600 }
+        durationMinutes:
+          type: integer
+          minimum: 1
+          maximum: 600
+          description: Required in both modes; stored and not applied under `flexible`.
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AssignmentMode' }]
+          description: |
+            Omitted, a create is `strict` and a PATCH keeps the stored mode.
+            Changing it answers `409 ASSIGNMENT_LOCKED` while the assignment is
+            open or once any attempt exists, as the time limit does.
         maxAttempts: { type: integer, minimum: 1, maximum: 99, default: 1 }
         shuffleQuestions:
           type: boolean
@@ -13105,7 +13173,9 @@ paths:
         `durationMinutes` or `maxAttempts` is refused with `ASSIGNMENT_LOCKED`
         (DG-65: only "Test & timing" locks); sending the stored value passes,
         and every other field stays editable. Outside `open` the version check
-        above is the only one.
+        above is the only one, except for `mode`: a change to it is refused
+        with `ASSIGNMENT_LOCKED` while the assignment is open **or** once any
+        attempt exists, so an attempt never changes mode under a student (F1).
 
         A **closed** assignment, by its window or by an early close, at the
         moment of the request, stays closed: a `window` that would make it
@@ -13123,7 +13193,8 @@ paths:
 
         An attempt already in progress moves with a later close, in the same
         transaction: its deadline becomes the earlier of its start plus the
-        student's time limit and the student's own close, when that is later
+        student's time limit and the student's own close (under `flexible`,
+        the student's own close), when that is later
         than the deadline it has. A deadline never moves earlier, so a shorter
         close, or `closeNow`, leaves every attempt in progress where it is, and
         an attempt whose deadline has already passed is over and is not
@@ -13144,7 +13215,8 @@ paths:
         '409':
           description: |
             `ASSIGNMENT_LOCKED` — the assignment is open, so the version, the
-            duration and the attempts cannot be changed; `ASSIGNMENT_CLOSED` —
+            duration, the attempts and the mode cannot be changed, or an
+            attempt exists, so the mode cannot; `ASSIGNMENT_CLOSED` —
             the assignment is closed and the window would open it again, so it
             is reopened with `reopenAssignment`; `VERSION_LOCKED` — attempts
             exist, so the version cannot be changed; or `TEST_NOT_PUBLISHED`.
@@ -13680,6 +13752,7 @@ paths:
                     additionalProperties: { type: integer }
                     description: Shown as used-vs-allowed, including over-limit. Reported, not enforced (§11.4).
                   integrity: { $ref: '#/components/schemas/IntegritySummary' }
+                  activeSeconds: { $ref: '#/components/schemas/ActiveSeconds' }
                   teacherNote:
                     type: [string, 'null']
                     description: |
@@ -17506,6 +17579,7 @@ paths:
                   type: array
                   items: { $ref: '#/components/schemas/IntegrityEventInput' }
                   maxItems: 500
+                activeMs: { $ref: '#/components/schemas/ActiveMsInput' }
       responses:
         '200':
           description: |
@@ -17579,12 +17653,14 @@ paths:
               properties:
                 sessionId: { $ref: '#/components/schemas/Uuid' }
                 events: { type: array, items: { $ref: '#/components/schemas/IntegrityEventInput' }, maxItems: 500 }
+                activeMs: { $ref: '#/components/schemas/ActiveMsInput' }
           text/plain:
             schema:
               type: string
               description: |
-                JSON encoded as text: `{ beaconToken, sessionId, events }`. Sent
-                as a `Blob` with type `text/plain` from `navigator.sendBeacon`.
+                JSON encoded as text: `{ beaconToken, sessionId, events,
+                activeMs? }`. Sent as a `Blob` with type `text/plain` from
+                `navigator.sendBeacon`.
       responses:
         '202':
           description: Accepted. Always 202 — the client cannot act on the outcome anyway.

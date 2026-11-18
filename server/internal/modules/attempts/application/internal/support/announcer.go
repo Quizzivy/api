@@ -15,7 +15,8 @@ import (
 
 // Announcer tells the people a write to an attempt concerns what it brought
 // about, after the write has committed: the teachers who reach the paper when
-// it is handed in or flagged by the integrity policy, and the student when a
+// it is handed in or flagged by the integrity policy, or absent again on a
+// flexible assignment, and the student when a
 // teacher declares it graded and the review policy shows the score. A nil
 // Announcer, and one without a Notifier, tell nobody.
 type Announcer struct {
@@ -50,8 +51,11 @@ func notices(m domain.Milestones, brief domain.Briefing, now time.Time) []notifi
 		if m.HandedIn {
 			out = append(out, submitted(reader, m, brief, now))
 		}
-		if m.Flagged {
-			out = append(out, flagged(reader, m, brief))
+		switch {
+		case m.Flagged:
+			out = append(out, flagged(reader, m, brief, notificationsdomain.FlaggedKey(m.AttemptID)))
+		case m.AbsentAgain:
+			out = append(out, flagged(reader, m, brief, notificationsdomain.FlaggedAgainKey(m.AttemptID, now)))
 		}
 	}
 	if m.Graded && brief.ShowsResult {
@@ -76,13 +80,16 @@ func submitted(reader string, m domain.Milestones, brief domain.Briefing, now ti
 	}
 }
 
-func flagged(reader string, m domain.Milestones, brief domain.Briefing) notificationscommand.Notify {
+// flagged is the notice of a flag, under FlaggedKey, or, on a flexible
+// assignment, of the absences counted since, under the FlaggedAgainKey of
+// the bucket they fall in, so a teacher is told at most once per bucket.
+func flagged(reader string, m domain.Milestones, brief domain.Briefing, key string) notificationscommand.Notify {
 	return notificationscommand.Notify{
 		UserID:    reader,
 		Kind:      notificationsdomain.AttemptFlagged,
 		Params:    notificationsdomain.Flagged{StudentName: brief.StudentName, Title: brief.Title, FocusLost: brief.FocusLost},
 		Target:    &notificationsdomain.Target{Route: notificationsdomain.RouteAttempt, AttemptID: m.AttemptID, AssignmentID: brief.AssignmentID},
-		DedupeKey: notificationsdomain.FlaggedKey(m.AttemptID),
+		DedupeKey: key,
 		Merge:     notificationsdomain.Replace,
 	}
 }

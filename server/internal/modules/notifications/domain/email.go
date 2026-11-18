@@ -117,7 +117,11 @@ func PlanEmail(n Notice, now time.Time) (Email, bool) {
 	}
 	switch n.Kind {
 	case AttemptFlagged:
-		return e.of(EmailAttemptFlagged, EmailIDs{AttemptID: t.AttemptID}, t.AttemptID, "flagged:"+t.AttemptID+":"+n.UserID)
+		key := "flagged:" + t.AttemptID + ":" + n.UserID
+		if bucket, again := FlaggedAgainBucket(n.DedupeKey); again {
+			key += ":" + bucket
+		}
+		return e.of(EmailAttemptFlagged, EmailIDs{AttemptID: t.AttemptID}, t.AttemptID, key)
 	case AssignmentExtended:
 		extended, _ := n.Params.(Extended)
 		return e.of(EmailAssignmentExtended, EmailIDs{AssignmentID: t.AssignmentID}, t.AssignmentID,

@@ -11,9 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Save writes a batch of answers and the events that accompanied them, in one
-// transaction. The milestones say that the integrity policy flagged the paper
-// in this save, and that the limit closed it.
+// Save writes a batch of answers and the events that accompanied them, and
+// credits the time on the paper they report, in one transaction. The
+// milestones say that the integrity policy flagged the paper in this save, or
+// counted another absence on a flexible one, and that the limit closed it.
 func (s *Postgres) Save(ctx context.Context, in domain.SaveInput, now time.Time) (domain.SaveResult, domain.Milestones, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -29,8 +30,11 @@ func (s *Postgres) Save(ctx context.Context, in domain.SaveInput, now time.Time)
 	if err != nil {
 		return domain.SaveResult{}, domain.Milestones{}, err
 	}
-	flagged, err := insertEvents(ctx, tx, in.AttemptID, in.SessionID, in.Events, versionID)
+	absences, err := insertEvents(ctx, tx, in.AttemptID, in.SessionID, in.Events, versionID)
 	if err != nil {
+		return domain.SaveResult{}, domain.Milestones{}, err
+	}
+	if err := creditActive(ctx, tx, in.AttemptID, in.SessionID, in.ActiveMs, now); err != nil {
 		return domain.SaveResult{}, domain.Milestones{}, err
 	}
 
@@ -41,7 +45,8 @@ func (s *Postgres) Save(ctx context.Context, in domain.SaveInput, now time.Time)
 	if err := tx.Commit(ctx); err != nil {
 		return domain.SaveResult{}, domain.Milestones{}, fmt.Errorf("attempts: commit save: %w", err)
 	}
-	reached := domain.Milestones{AttemptID: in.AttemptID, HandedIn: limit.closed, Flagged: flagged || limit.flagged}
+	reached := domain.Milestones{AttemptID: in.AttemptID, HandedIn: limit.closed,
+		Flagged: absences.flagged || limit.flagged, AbsentAgain: absences.again}
 	return domain.SaveResult{SavedAt: now, DeadlineAt: deadlineAt, Saved: saved, Dropped: dropped}, reached, nil
 }
 
@@ -153,9 +158,17 @@ func upsertAnswers(ctx context.Context, tx pgx.Tx, in domain.SaveInput, versionI
 	return len(landed), dropped, nil
 }
 
-func insertEvents(ctx context.Context, q db.Querier, attemptID, sessionID string, events []domain.Event, versionID string) (bool, error) {
+// absences is what counting the absences again found: the paper flagged for
+// the first time, or, under a flexible assignment, another absence counted on
+// a paper already flagged.
+type absences struct {
+	flagged bool
+	again   bool
+}
+
+func insertEvents(ctx context.Context, q db.Querier, attemptID, sessionID string, events []domain.Event, versionID string) (absences, error) {
 	if len(events) == 0 {
-		return false, nil
+		return absences{}, nil
 	}
 	kinds := make([]string, len(events))
 	occurred := make([]time.Time, len(events))
@@ -189,20 +202,24 @@ func insertEvents(ctx context.Context, q db.Querier, attemptID, sessionID string
 `,
 		attemptID, sessionID, kinds, occurred, seqs, questions, metas, versionID)
 	if err != nil {
-		return false, fmt.Errorf("attempts: insert events: %w", err)
+		return absences{}, fmt.Errorf("attempts: insert events: %w", err)
 	}
 	return deriveFocusLoss(ctx, q, attemptID)
 }
 
-func deriveFocusLoss(ctx context.Context, q db.Querier, attemptID string) (bool, error) {
-	var newlyFlagged bool
+// deriveFocusLoss counts the attempt's absences again and flags it by the
+// assignment's leaving rule. Under flexible the rule is not read: the first
+// counted absence flags the paper, whatever maxFocusLoss and onLimitExceeded
+// hold, and each later one is reported as again.
+func deriveFocusLoss(ctx context.Context, q db.Querier, attemptID string) (absences, error) {
+	var out absences
 	err := q.QueryRow(ctx, `
 		UPDATE app.attempts at
 		   SET focus_loss_count = counted.n,
-		       flagged = at.flagged
-		         OR (a.integrity_max_focus_loss <> 0
+		       flagged = at.flagged OR CASE WHEN a.mode = 'flexible' THEN counted.n > 0 ELSE
+		         (a.integrity_max_focus_loss <> 0
 		             AND counted.n > greatest(0, a.integrity_max_focus_loss)
-		             AND a.integrity_on_limit_exceeded IN ('flag', 'auto_submit'))
+		             AND a.integrity_on_limit_exceeded IN ('flag', 'auto_submit')) END
 		  FROM app.assignments a,
 		       LATERAL (
 		         SELECT count(*) AS n
@@ -213,9 +230,41 @@ func deriveFocusLoss(ctx context.Context, q db.Querier, attemptID string) (bool,
 		                     ELSE false END
 		       ) AS counted
 		 WHERE at.id = $1::uuid AND a.id = at.assignment_id
-		RETURNING NOT old.flagged AND new.flagged`, attemptID).Scan(&newlyFlagged)
+		RETURNING NOT old.flagged AND new.flagged,
+		          a.mode = 'flexible' AND old.flagged AND new.focus_loss_count > old.focus_loss_count`,
+		attemptID).Scan(&out.flagged, &out.again)
 	if err != nil {
-		return false, fmt.Errorf("attempts: derive focus loss: %w", err)
+		return absences{}, fmt.Errorf("attempts: derive focus loss: %w", err)
 	}
-	return newlyFlagged, nil
+	return out, nil
+}
+
+// ActiveGrace is what a report of time on the paper may claim beyond the time
+// since the session's previous one: the engine's count and the server's clock
+// are read at different moments.
+const ActiveGrace = 5 * time.Second
+
+// creditActive adds a report of the paper's visible time to the attempt's
+// time on the paper, never more than the time since the previous report plus
+// ActiveGrace, and makes now the previous report. It credits only an attempt
+// in progress, before its deadline, from its current session: a report from
+// a session another tab replaced is dropped. An attempt whose time was never
+// measured (active_ms NULL, started before F1) stays unmeasured.
+func creditActive(ctx context.Context, q db.Querier, attemptID, sessionID string, activeMs *int, now time.Time) error {
+	if activeMs == nil {
+		return nil
+	}
+	_, err := q.Exec(ctx, `
+		UPDATE app.attempts
+		   SET active_ms = active_ms + least($3::bigint,
+		         greatest(0, floor(extract(epoch FROM $4::timestamptz - active_reported_at) * 1000)::bigint + $5::bigint)),
+		       active_reported_at = $4::timestamptz
+		 WHERE id = $1::uuid AND session_id = $2::uuid AND status = 'in_progress'
+		   AND deadline_at >= $4::timestamptz
+		   AND active_ms IS NOT NULL AND active_reported_at IS NOT NULL`,
+		attemptID, sessionID, *activeMs, now, ActiveGrace.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("attempts: credit time on the paper: %w", err)
+	}
+	return nil
 }

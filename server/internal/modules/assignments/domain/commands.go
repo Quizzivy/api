@@ -53,12 +53,15 @@ type WriteInput struct {
 	OpensAt       time.Time
 	ClosesAt      time.Time
 	DurationMin   int
-	MaxAttempts   int
-	ShuffleQ      bool
-	ShuffleO      bool
-	Review        Review
-	Integrity     Integrity
-	CloseNow      bool
+	// Mode is the mode the request named, or empty: a create stores strict
+	// and an update keeps the stored mode.
+	Mode        Mode
+	MaxAttempts int
+	ShuffleQ    bool
+	ShuffleO    bool
+	Review      Review
+	Integrity   Integrity
+	CloseNow    bool
 	// ReleaseSet, ClassAverageSet and StudentNoteSet say that the request
 	// named the field. A create takes Review and StudentNote as they stand; an
 	// update keeps the stored value of a field it did not name.
@@ -80,6 +83,10 @@ func (in WriteInput) Validate() error {
 
 	if in.CloseNow && in.OpensAt.After(in.Now) {
 		fields.AddIn("closeNow", "Không thể đóng ngay khi thời điểm mở còn ở phía trước.", "The assignment cannot be closed now while its opening time is still ahead.")
+	}
+
+	if in.Mode != "" && !in.Mode.Valid() {
+		fields.AddIn("mode", "Chế độ bài giao không hợp lệ.", "The assignment mode is not valid.")
 	}
 
 	if !in.Review.Release.Valid() {

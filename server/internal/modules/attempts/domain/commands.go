@@ -10,6 +10,9 @@ type SaveInput struct {
 	SessionID string
 	Answers   []Answer
 	Events    []Event
+	// ActiveMs is the paper's visible time since this session's previous
+	// report, as the engine counts it; nil credits nothing.
+	ActiveMs *int
 }
 
 // SaveResult reports what actually landed. Saved can be lower than the number
@@ -28,16 +31,20 @@ type FlushInput struct {
 	AttemptID string
 	SessionID string
 	Events    []Event
+	// ActiveMs is as SaveInput's; it is credited only from the attempt's
+	// current session.
+	ActiveMs *int
 
 	// StudentID is set when the request arrived with a verified access token.
 	StudentID   string
 	BeaconToken string
 }
 
-// CreateInput starts an attempt. ExpectedDeadlineAt is the deadline the caller
-// worked out from its own earlier read of the rules, which the maintenance
-// check looks at first; the deadline stored is the one the rules give when
-// Create reads them again under a lock, at StartedAt.
+// CreateInput starts an attempt. ExpectedDeadlineAt is where the span ends
+// that the caller worked out from its own earlier read of the rules
+// (Rules.GuardedUntil), which the maintenance check looks at first; the
+// deadline stored is the one the rules give when Create reads them again
+// under a lock, at StartedAt.
 type CreateInput struct {
 	AssignmentID       string
 	StudentID          string

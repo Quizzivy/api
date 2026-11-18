@@ -16,13 +16,21 @@ type Milestones struct {
 	// Flagged is set when the integrity policy, and not a teacher, flagged
 	// the paper in this write for the first time.
 	Flagged bool
+	// AbsentAgain is set when, under a flexible assignment, the write counted
+	// another absence on a paper that was already flagged. Each teacher who
+	// reaches the paper holds one notice item for the attempt per
+	// FlaggedBucket of announcement time (FlaggedAgainKey): the first such
+	// absence in the bucket writes it, and each later one in the same bucket
+	// updates it and marks it unread again. The flag email goes to each
+	// teacher at most once per bucket.
+	AbsentAgain bool
 	// Graded is set when a teacher declared the paper graded.
 	Graded bool
 }
 
 // Any reports whether the write brought something about.
 func (m Milestones) Any() bool {
-	return m.HandedIn || m.Flagged || m.Graded
+	return m.HandedIn || m.Flagged || m.AbsentAgain || m.Graded
 }
 
 // Briefing is what a notice about a paper says that the paper does not: who

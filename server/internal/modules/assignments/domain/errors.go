@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -12,6 +13,9 @@ var (
 	// ErrAssignmentLocked is a change to the version, the duration or the
 	// number of attempts of an assignment that is open.
 	ErrAssignmentLocked = errors.New("assignments: open, so the test and timing are locked")
+	// ErrModeLocked is a change to the mode of an assignment that is open or
+	// has an attempt (ModeLocked). It is an ErrAssignmentLocked.
+	ErrModeLocked = fmt.Errorf("%w: the mode", ErrAssignmentLocked)
 )
 
 var (

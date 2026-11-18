@@ -45,6 +45,10 @@ What is here:
   some of the class. Đào Minh Khang, a student Minh created and no peer of the Admin's, is the
   only member of Minh's class, with an announcement there and a direct thread with Minh, all
   read. It relies on 06, 08 and 09.
+- `12-dev-flexible.sql` — one flexible assignment (F1, T-F1.9) of 02's test to 01's class, open
+  for thirty days with fifty attempts and fullscreen off, for the live E2E of the flexible mode.
+  Its time limit (one minute) and leaving rule (submit on the second absence) are stored and
+  not applied, so a strict reading of it fails the spec. It relies on 01 and 02.
 - `99-assert.sql` — runs last and refuses the seed if the rows above break a
   rule `publish` would have enforced, or if a user, class or owned row lacks
   the column R2's access model reads. The seed writes frozen version rows
@@ -52,7 +56,10 @@ What is here:
   checks the new types' frozen shape: True / False / Not given's three options, "Choose N",
   matching's items and choices, rubric criteria only on essays, and that the media references
   match the images and audio in the content. Since R7 it checks 11's grants, sets and threads
-  as the API writes them, and the decks' unread counts and context card.
+  as the API writes them, and the decks' unread counts and context card. Since F1 it checks
+  12's assignment is flexible, reaches the student, is open now and still stores its strict
+  rules, and that 04's and 10's are strict. A database seeded more than thirty days ago fails
+  it: 12's row has closed, and DO NOTHING keeps it so; reset the database and seed again.
 
 ## Logins
 

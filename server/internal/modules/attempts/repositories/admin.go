@@ -7,6 +7,7 @@ import (
 	"quizzivy/internal/modules/attempts/domain"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/schedule"
 	"quizzivy/internal/shared/visibility"
 	"strings"
 	"time"
@@ -17,6 +18,13 @@ import (
 var interveneOn = ` AND ($8::boolean OR assignment_id IN ` + visibility.AssignmentIDs(9) + `)`
 
 // Extend moves a live attempt's deadline and records why, in one statement.
+// The transaction takes the maintenance-windows lock shared first, then the
+// attempt row, the order an attempt start and every writer of a window keep.
+// A flexible attempt is then moved through every window already scheduled
+// ahead (schedule.MoveAttemptThroughWindows), so an extension into a window
+// is kept past it, as scheduling the window after the extension would have
+// kept it; that move is audited apart. A strict attempt is extended by the
+// minutes alone, as before.
 func (s *Postgres) Extend(ctx context.Context, req domain.Request, attemptID string, minutes int, reason string, now time.Time) (domain.Attempt, error) {
 	reason, err := domain.Interventions.CleanReason(reason)
 	if err != nil {
@@ -38,8 +46,32 @@ func (s *Postgres) Extend(ctx context.Context, req domain.Request, attemptID str
 		    FROM updated
 		)
 		SELECT ` + attemptColumns + ` FROM updated`
-	out, err := scanAttempt(s.QueryRow(ctx, q,
-		attemptID, minutes, req.ActorID, now, opt.String(req.IP), opt.String(req.UserAgent), reason, req.All, opt.String(req.ActorID)))
+	var out domain.AttemptRecord
+	err = s.InTx(ctx, "attempts: extend", func(tx pgx.Tx) error {
+		if err := schedule.LockWindows(ctx, tx); err != nil {
+			return err
+		}
+		extended, err := scanAttempt(tx.QueryRow(ctx, q,
+			attemptID, minutes, req.ActorID, now, opt.String(req.IP), opt.String(req.UserAgent), reason, req.All, opt.String(req.ActorID)))
+		if err != nil {
+			return err
+		}
+		moved, err := schedule.MoveAttemptThroughWindows(ctx, tx, schedule.AttemptMove{
+			AttemptID: extended.ID, AssignmentID: extended.AssignmentID, ActorID: req.ActorID,
+			IP: req.IP, UserAgent: req.UserAgent, Cause: "attempt_extended", Now: now,
+		})
+		if err != nil {
+			return fmt.Errorf("attempts: %w", err)
+		}
+		if moved {
+			if extended, err = scanAttempt(tx.QueryRow(ctx,
+				`SELECT `+attemptColumns+` FROM app.attempts WHERE id = $1::uuid`, extended.ID)); err != nil {
+				return fmt.Errorf("attempts: read the extended attempt: %w", err)
+			}
+		}
+		out = extended
+		return nil
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Attempt{}, s.whyNotLive(ctx, req.Scope(), attemptID)
 	}

@@ -43,7 +43,7 @@ var studentCardColumns = `
 	                                  AND m.user_id = $1::uuid
 	         WHERE ac.assignment_id = a.id),
 	       a.opens_at, a.closes_at, a.closed_at, a.published_at,
-	       a.duration_minutes, a.max_attempts,
+	       a.mode::text, a.duration_minutes, a.max_attempts,
 	       (a.review_show_score
 	        AND (a.review_release = 'on_submit' OR now() >= ` + schedule.CloseOf("o") + `)),
 	       (SELECT count(*) FROM app.test_version_questions q
@@ -132,7 +132,7 @@ func scanStudentCard(row pgx.Row) (domain.StudentCard, error) {
 	)
 	err := row.Scan(&c.ID, &c.TestTitle, &c.ClassName, &c.ClassID, &c.ClassIDs,
 		&c.OpensAt, &c.ClosesAt, &c.ClosedAt, &c.PublishedAt,
-		&c.DurationMin, &c.MaxAttempts, &showScore,
+		&c.Mode, &c.DurationMin, &c.MaxAttempts, &showScore,
 		&c.QuestionCount, &c.TotalPoints,
 		&c.AttemptsUsed, &c.HasLiveAttempt, &c.LiveDeadlineAt, &c.LiveAnsweredCount,
 		&l.id, &l.status, &l.submittedAt, &l.earned, &l.total, &l.pending, &l.band,
@@ -202,7 +202,7 @@ func (s *Postgres) StudentDetail(ctx context.Context, id, studentID string) (dom
 		studentID, id).Scan(
 		&d.ID, &d.TestTitle, &d.ClassName, &d.ClassID, &d.ClassIDs,
 		&d.OpensAt, &d.ClosesAt, &d.ClosedAt, &d.PublishedAt,
-		&d.DurationMin, &d.MaxAttempts, &showScore,
+		&d.Mode, &d.DurationMin, &d.MaxAttempts, &showScore,
 		&d.QuestionCount, &d.TotalPoints,
 		&d.AttemptsUsed, &d.HasLiveAttempt, &d.LiveDeadlineAt, &d.LiveAnsweredCount,
 		&l.id, &l.status, &l.submittedAt, &l.earned, &l.total, &l.pending, &l.band,
