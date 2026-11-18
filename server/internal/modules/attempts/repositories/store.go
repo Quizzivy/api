@@ -39,7 +39,7 @@ var rulesQuery = `
 	       a.duration_minutes, a.max_attempts, a.shuffle_questions, a.shuffle_options,
 	       a.integrity_require_fullscreen, a.integrity_block_copy_paste,
 	       a.integrity_max_focus_loss, a.integrity_on_limit_exceeded,
-	       a.integrity_min_away_ms, t.title, ` + schedule.OverrideSelect + `,
+	       a.integrity_min_away_ms, t.title, ` + schedule.OverrideSelect + `, a.mode::text,
 	       -- Targeted by class or by name is one answer, not two: EXISTS over
 	       -- the union rather than two counts, for the same reason the roster
 	       -- count is a union (a student reached both ways is one person).
@@ -79,7 +79,7 @@ func readRules(ctx context.Context, q db.Querier, assignmentID, studentID, lock 
 		&r.DurationMinutes, &r.MaxAttempts, &r.ShuffleQuestions, &r.ShuffleOptions,
 		&r.Integrity.RequireFullscreen, &r.Integrity.BlockCopyPaste,
 		&r.Integrity.MaxFocusLoss, &r.Integrity.OnLimitExceeded, &r.Integrity.MinAwayMs,
-		&r.TestTitle, &oc.ClosesAt, &oc.DurationMin, &oc.ExtraAttempts, &r.Targeted,
+		&r.TestTitle, &oc.ClosesAt, &oc.DurationMin, &oc.ExtraAttempts, &r.Mode, &r.Targeted,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Rules{}, domain.ErrNotFound
@@ -191,13 +191,12 @@ func (s *Postgres) committedRules(ctx context.Context, tx pgx.Tx, in domain.Crea
 	if err := rules.CanStartAt(in.StartedAt); err != nil {
 		return domain.Rules{}, time.Time{}, err
 	}
-	deadline := rules.Deadline(in.StartedAt)
-	if deadline.After(in.ExpectedDeadlineAt) {
-		if err := s.guardStart(ctx, tx, in.StartedAt, deadline); err != nil {
+	if until := rules.GuardedUntil(in.StartedAt); until.After(in.ExpectedDeadlineAt) {
+		if err := s.guardStart(ctx, tx, in.StartedAt, until); err != nil {
 			return domain.Rules{}, time.Time{}, err
 		}
 	}
-	return rules, deadline, nil
+	return rules, rules.Deadline(in.StartedAt), nil
 }
 
 func insertAttempt(ctx context.Context, tx pgx.Tx, in domain.CreateInput, versionID string, deadline time.Time) (domain.AttemptRecord, error) {
@@ -560,7 +559,7 @@ func (s *Postgres) RulesFor(ctx context.Context, assignmentID, studentID string)
 		       a.duration_minutes, a.max_attempts, a.shuffle_questions, a.shuffle_options,
 		       a.integrity_require_fullscreen, a.integrity_block_copy_paste,
 		       a.integrity_max_focus_loss, a.integrity_on_limit_exceeded,
-		       a.integrity_min_away_ms, t.title, `+schedule.OverrideSelect+`
+		       a.integrity_min_away_ms, t.title, `+schedule.OverrideSelect+`, a.mode::text
 		  FROM app.assignments a
 		  JOIN app.test_versions v ON v.id = a.test_version_id
 		  JOIN app.tests t ON t.id = v.test_id
@@ -570,7 +569,7 @@ func (s *Postgres) RulesFor(ctx context.Context, assignmentID, studentID string)
 		&r.DurationMinutes, &r.MaxAttempts, &r.ShuffleQuestions, &r.ShuffleOptions,
 		&r.Integrity.RequireFullscreen, &r.Integrity.BlockCopyPaste,
 		&r.Integrity.MaxFocusLoss, &r.Integrity.OnLimitExceeded, &r.Integrity.MinAwayMs,
-		&r.TestTitle, &oc.ClosesAt, &oc.DurationMin, &oc.ExtraAttempts,
+		&r.TestTitle, &oc.ClosesAt, &oc.DurationMin, &oc.ExtraAttempts, &r.Mode,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Rules{}, domain.ErrNotFound

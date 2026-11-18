@@ -40,6 +40,9 @@ func validPreferences(p domain.Preferences) bool {
 	if ai := p.AI; ai != nil && ai.Language != nil && *ai.Language != "vi" && *ai.Language != "en" {
 		return false
 	}
+	if d := p.AssignmentDefaults; d != nil && d.Mode != nil && *d.Mode != "strict" && *d.Mode != "flexible" {
+		return false
+	}
 	if p.AssignmentDefaults != nil && p.AssignmentDefaults.DurationMinutes != nil {
 		duration := *p.AssignmentDefaults.DurationMinutes
 		return duration >= 1 && duration <= 600

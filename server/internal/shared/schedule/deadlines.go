@@ -51,7 +51,8 @@ type Recompute struct {
 // RecomputeDeadlines moves the deadline of each attempt in progress that the
 // window now lets run longer, and returns how many it moved. An attempt's
 // deadline is the earlier of its start plus its student's time limit and its
-// student's close, the rule Rules.Deadline applies at the start; it is moved
+// student's close, or that close alone under a flexible assignment (Mode.
+// Deadline, the rule Rules.Deadline applies at the start); it is moved
 // only when that is later than the deadline it has, so a deadline never
 // shortens and one a maintenance window pushed past the rule stays. An attempt
 // whose deadline has already passed, on the database's clock, is over whether
@@ -72,9 +73,7 @@ func RecomputeDeadlines(ctx context.Context, tx Execer, in Recompute) (int, erro
 	var moved int
 	err := tx.QueryRow(ctx, `
 		WITH live AS MATERIALIZED (
-		  SELECT at.id,
-		         least(at.started_at + make_interval(mins => coalesce(o.duration_minutes, a.duration_minutes)),
-		               `+CloseOf("o")+`) AS next_deadline
+		  SELECT at.id, `+DeadlineOf("o")+` AS next_deadline
 		    FROM app.attempts at
 		    JOIN app.assignments a ON a.id = at.assignment_id
 		    `+OverrideJoin("at.student_id")+`

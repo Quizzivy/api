@@ -62,11 +62,14 @@ type AIPreferences struct {
 
 // AssignmentDefaults supplies optional values for future assignment forms.
 type AssignmentDefaults struct {
-	BlockCopyPaste    *bool `json:"blockCopyPaste,omitempty"`
-	DurationMinutes   *int  `json:"durationMinutes,omitempty"`
-	RequireFullscreen *bool `json:"requireFullscreen,omitempty"`
-	ShowScore         *bool `json:"showScore,omitempty"`
-	ShuffleQuestions  *bool `json:"shuffleQuestions,omitempty"`
+	BlockCopyPaste  *bool `json:"blockCopyPaste,omitempty"`
+	DurationMinutes *int  `json:"durationMinutes,omitempty"`
+	// Mode is the assignment mode a new assignment's form starts from:
+	// "strict" or "flexible" (F1).
+	Mode              *string `json:"mode,omitempty"`
+	RequireFullscreen *bool   `json:"requireFullscreen,omitempty"`
+	ShowScore         *bool   `json:"showScore,omitempty"`
+	ShuffleQuestions  *bool   `json:"shuffleQuestions,omitempty"`
 }
 
 // PreferencesRecord carries one atomic top-level merge and its audit metadata.

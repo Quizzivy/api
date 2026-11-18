@@ -138,6 +138,10 @@ var kindRow = regexp.MustCompile("^\\| `([a-z_.]+)` \\| [^|]+ \\| (.+) \\|$")
 
 var optionalName = regexp.MustCompile("^`([a-zA-Z]+)` (?:for|when) ")
 
+// kindRemark is a remark in parentheses after a kind's params, such as
+// attempt.flagged's on its repeats under a flexible assignment (F1).
+var kindRemark = regexp.MustCompile(` \([^|]*\)$`)
+
 func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 	kinds := schema(t, "NotificationKind")
 	required, optional := map[string][]string{}, map[string][]string{}
@@ -146,7 +150,7 @@ func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 		if row == nil {
 			continue
 		}
-		cells := strings.SplitN(row[2], ", and ", 2)
+		cells := strings.SplitN(kindRemark.ReplaceAllString(row[2], ""), ", and ", 2)
 		names := strings.Split(strings.ReplaceAll(cells[0], "`", ""), ", ")
 		slices.Sort(names)
 		required[row[1]] = names

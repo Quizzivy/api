@@ -34,10 +34,11 @@ type FlushInput struct {
 	BeaconToken string
 }
 
-// CreateInput starts an attempt. ExpectedDeadlineAt is the deadline the caller
-// worked out from its own earlier read of the rules, which the maintenance
-// check looks at first; the deadline stored is the one the rules give when
-// Create reads them again under a lock, at StartedAt.
+// CreateInput starts an attempt. ExpectedDeadlineAt is where the span ends
+// that the caller worked out from its own earlier read of the rules
+// (Rules.GuardedUntil), which the maintenance check looks at first; the
+// deadline stored is the one the rules give when Create reads them again
+// under a lock, at StartedAt.
 type CreateInput struct {
 	AssignmentID       string
 	StudentID          string

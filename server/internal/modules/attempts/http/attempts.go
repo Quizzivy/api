@@ -157,6 +157,7 @@ func (h Attempts) toAPIAttemptSession(ctx context.Context, studentID string, in 
 			OnLimitExceeded:   openapi.IntegrityPolicyOnLimitExceeded(in.Integrity.OnLimitExceeded),
 			MinAwayMs:         in.Integrity.MinAwayMs,
 		},
+		Mode: openapi.AssignmentMode(in.Mode.OrStrict()),
 	}
 	if in.Superseded {
 		out.Superseded = &in.Superseded

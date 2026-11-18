@@ -7,6 +7,7 @@ package domain
 
 import (
 	testsdomain "quizzivy/internal/modules/tests/domain"
+	"quizzivy/internal/shared/schedule"
 	"time"
 )
 
@@ -51,6 +52,9 @@ type Session struct {
 	GroupAudioPlays   map[string]int
 	Answers           map[string][]byte
 	Integrity         Integrity
+	// Mode is the assignment's: under flexible the engine never submits for
+	// leaving and the deadline is the student's close.
+	Mode schedule.Mode
 	// Superseded reports that the reader named a session the attempt no longer
 	// has; SessionID is then the one it named and BeaconToken is empty.
 	Superseded bool
@@ -79,6 +83,7 @@ type Rules struct {
 	Integrity        Integrity
 	TestTitle        string
 	Targeted         bool
+	Mode             schedule.Mode
 }
 
 // Tally answers the two questions the create path asks, which look like one
@@ -136,11 +141,26 @@ func (r Rules) CanStartAt(now time.Time) error {
 }
 
 // Deadline is the §9 rule, server-side and authoritative: a student gets their
-// full duration unless the assignment closes first.
+// full duration unless the assignment closes first. Under a flexible
+// assignment it is the student's close, an early close included, and the time
+// limit, an override's too, is not applied (F1).
 func (r Rules) Deadline(now time.Time) time.Time {
-	full := now.Add(time.Duration(r.DurationMinutes) * time.Minute)
-	if r.ClosesAt.Before(full) {
-		return r.ClosesAt
+	closes := r.ClosesAt
+	if r.Mode == schedule.Flexible {
+		closes = schedule.Close(r.ClosesAt, r.ClosedAt, nil)
 	}
-	return full
+	return r.Mode.Deadline(now, r.DurationMinutes, closes)
+}
+
+// GuardedUntil is where the span ends that a maintenance window scheduled
+// for it refuses a start at now: the attempt's deadline under strict, and
+// under flexible the instant after now (the database's resolution is a
+// microsecond), so a flexible start is refused only while a window is under
+// way. A window ahead moves a flexible attempt by its close instead
+// (core/maintenance, ScheduleWindow).
+func (r Rules) GuardedUntil(now time.Time) time.Time {
+	if r.Mode == schedule.Flexible {
+		return now.Add(time.Microsecond)
+	}
+	return r.Deadline(now)
 }
