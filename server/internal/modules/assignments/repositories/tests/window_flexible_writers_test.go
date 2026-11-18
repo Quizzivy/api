@@ -60,7 +60,11 @@ func TestAnExtensionIntoAScheduledWindowMovesAFlexibleAttemptPastIt(t *testing.T
 	flexible := w.flexibleClosingSoon(t, 20*time.Minute)
 	strict := w.closingSoon(t, w.a, w.classA, 20*time.Minute, 45)
 	flexibleAttempt := w.sitting(t, flexible, w.classmate(t, w.classA, w.a), 5*time.Minute, w.closesAt(t, flexible), "in_progress")
-	strictAttempt := w.sitting(t, strict, w.classmate(t, w.classA, w.a), 5*time.Minute, w.closesAt(t, strict), "in_progress")
+	// Started a minute ago, the strict attempt's deadline after the extension,
+	// its start plus 45 minutes, is some four minutes into the window, so
+	// the move through the window would select it if it did not keep to
+	// flexible attempts.
+	strictAttempt := w.sitting(t, strict, w.classmate(t, w.classA, w.a), time.Minute, w.closesAt(t, strict), "in_progress")
 
 	for _, id := range []string{flexible, strict} {
 		req := as(w.a, false)
