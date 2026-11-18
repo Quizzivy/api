@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"quizzivy/internal/platform/db"
+	"quizzivy/internal/shared/schedule"
 )
 
 // WindowLockKey is the advisory-lock key, in the 73819 namespace, that orders
@@ -48,21 +49,15 @@ type WindowReport struct {
 
 // windowDeadline is the deadline a window from $1 to $2 gives a running
 // attempt aliased a, on its assignment aliased s: a strict attempt's moves by
-// the window's length, and a flexible one's is recomputed from its student's
-// close, the assignment's and the override's moved as the same statement
-// moves them, and never earlier than it was. A flexible deadline that itself
-// falls inside the window, which only a teacher's extension past the close
-// can leave there, moves by the window's length too, so the extension is kept.
-const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN greatest(
-       a.deadline_at + CASE WHEN a.deadline_at < $2::timestamptz
-                            THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END,
-       least(s.closed_at, s.closes_at + CASE WHEN s.closed_at IS NULL
-                                              AND s.closes_at >= $1::timestamptz AND s.closes_at < $2::timestamptz
-                                             THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END),
-       (SELECT o.closes_at + CASE WHEN o.closes_at >= $1::timestamptz AND o.closes_at < $2::timestamptz
-                                  THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END
-          FROM app.assignment_student_overrides o
-         WHERE o.assignment_id = a.assignment_id AND o.student_id = a.student_id))
+// the window's length, and a flexible one's is schedule.FlexibleWindowDeadline,
+// recomputed from its student's close, the assignment's and the override's
+// moved as the same statement moves them, and never earlier than it was. A
+// flexible deadline that itself falls inside the window, which only a
+// teacher's extension past the close can leave there, moves by the window's
+// length too, so the extension is kept. An attempt that starts after the
+// window is scheduled, and a deadline a writer moves after it, go through the
+// same expression (schedule.ThroughWindows, schedule.RecomputeDeadlines).
+const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN ` + schedule.FlexibleWindowDeadline + `
      ELSE a.deadline_at + ($2::timestamptz - $1::timestamptz) END`
 
 // moving is the running attempts a window from $1 to $2 extends, over
@@ -80,18 +75,24 @@ const movingOverrides = `SELECT count(*) FROM app.assignment_student_overrides o
  WHERE s.published_at IS NOT NULL AND o.closes_at >= $1 AND o.closes_at < $2`
 
 // ScheduleWindow schedules a window from startsAt to endsAt, no earlier than a
-// minute ago, and in the same statement extends by its length the deadline of
-// every running strict attempt that would still be running when it starts
-// (a flexible one's is recomputed from its student's close as this statement
-// moves it, windowDeadline, and moves only when that close or the deadline
-// itself, extended past the close, falls inside the window), the close
-// of every published, open assignment that would close inside it, and the close
-// of every override on a published assignment that would close inside it, an
+// minute ago, and in the same statement moves the deadline of every running
+// attempt that would still be running when it starts, the close of every
+// published, open assignment that would close inside it, and the close of
+// every override on a published assignment that would close inside it, an
 // early-closed assignment's too, because that override is what keeps its
-// student in. Every change is audited as System, with no actor. A dry run reports the
-// counts and refusals and changes nothing, taking no lock. Applying holds the
-// maintenance-windows advisory lock, which the start guard takes shared, so
-// no attempt starts between the check and the write.
+// student in. A strict attempt's deadline moves by the window's length. A
+// flexible one's becomes the latest of: itself, moved by the window's length
+// when it falls inside the window; its assignment's close, moved so when that
+// falls inside it and the assignment was not closed early; and its student's
+// override close, moved so when that falls inside it (windowDeadline). It
+// never moves earlier, and it can move when the student's close is outside
+// the window: when the assignment closes inside the window and the student's
+// override after it, the deadline moves to the assignment's moved close when
+// that is later, by less than the window's length. Every change is audited as
+// System, with no actor. A dry run reports the counts and refusals and changes
+// nothing, taking no lock. Applying holds the maintenance-windows advisory
+// lock, which the start guard takes shared, so no attempt starts between the
+// check and the write.
 func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Time, apply bool) (ScheduleReport, error) {
 	out := ScheduleReport{StartsAt: startsAt, EndsAt: endsAt}
 	if !endsAt.After(startsAt) {

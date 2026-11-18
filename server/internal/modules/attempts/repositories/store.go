@@ -154,7 +154,11 @@ func (s *Postgres) Tally(ctx context.Context, assignmentID, studentID string) (d
 // override, holds that row until it commits and recomputes the attempts in
 // progress, so this attempt either sees the committed window or is inserted
 // before the writer reads the attempts. The deadline stored comes from that
-// read; the caller's is only where the first maintenance check looks.
+// read; the caller's is only where the first maintenance check looks. A
+// flexible attempt's is then moved through every window already scheduled
+// ahead of it, as scheduling the window would have moved it had it been
+// running then (schedule.ThroughWindows): a window ahead does not refuse a
+// flexible start, it moves it by its close.
 func (s *Postgres) Create(ctx context.Context, in domain.CreateInput) (domain.AttemptRecord, domain.Rules, error) {
 	var (
 		out   domain.AttemptRecord
@@ -196,7 +200,19 @@ func (s *Postgres) committedRules(ctx context.Context, tx pgx.Tx, in domain.Crea
 			return domain.Rules{}, time.Time{}, err
 		}
 	}
-	return rules, rules.Deadline(in.StartedAt), nil
+	deadline := rules.Deadline(in.StartedAt)
+	if rules.Mode != schedule.Flexible {
+		return rules, deadline, nil
+	}
+	// The guard holds the windows lock shared, so the windows read here are
+	// those a window-schedule after this commit sees this attempt beside.
+	deadline, err = schedule.ThroughWindows(ctx, tx, schedule.FlexibleStart{
+		AssignmentID: in.AssignmentID, StudentID: in.StudentID, Deadline: deadline, StartedAt: in.StartedAt,
+	})
+	if err != nil {
+		return domain.Rules{}, time.Time{}, fmt.Errorf("attempts: %w", err)
+	}
+	return rules, deadline, nil
 }
 
 func insertAttempt(ctx context.Context, tx pgx.Tx, in domain.CreateInput, versionID string, deadline time.Time) (domain.AttemptRecord, error) {

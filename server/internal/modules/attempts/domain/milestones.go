@@ -17,8 +17,12 @@ type Milestones struct {
 	// the paper in this write for the first time.
 	Flagged bool
 	// AbsentAgain is set when, under a flexible assignment, the write counted
-	// another absence on a paper that was already flagged: the teachers are
-	// told again, at most once per attempt in each FlaggedBucket.
+	// another absence on a paper that was already flagged. Each teacher who
+	// reaches the paper holds one notice item for the attempt per
+	// FlaggedBucket of announcement time (FlaggedAgainKey): the first such
+	// absence in the bucket writes it, and each later one in the same bucket
+	// updates it and marks it unread again. The flag email goes to each
+	// teacher at most once per bucket.
 	AbsentAgain bool
 	// Graded is set when a teacher declared the paper graded.
 	Graded bool

@@ -156,8 +156,9 @@ func (r Rules) Deadline(now time.Time) time.Time {
 // for it refuses a start at now: the attempt's deadline under strict, and
 // under flexible the instant after now (the database's resolution is a
 // microsecond), so a flexible start is refused only while a window is under
-// way. A window ahead moves a flexible attempt by its close instead
-// (core/maintenance, ScheduleWindow).
+// way. A window ahead moves a flexible attempt by its close instead: one in
+// progress when the window is scheduled (core/maintenance, ScheduleWindow),
+// and one that starts after it was (schedule.ThroughWindows, at the start).
 func (r Rules) GuardedUntil(now time.Time) time.Time {
 	if r.Mode == schedule.Flexible {
 		return now.Add(time.Microsecond)
