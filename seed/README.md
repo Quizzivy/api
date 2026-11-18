@@ -57,7 +57,9 @@ What is here:
   matching's items and choices, rubric criteria only on essays, and that the media references
   match the images and audio in the content. Since R7 it checks 11's grants, sets and threads
   as the API writes them, and the decks' unread counts and context card. Since F1 it checks
-  12's assignment is flexible and reaches the student, and that 04's and 10's are strict.
+  12's assignment is flexible, reaches the student, is open now and still stores its strict
+  rules, and that 04's and 10's are strict. A database seeded more than thirty days ago fails
+  it: 12's row has closed, and DO NOTHING keeps it so; reset the database and seed again.
 
 ## Logins
 

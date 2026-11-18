@@ -636,9 +636,11 @@ BEGIN
   RAISE NOTICE 'seed: collaboration holds';
 END $$;
 
--- 12's flexible assignment (F1, T-F1.9): flexible, published, open to 01's student through
--- the class, with fullscreen off for headless Chromium; and the live fixtures of 04 and 10,
--- whose specs test strict, still strict.
+-- 12's flexible assignment (F1, T-F1.9): flexible, published, reaching 01's student through
+-- the class, with fullscreen off for headless Chromium; open now, which a database seeded more
+-- than thirty days ago is not, since 12 inserts with DO NOTHING; holding the strict rules the
+-- live spec counts on flexible not to apply (one minute, a submit on the second absence); and
+-- the live fixtures of 04 and 10, whose specs test strict, still strict.
 DO $$
 DECLARE
   flexible constant uuid := '01935000-0000-7000-8000-000000001201';
@@ -653,6 +655,19 @@ BEGIN
                      JOIN app.class_members m ON m.class_id = ac.class_id
                     WHERE ac.assignment_id = a.id AND m.user_id = student)) THEN
     RAISE EXCEPTION 'seed: no published flexible assignment %, fullscreen off, reaching hocvien@quizzivy.com', flexible;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM app.assignments a
+     WHERE a.id = flexible AND a.opens_at <= now() AND a.closes_at > now()) THEN
+    RAISE EXCEPTION 'seed: flexible assignment % is not open now (seeded more than thirty days ago? reset the database and seed again)', flexible;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM app.assignments a
+     WHERE a.id = flexible AND a.duration_minutes = 1 AND a.integrity_max_focus_loss = 1
+       AND a.integrity_on_limit_exceeded = 'auto_submit') THEN
+    RAISE EXCEPTION 'seed: flexible assignment % no longer stores the strict rules its live spec relies on: a one-minute limit and a submit on the second absence', flexible;
   END IF;
 
   SELECT string_agg(a.id::text, ', ') INTO bad
