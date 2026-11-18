@@ -100,7 +100,7 @@ func (s *Postgres) attachAttempts(ctx context.Context, assignmentID string, rows
 		SELECT DISTINCT ON (at.student_id)
 		       at.student_id::text, at.id::text, at.attempt_no, at.status::text,
 		       at.started_at, at.deadline_at, at.submitted_at,
-		       at.score_earned, at.score_total, at.focus_loss_count, at.flagged,
+		       at.score_earned, at.score_total, at.focus_loss_count, at.flagged, at.active_ms / 1000,
 		       (SELECT count(*) FROM app.attempt_answers aa WHERE aa.attempt_id = at.id AND `+answered.SaysSomething("aa")+`),
 		       (SELECT count(*) FROM app.attempt_answers aa
 		         WHERE aa.attempt_id = at.id AND `+answered.AwaitsGrade("aa")+`),
@@ -131,9 +131,10 @@ func (s *Postgres) attachAttempts(ctx context.Context, assignmentID string, rows
 			submitted               *time.Time
 			earned, total, band     *float64
 			flagged, overLimit      bool
+			active                  *int
 		)
 		if err := found.Scan(&studentID, &id, &no, &status, &started, &deadline, &submitted,
-			&earned, &total, &focusLoss, &flagged, &progress, &pending, &overLimit, &band); err != nil {
+			&earned, &total, &focusLoss, &flagged, &active, &progress, &pending, &overLimit, &band); err != nil {
 			return fmt.Errorf("attempts: scan monitor attempt: %w", err)
 		}
 		i, ok := at[studentID]
@@ -149,6 +150,7 @@ func (s *Postgres) attachAttempts(ctx context.Context, assignmentID string, rows
 		row.SubmittedAt = submitted
 		row.AnsweredCount = &progress
 		row.FocusLossCount = &focusLoss
+		row.ActiveSeconds = active
 		row.Flagged = flagged
 		row.AudioOverLimit = overLimit
 		if earned != nil && total != nil {

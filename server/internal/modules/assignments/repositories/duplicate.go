@@ -17,7 +17,7 @@ import (
 const duplicatedClassField = "classIds"
 
 // Duplicate copies an assignment the actor reaches as a draft owned by the
-// actor: the same version, time limit, attempts, shuffle flags, review options,
+// actor: the same version, mode, time limit, attempts, shuffle flags, review options,
 // integrity policy and note to students, a window that opens at now and lasts
 // as long as the original's, and the classes named as its only targets. The
 // version must be one the actor may assign, as for Create. Another teacher's
@@ -58,14 +58,14 @@ func (s *Postgres) Duplicate(ctx context.Context, req domain.Request, classIDs [
 		        review_release, review_show_class_average, student_note,
 		        integrity_require_fullscreen, integrity_block_copy_paste,
 		        integrity_max_focus_loss, integrity_on_limit_exceeded, integrity_min_away_ms,
-		        created_by, published_at)
+		        created_by, published_at, mode)
 		SELECT o.test_id, o.test_version_id, $2::timestamptz, $2::timestamptz + (o.closes_at - o.opens_at), NULL,
 		       o.duration_minutes, o.max_attempts, o.shuffle_questions, o.shuffle_options,
 		       o.review_show_score, o.review_show_correct_answers, o.review_show_explanations,
 		       o.review_release, o.review_show_class_average, o.student_note,
 		       o.integrity_require_fullscreen, o.integrity_block_copy_paste,
 		       o.integrity_max_focus_loss, o.integrity_on_limit_exceeded, o.integrity_min_away_ms,
-		       $3::uuid, NULL
+		       $3::uuid, NULL, o.mode
 		  FROM app.assignments o
 		 WHERE o.id = $1::uuid AND ($4::boolean OR o.id IN `+visibility.AssignmentIDs(3)+`)
 		RETURNING id::text`,

@@ -58,6 +58,7 @@ func (h Attempts) GetAssignmentMonitor(ctx context.Context, request openapi.GetA
 			SubmittedAt:    r.SubmittedAt,
 			AnsweredCount:  r.AnsweredCount,
 			FocusLossCount: r.FocusLossCount,
+			ActiveSeconds:  r.ActiveSeconds,
 			Flagged:        httpapi.Ptr(r.Flagged),
 			AudioOverLimit: httpapi.Ptr(r.AudioOverLimit),
 			ExtendedTo:     r.ExtendedTo,
@@ -148,6 +149,7 @@ func (h Attempts) GetAttemptForReview(ctx context.Context, request openapi.GetAt
 		Answers:       answers,
 		AudioPlays:    rv.AudioPlays,
 		Integrity:     toAPIIntegritySummary(timeline.Summary),
+		ActiveSeconds: rv.ActiveSeconds,
 		TeacherNote:   rv.TeacherNote,
 	}, nil
 }

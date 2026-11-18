@@ -16,11 +16,14 @@ type StudentCard struct {
 	ClassName *string
 	ClassID   *string
 	// ClassIDs is every targeted class that contains them and is not archived.
-	ClassIDs      []string
-	OpensAt       time.Time
-	ClosesAt      time.Time
-	ClosedAt      *time.Time
-	PublishedAt   *time.Time
+	ClassIDs    []string
+	OpensAt     time.Time
+	ClosesAt    time.Time
+	ClosedAt    *time.Time
+	PublishedAt *time.Time
+	// Mode is the assignment's: under flexible the student may stop and come
+	// back until their close, and DurationMin does not apply.
+	Mode          Mode
 	DurationMin   int
 	MaxAttempts   int
 	QuestionCount int

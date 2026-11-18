@@ -207,8 +207,8 @@ func TestFoundationObjectsExist(t *testing.T) {
 		WHERE n.nspname = 'app' AND t.typtype = 'e'`).Scan(&enums); err != nil {
 		t.Fatal(err)
 	}
-	if enums != 6 {
-		t.Errorf("found %d enum types in app, want 6 (§13.2 plus D-15, less user_role since T-R3.1)", enums)
+	if enums != 7 {
+		t.Errorf("found %d enum types in app, want 7 (§13.2 plus D-15, less user_role since T-R3.1, plus F1's assignment_mode)", enums)
 	}
 
 	for _, fn := range []string{"immutable_unaccent", "set_updated_at"} {

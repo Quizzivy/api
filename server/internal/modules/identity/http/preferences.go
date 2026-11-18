@@ -23,7 +23,7 @@ func (h Identity) UpdatePreferences(ctx context.Context, request openapi.UpdateP
 		return openapi.UpdatePreferences400JSONResponse(httpapi.Error(ctx, openapi.VALIDATIONFAILED, httpx.Text(ctx, "Thiếu tùy chọn.", "Supply preferences."))), nil
 	}
 	body := request.Body
-	patch := domain.Preferences{Theme: (*string)(body.Theme), CompactTables: body.CompactTables, LargerTestText: body.LargerTestText, Workspace: (*string)(body.Workspace), AssignmentDefaults: (*domain.AssignmentDefaults)(body.AssignmentDefaults), AI: aiPreferences(body)}
+	patch := domain.Preferences{Theme: (*string)(body.Theme), CompactTables: body.CompactTables, LargerTestText: body.LargerTestText, Workspace: (*string)(body.Workspace), AssignmentDefaults: assignmentDefaults(body), AI: aiPreferences(body)}
 	meta := httpx.RequestMetaFromContext(ctx)
 	prefs, err := h.app.Commands.UpdatePreferences.Handle(ctx, command.UpdatePreferences{UserID: principal.UserID, Preferences: patch, IP: meta.IP, UserAgent: meta.UserAgent})
 	switch {
@@ -35,6 +35,17 @@ func (h Identity) UpdatePreferences(ctx context.Context, request openapi.UpdateP
 		return openapi.UpdatePreferences400JSONResponse(httpapi.FieldError(ctx, "preferences", httpx.Text(ctx, "Tùy chọn không hợp lệ hoặc vượt quá giới hạn.", "The preferences are invalid or exceed the limit."))), nil
 	default:
 		return nil, err
+	}
+}
+
+func assignmentDefaults(body *openapi.UserPreferences) *domain.AssignmentDefaults {
+	d := body.AssignmentDefaults
+	if d == nil {
+		return nil
+	}
+	return &domain.AssignmentDefaults{
+		BlockCopyPaste: d.BlockCopyPaste, DurationMinutes: d.DurationMinutes, Mode: (*string)(d.Mode),
+		RequireFullscreen: d.RequireFullscreen, ShowScore: d.ShowScore, ShuffleQuestions: d.ShuffleQuestions,
 	}
 }
 
@@ -64,12 +75,13 @@ func toAPIPreferences(p domain.Preferences) openapi.UserPreferences {
 	}
 	if d := p.AssignmentDefaults; d != nil {
 		out.AssignmentDefaults = &struct {
-			BlockCopyPaste    *bool `json:"blockCopyPaste,omitempty"`
-			DurationMinutes   *int  `json:"durationMinutes,omitempty"`
-			RequireFullscreen *bool `json:"requireFullscreen,omitempty"`
-			ShowScore         *bool `json:"showScore,omitempty"`
-			ShuffleQuestions  *bool `json:"shuffleQuestions,omitempty"`
-		}{d.BlockCopyPaste, d.DurationMinutes, d.RequireFullscreen, d.ShowScore, d.ShuffleQuestions}
+			BlockCopyPaste    *bool                   `json:"blockCopyPaste,omitempty"`
+			DurationMinutes   *int                    `json:"durationMinutes,omitempty"`
+			Mode              *openapi.AssignmentMode `json:"mode,omitempty"`
+			RequireFullscreen *bool                   `json:"requireFullscreen,omitempty"`
+			ShowScore         *bool                   `json:"showScore,omitempty"`
+			ShuffleQuestions  *bool                   `json:"shuffleQuestions,omitempty"`
+		}{d.BlockCopyPaste, d.DurationMinutes, (*openapi.AssignmentMode)(d.Mode), d.RequireFullscreen, d.ShowScore, d.ShuffleQuestions}
 	}
 	return out
 }

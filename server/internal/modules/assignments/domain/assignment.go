@@ -5,6 +5,7 @@
 package domain
 
 import (
+	"quizzivy/internal/shared/schedule"
 	"strings"
 	"time"
 )
@@ -22,6 +23,7 @@ type Assignment struct {
 	ClosedAt            *time.Time
 	PublishedAt         *time.Time
 	UpdatedAt           time.Time
+	Mode                Mode
 	DurationMin         int
 	MaxAttempts         int
 	ShuffleQ            bool
@@ -35,6 +37,17 @@ type Assignment struct {
 	FlaggedCount        int
 	PendingGradingCount int
 	PendingManualCount  int
+}
+
+// Mode is how the assignment times an attempt (schedule.Mode, F1).
+type Mode = schedule.Mode
+
+// ModeLocked reports whether changing the stored mode current to next is
+// refused: while the assignment is open, or once any attempt exists, so that
+// an attempt never changes mode under a student. An empty next names no
+// mode and keeps current.
+func ModeLocked(current, next Mode, status Status, started bool) bool {
+	return next != "" && next != current && (status == Open || started)
 }
 
 type Status string
