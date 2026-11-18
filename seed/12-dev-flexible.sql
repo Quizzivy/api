@@ -6,7 +6,7 @@
 -- hold for it. Nothing else here reads a later seed.
 --
 -- One assignment, …00001201, for the live E2E of the flexible mode: start,
--- answer, take a break by the paper's ✕, resume, leave the tab, hand in. Its
+-- answer, take a break by the paper's ×, resume, leave the tab, hand in. Its
 -- own row rather than one of 04's: the specs run in parallel, and two of them
 -- on one assignment is a session takeover. The Admin owns the paper and
 -- teaches the class, so the Admin is the teacher a flagged attempt notifies.
