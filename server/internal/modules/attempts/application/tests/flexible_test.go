@@ -211,14 +211,22 @@ func TestTimeOnThePaperIsCappedAndComesOnlyFromTheCurrentSession(t *testing.T) {
 		t.Fatalf("a report of ten minutes, ten seconds after the last, brought the time to %s, want about 20000 + 10000 + 5000", msText(ms))
 	}
 
+	// The old session's last report is an hour back: the resume, not that
+	// report, is what the new session's first report counts from.
+	rewind(time.Hour)
 	resumed, err := svc.Commands.StartOrResume.Handle(t.Context(), command.StartOrResume{AssignmentID: w.assignment, StudentID: w.student, Resume: session.Attempt.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	before, at := activeOf(t, pool, session.Attempt.ID)
-	if at == nil || time.Since(*at) > time.Minute {
+	if at == nil || time.Since(*at) > 5*time.Second || time.Until(*at) > 5*time.Second {
 		t.Errorf("the resume left the previous report at %v, want it now", at)
 	}
+	report(resumed, 600_000)
+	if ms, _ := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms-*before > 6_000 {
+		t.Errorf("the first report after the resume brought the time to %s from %d, want at most about five seconds more, not the hour since the old session's report", msText(ms), *before)
+	}
+	before, _ = activeOf(t, pool, session.Attempt.ID)
 	rewind(time.Minute)
 	stale := 30_000
 	old := flushEvents(w, session)
