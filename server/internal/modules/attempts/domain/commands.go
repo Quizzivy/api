@@ -10,6 +10,9 @@ type SaveInput struct {
 	SessionID string
 	Answers   []Answer
 	Events    []Event
+	// ActiveMs is the paper's visible time since this session's previous
+	// report, as the engine counts it; nil credits nothing.
+	ActiveMs *int
 }
 
 // SaveResult reports what actually landed. Saved can be lower than the number
@@ -28,6 +31,9 @@ type FlushInput struct {
 	AttemptID string
 	SessionID string
 	Events    []Event
+	// ActiveMs is as SaveInput's; it is credited only from the attempt's
+	// current session.
+	ActiveMs *int
 
 	// StudentID is set when the request arrived with a verified access token.
 	StudentID   string

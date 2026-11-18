@@ -203,8 +203,9 @@ func insertAttempt(ctx context.Context, tx pgx.Tx, in domain.CreateInput, versio
 	out, err := scanAttempt(tx.QueryRow(ctx, `
 		INSERT INTO app.attempts
 		  (assignment_id, test_version_id, student_id, attempt_no, session_id,
-		   shuffle_seed, beacon_token_hash, started_at, deadline_at)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9)
+		   shuffle_seed, beacon_token_hash, started_at, deadline_at,
+		   active_ms, active_reported_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9, 0, $8)
 		RETURNING `+attemptColumns,
 		in.AssignmentID, versionID, in.StudentID, in.AttemptNo, in.SessionID,
 		in.Seed, in.BeaconHash, in.StartedAt, deadline))
@@ -230,7 +231,8 @@ func (s *Postgres) guardStart(ctx context.Context, tx pgx.Tx, now, deadline time
 
 // Resume hands the attempt to a new tab and records why, in one transaction:
 // the session swap and the events explaining it are the same fact, and a
-// timeline missing the takeover it caused is worse than no timeline.
+// timeline missing the takeover it caused is worse than no timeline. The new
+// session's time on the paper counts from in.Now (Save, creditActive).
 func (s *Postgres) Resume(ctx context.Context, in domain.ResumeInput) (domain.AttemptRecord, bool, error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -257,9 +259,10 @@ func (s *Postgres) Resume(ctx context.Context, in domain.ResumeInput) (domain.At
 
 	updated, err := scanAttempt(tx.QueryRow(ctx, `
 		UPDATE app.attempts
-		   SET session_id = $2::uuid, beacon_token_hash = $3
+		   SET session_id = $2::uuid, beacon_token_hash = $3,
+		       active_reported_at = CASE WHEN active_ms IS NOT NULL THEN $4::timestamptz END
 		 WHERE id = $1::uuid
-		RETURNING `+attemptColumns, in.AttemptID, in.SessionID, in.BeaconHash))
+		RETURNING `+attemptColumns, in.AttemptID, in.SessionID, in.BeaconHash, in.Now))
 	if err != nil {
 		return domain.AttemptRecord{}, false, fmt.Errorf("attempts: swap session: %w", err)
 	}

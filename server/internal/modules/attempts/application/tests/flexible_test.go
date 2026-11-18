@@ -4,12 +4,15 @@ package application_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"quizzivy/internal/modules/attempts/application"
 	"quizzivy/internal/modules/attempts/application/command"
+	"quizzivy/internal/modules/attempts/application/query"
 	"quizzivy/internal/modules/attempts/domain"
 	notificationsdomain "quizzivy/internal/modules/notifications/domain"
 	"quizzivy/internal/shared/schedule"
@@ -23,6 +26,24 @@ func flexibleWorld(t *testing.T, pool *pgxpool.Pool, o worldOpts) world {
 		t.Fatal(err)
 	}
 	return w
+}
+
+func activeOf(t *testing.T, pool *pgxpool.Pool, attemptID string) (*int64, *time.Time) {
+	t.Helper()
+	var ms *int64
+	var at *time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT active_ms, active_reported_at FROM app.attempts WHERE id = $1::uuid`, attemptID).Scan(&ms, &at); err != nil {
+		t.Fatal(err)
+	}
+	return ms, at
+}
+
+// msText prints a time on the paper read by activeOf.
+func msText(ms *int64) string {
+	if ms == nil {
+		return "NULL"
+	}
+	return strconv.FormatInt(*ms, 10)
 }
 
 func statusOf(t *testing.T, pool *pgxpool.Pool, attemptID string) string {
@@ -152,4 +173,107 @@ func TestAStrictAttemptIsToldOfAsBefore(t *testing.T) {
 			t.Errorf("strict %s sent %d notices, want %d: %+v", c.rule, len(sent), c.want, sent)
 		}
 	}
+}
+
+// Time on the paper: a start measures from zero; a report is capped at the
+// time since the session's previous one plus five seconds; a superseded
+// session's report is dropped; a row from before F1 stays unmeasured.
+func TestTimeOnThePaperIsCappedAndComesOnlyFromTheCurrentSession(t *testing.T) {
+	pool := newPool(t)
+	w := seedWorld(t, pool, openAssignment())
+	svc := announcing(pool, &told{}, nil)
+	session := startFor(t, svc, w, w.student)
+	if ms, at := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms != 0 || at == nil || !at.Equal(session.Attempt.StartedAt) {
+		t.Fatalf("a start measures %s from %v, want 0 from the start %v", msText(ms), at, session.Attempt.StartedAt)
+	}
+	report := func(s domain.Session, ms int) {
+		t.Helper()
+		in := domain.SaveInput{AttemptID: s.Attempt.ID, StudentID: w.student, SessionID: s.SessionID, ActiveMs: &ms}
+		if _, err := svc.Commands.Save.Handle(t.Context(), command.Save{Input: in}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rewind := func(by time.Duration) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE app.attempts SET active_reported_at = active_reported_at - make_interval(secs => $2) WHERE id = $1::uuid`,
+			session.Attempt.ID, by.Seconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rewind(time.Minute)
+	report(session, 20_000)
+	if ms, _ := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms != 20_000 {
+		t.Fatalf("a report within the time since the start credited %s, want 20000", msText(ms))
+	}
+	rewind(10 * time.Second)
+	report(session, 600_000)
+	if ms, _ := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms < 35_000 || *ms > 36_000 {
+		t.Fatalf("a report of ten minutes, ten seconds after the last, brought the time to %s, want about 20000 + 10000 + 5000", msText(ms))
+	}
+
+	resumed, err := svc.Commands.StartOrResume.Handle(t.Context(), command.StartOrResume{AssignmentID: w.assignment, StudentID: w.student, Resume: session.Attempt.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, at := activeOf(t, pool, session.Attempt.ID)
+	if at == nil || time.Since(*at) > time.Minute {
+		t.Errorf("the resume left the previous report at %v, want it now", at)
+	}
+	rewind(time.Minute)
+	stale := 30_000
+	old := flushEvents(w, session)
+	old.ActiveMs = &stale
+	if _, err := svc.Commands.Flush.Handle(t.Context(), command.Flush{Input: old}); err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms != *before {
+		t.Errorf("the superseded session's report moved the time to %s from %d", msText(ms), *before)
+	}
+	current := flushEvents(w, resumed)
+	current.ActiveMs = &stale
+	if _, err := svc.Commands.Flush.Handle(t.Context(), command.Flush{Input: current}); err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := activeOf(t, pool, session.Attempt.ID); ms == nil || *ms != *before+30_000 {
+		t.Errorf("the current session's flush brought the time to %s, want %d", msText(ms), *before+30_000)
+	}
+
+	monitorShows(t, svc, w, session.Attempt.ID, int((*before+30_000)/1000))
+	if _, err := pool.Exec(t.Context(), `UPDATE app.attempts SET active_ms = NULL, active_reported_at = NULL WHERE id = $1::uuid`, session.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	report(resumed, 1_000)
+	if ms, at := activeOf(t, pool, session.Attempt.ID); ms != nil || at != nil {
+		t.Errorf("a row from before F1 reads %s from %v after a report, want it unmeasured", msText(ms), at)
+	}
+	monitorShows(t, svc, w, session.Attempt.ID, -1)
+}
+
+// monitorShows checks the monitor's and the review's time on the paper, in
+// whole seconds, or none when seconds is negative.
+func monitorShows(t *testing.T, svc *application.Application, w world, attemptID string, seconds int) {
+	t.Helper()
+	monitor, err := svc.Queries.Monitor.Handle(t.Context(), query.Monitor{AssignmentID: w.assignment, Scope: everyone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := svc.Queries.Review.Handle(t.Context(), query.Review{AttemptID: attemptID, Scope: everyone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range monitor.Rows {
+		if row.AttemptID == nil || *row.AttemptID != attemptID {
+			continue
+		}
+		for name, got := range map[string]*int{"monitor": row.ActiveSeconds, "review": review.ActiveSeconds} {
+			switch {
+			case seconds < 0 && got != nil:
+				t.Errorf("the %s shows %d seconds for an unmeasured attempt", name, *got)
+			case seconds >= 0 && (got == nil || *got != seconds):
+				t.Errorf("the %s shows %v seconds, want %d", name, got, seconds)
+			}
+		}
+		return
+	}
+	t.Errorf("the monitor has no row for %s", attemptID)
 }

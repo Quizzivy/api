@@ -11,8 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Save writes a batch of answers and the events that accompanied them, in one
-// transaction. The milestones say that the integrity policy flagged the paper in this save, or
+// Save writes a batch of answers and the events that accompanied them, and
+// credits the time on the paper they report, in one transaction. The
+// milestones say that the integrity policy flagged the paper in this save, or
 // counted another absence on a flexible one, and that the limit closed it.
 func (s *Postgres) Save(ctx context.Context, in domain.SaveInput, now time.Time) (domain.SaveResult, domain.Milestones, error) {
 	tx, err := s.Begin(ctx)
@@ -31,6 +32,9 @@ func (s *Postgres) Save(ctx context.Context, in domain.SaveInput, now time.Time)
 	}
 	absences, err := insertEvents(ctx, tx, in.AttemptID, in.SessionID, in.Events, versionID)
 	if err != nil {
+		return domain.SaveResult{}, domain.Milestones{}, err
+	}
+	if err := creditActive(ctx, tx, in.AttemptID, in.SessionID, in.ActiveMs, now); err != nil {
 		return domain.SaveResult{}, domain.Milestones{}, err
 	}
 
@@ -233,4 +237,34 @@ func deriveFocusLoss(ctx context.Context, q db.Querier, attemptID string) (absen
 		return absences{}, fmt.Errorf("attempts: derive focus loss: %w", err)
 	}
 	return out, nil
+}
+
+// ActiveGrace is what a report of time on the paper may claim beyond the time
+// since the session's previous one: the engine's count and the server's clock
+// are read at different moments.
+const ActiveGrace = 5 * time.Second
+
+// creditActive adds a report of the paper's visible time to the attempt's
+// time on the paper, never more than the time since the previous report plus
+// ActiveGrace, and makes now the previous report. It credits only an attempt
+// in progress, before its deadline, from its current session: a report from
+// a session another tab replaced is dropped. An attempt whose time was never
+// measured (active_ms NULL, started before F1) stays unmeasured.
+func creditActive(ctx context.Context, q db.Querier, attemptID, sessionID string, activeMs *int, now time.Time) error {
+	if activeMs == nil {
+		return nil
+	}
+	_, err := q.Exec(ctx, `
+		UPDATE app.attempts
+		   SET active_ms = active_ms + least($3::bigint,
+		         greatest(0, floor(extract(epoch FROM $4::timestamptz - active_reported_at) * 1000)::bigint + $5::bigint)),
+		       active_reported_at = $4::timestamptz
+		 WHERE id = $1::uuid AND session_id = $2::uuid AND status = 'in_progress'
+		   AND deadline_at >= $4::timestamptz
+		   AND active_ms IS NOT NULL AND active_reported_at IS NOT NULL`,
+		attemptID, sessionID, *activeMs, now, ActiveGrace.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("attempts: credit time on the paper: %w", err)
+	}
+	return nil
 }

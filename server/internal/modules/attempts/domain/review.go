@@ -37,9 +37,11 @@ type Review struct {
 	PublishedAt time.Time
 	// TeacherNote is G-05's private note: the teacher's, never the student's.
 	TeacherNote *string
-	Questions   []ReviewQuestion
-	Answers     map[string]ReviewAnswer
-	AudioPlays  map[string]int
+	// ActiveSeconds is as MonitorRow's.
+	ActiveSeconds *int
+	Questions     []ReviewQuestion
+	Answers       map[string]ReviewAnswer
+	AudioPlays    map[string]int
 }
 
 // ReviewQuestion is a frozen version question with everything the grader may see.
