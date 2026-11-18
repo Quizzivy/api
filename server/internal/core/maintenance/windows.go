@@ -50,8 +50,12 @@ type WindowReport struct {
 // attempt aliased a, on its assignment aliased s: a strict attempt's moves by
 // the window's length, and a flexible one's is recomputed from its student's
 // close, the assignment's and the override's moved as the same statement
-// moves them, and never earlier than it was.
-const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN greatest(a.deadline_at,
+// moves them, and never earlier than it was. A flexible deadline that itself
+// falls inside the window, which only a teacher's extension past the close
+// can leave there, moves by the window's length too, so the extension is kept.
+const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN greatest(
+       a.deadline_at + CASE WHEN a.deadline_at < $2::timestamptz
+                            THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END,
        least(s.closed_at, s.closes_at + CASE WHEN s.closed_at IS NULL
                                               AND s.closes_at >= $1::timestamptz AND s.closes_at < $2::timestamptz
                                              THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END),
@@ -79,8 +83,8 @@ const movingOverrides = `SELECT count(*) FROM app.assignment_student_overrides o
 // minute ago, and in the same statement extends by its length the deadline of
 // every running strict attempt that would still be running when it starts
 // (a flexible one's is recomputed from its student's close as this statement
-// moves it, windowDeadline, and moves only when that close falls inside the
-// window), the close
+// moves it, windowDeadline, and moves only when that close or the deadline
+// itself, extended past the close, falls inside the window), the close
 // of every published, open assignment that would close inside it, and the close
 // of every override on a published assignment that would close inside it, an
 // early-closed assignment's too, because that override is what keeps its

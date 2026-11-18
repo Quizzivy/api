@@ -120,3 +120,40 @@ func TestAFlexibleStartIsRefusedOnlyWhileAWindowIsUnderWay(t *testing.T) {
 		t.Errorf("a flexible start while the window is under way: %v, want MaintenanceScheduledError", err)
 	}
 }
+
+// A flexible attempt a teacher extended past its close keeps the extension: a
+// window it falls inside moves it by the window's length, as a strict
+// attempt's, and the moved close never takes it back.
+func TestAWindowKeepsTheExtensionOfAFlexibleAttempt(t *testing.T) {
+	w := newWorld(t)
+	start := far(w, 13)
+	end := start.Add(time.Hour)
+	closedBefore := w.flexible(t, w.assignment(t, start.Add(-30*time.Minute)))
+	closesInside := w.flexible(t, w.assignment(t, start.Add(30*time.Minute)))
+	extended := w.attempt(t, closedBefore, start.Add(45*time.Minute))
+	extendedInside := w.attempt(t, closesInside, start.Add(50*time.Minute))
+	extendedBeyond := w.attempt(t, closedBefore, end.Add(10*time.Minute))
+
+	dry, err := maintenance.ScheduleWindow(w.ctx, w.tx, start, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := w.schedule(t, start, end)
+
+	if got, want := w.deadline(t, extended), start.Add(105*time.Minute); !got.Equal(want) {
+		t.Errorf("an attempt extended past a close before the window has deadline %v, want %v, its own plus the window's length", got, want)
+	}
+	if got, want := w.deadline(t, extendedInside), start.Add(110*time.Minute); !got.Equal(want) {
+		t.Errorf("an attempt extended past a close inside the window has deadline %v, want %v, not the moved close", got, want)
+	}
+	if got, want := w.deadline(t, extendedBeyond), end.Add(10*time.Minute); !got.Equal(want) {
+		t.Errorf("an attempt extended beyond the window moved to %v, want it kept at %v", got, want)
+	}
+	var audited int
+	if err := w.tx.QueryRow(w.ctx, `SELECT count(*) FROM app.audit_log WHERE action = 'attempt.extended' AND entity_id = $1`, extended).Scan(&audited); err != nil {
+		t.Fatal(err)
+	}
+	if audited != 1 || dry.Attempts != report.Attempts || report.Attempts != 2 {
+		t.Errorf("the extended attempt has %d extension rows; the dry run counted %d attempts, the run %d, want 2", audited, dry.Attempts, report.Attempts)
+	}
+}
