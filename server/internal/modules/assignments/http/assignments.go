@@ -113,6 +113,7 @@ func toAPIAssignment(a domain.Assignment) openapi.Assignment {
 			} `json:"students"`
 		}{Classes: classes, Students: students},
 		UpdatedAt:        a.UpdatedAt,
+		Mode:             openapi.AssignmentMode(a.Mode.OrStrict()),
 		DurationMinutes:  a.DurationMin,
 		MaxAttempts:      a.MaxAttempts,
 		ShuffleQuestions: a.ShuffleQ,
@@ -231,6 +232,10 @@ func (h Assignments) UpdateAssignment(ctx context.Context, request openapi.Updat
 	case errors.Is(err, domain.ErrTestNotPublished):
 		return openapi.UpdateAssignment409JSONResponse(httpapi.Error(ctx, openapi.TESTNOTPUBLISHED,
 			httpx.Text(ctx, "Chỉ có thể giao một phiên bản đề đã xuất bản.", "Only a published version of a test can be assigned."))), nil
+	case errors.Is(err, domain.ErrModeLocked):
+		return openapi.UpdateAssignment409JSONResponse(httpapi.Error(ctx, openapi.ASSIGNMENTLOCKED,
+			httpx.Text(ctx, "Bài giao đang mở hoặc đã có học viên làm bài nên không thể đổi chế độ.",
+				"The assignment is open or a student has started, so its mode cannot be changed."))), nil
 	case errors.Is(err, domain.ErrAssignmentLocked):
 		return openapi.UpdateAssignment409JSONResponse(httpapi.Error(ctx, openapi.ASSIGNMENTLOCKED,
 			httpx.Text(ctx, "Bài giao đang mở nên không thể đổi đề, thời lượng hoặc số lượt làm.",
@@ -311,6 +316,9 @@ func toWriteInput(ctx context.Context, body openapi.AssignmentInput) (domain.Wri
 			MinAwayMs:         body.Integrity.MinAwayMs,
 		},
 		Now: time.Now(),
+	}
+	if body.Mode != nil {
+		in.Mode = domain.Mode(*body.Mode)
 	}
 	if body.ShuffleQuestions != nil {
 		in.ShuffleQ = *body.ShuffleQuestions

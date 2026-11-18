@@ -55,9 +55,10 @@ func (s *Postgres) Create(ctx context.Context, req domain.Request, in domain.Wri
 		        review_release, review_show_class_average, student_note,
 		        integrity_require_fullscreen, integrity_block_copy_paste,
 		        integrity_max_focus_loss, integrity_on_limit_exceeded, integrity_min_away_ms,
-		        created_by, published_at)
+		        created_by, published_at, mode)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-		        $12, $13, $14, $15, $16, $17, $18::app.integrity_action, $19, $20::uuid, $21)
+		        $12, $13, $14, $15, $16, $17, $18::app.integrity_action, $19, $20::uuid, $21,
+		        $22::app.assignment_mode)
 		RETURNING id::text`,
 		testID, in.TestVersionID, in.OpensAt, in.ClosesAt,
 		in.DurationMin, in.MaxAttempts, in.ShuffleQ, in.ShuffleO,
@@ -65,7 +66,7 @@ func (s *Postgres) Create(ctx context.Context, req domain.Request, in domain.Wri
 		string(in.Review.Release), in.Review.ShowClassAverage, in.StudentNote,
 		in.Integrity.RequireFullscreen, in.Integrity.BlockCopyPaste,
 		in.Integrity.MaxFocusLoss, in.Integrity.OnLimitExceeded, in.Integrity.MinAwayMs,
-		req.ActorID, domain.Schedule.PublishedAtOf(in)).Scan(&id); err != nil {
+		req.ActorID, domain.Schedule.PublishedAtOf(in), string(in.Mode.OrStrict())).Scan(&id); err != nil {
 		return domain.Assignment{}, fmt.Errorf("assignments: insert: %w", err)
 	}
 
@@ -95,17 +96,8 @@ func (s *Postgres) Create(ctx context.Context, req domain.Request, in domain.Wri
 }
 
 // versionStillFree refuses a version change once anyone has started.
-func versionStillFree(ctx context.Context, tx pgx.Tx, assignmentID, next, current string) error {
-	if next == current {
-		return nil
-	}
-	var started bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM app.attempts WHERE assignment_id = $1::uuid)`,
-		assignmentID).Scan(&started); err != nil {
-		return fmt.Errorf("assignments: attempt check: %w", err)
-	}
-	if started {
+func versionStillFree(current lockedRow, next string) error {
+	if next != current.versionID && current.started {
 		return domain.ErrVersionLocked
 	}
 	return nil
@@ -159,7 +151,8 @@ func (s *Postgres) Update(ctx context.Context, req domain.Request, in domain.Wri
 		       integrity_max_focus_loss = $16,
 		       integrity_on_limit_exceeded = $17::app.integrity_action,
 		       integrity_min_away_ms = $18,
-		       published_at = $19
+		       published_at = $19,
+		       mode = $26::app.assignment_mode
 		 WHERE id = $1::uuid`,
 		req.ID, testID, in.TestVersionID, in.OpensAt, in.ClosesAt, next,
 		in.DurationMin, in.MaxAttempts, in.ShuffleQ, in.ShuffleO,
@@ -168,7 +161,7 @@ func (s *Postgres) Update(ctx context.Context, req domain.Request, in domain.Wri
 		in.Integrity.MaxFocusLoss, in.Integrity.OnLimitExceeded,
 		in.Integrity.MinAwayMs, domain.Schedule.NextPublishedAt(current.publishedAt, in),
 		in.ReleaseSet, string(in.Review.Release), in.ClassAverageSet, in.Review.ShowClassAverage,
-		in.StudentNoteSet, in.StudentNote); err != nil {
+		in.StudentNoteSet, in.StudentNote, string(modeAfter(current, in))); err != nil {
 		return domain.Assignment{}, fmt.Errorf("assignments: update: %w", err)
 	}
 	if err := replaceTargets(ctx, tx, req.Scope(), req.ID, in); err != nil {
@@ -206,6 +199,18 @@ type lockedRow struct {
 	closedAt, publishedAt *time.Time
 	durationMin           int
 	maxAttempts           int
+	mode                  domain.Mode
+	// started is whether any attempt exists on the assignment, read once the
+	// row is locked (lockForUpdate).
+	started bool
+}
+
+// modeAfter is the mode an update leaves: the one it names, or the stored one.
+func modeAfter(current lockedRow, in domain.WriteInput) domain.Mode {
+	if in.Mode == "" {
+		return current.mode
+	}
+	return in.Mode
 }
 
 func checkUpdate(ctx context.Context, tx pgx.Tx, req domain.Request, in domain.WriteInput, current lockedRow) (string, error) {
@@ -223,7 +228,7 @@ func checkUpdate(ctx context.Context, tx pgx.Tx, req domain.Request, in domain.W
 	if err != nil {
 		return "", err
 	}
-	if err := versionStillFree(ctx, tx, req.ID, in.TestVersionID, current.versionID); err != nil {
+	if err := versionStillFree(current, in.TestVersionID); err != nil {
 		return "", err
 	}
 	if err := checkOptionShuffle(ctx, tx, in); err != nil {
@@ -237,6 +242,9 @@ func checkUpdate(ctx context.Context, tx pgx.Tx, req domain.Request, in domain.W
 
 func requireUnlocked(current lockedRow, in domain.WriteInput) error {
 	status := domain.Schedule.StatusAt(in.Now, current.publishedAt, current.opensAt, current.closesAt, current.closedAt)
+	if domain.ModeLocked(current.mode, in.Mode, status, current.started) {
+		return domain.ErrModeLocked
+	}
 	if status != domain.Open {
 		return nil
 	}
@@ -253,24 +261,35 @@ func requireStaysClosed(current lockedRow, in domain.WriteInput) error {
 	return nil
 }
 
+// lockForUpdate locks the assignment row and then reads whether any attempt
+// exists, in a statement of its own: a start holds the row FOR SHARE while it
+// inserts, and a statement that waited on that lock still reads from the
+// snapshot it took before the wait, so only a later statement sees the
+// attempt. A start after the lock waits for this transaction and reads what
+// it leaves.
 func lockForUpdate(ctx context.Context, tx pgx.Tx, scope access.Scope, id string) (lockedRow, error) {
 	var row lockedRow
 	err := tx.QueryRow(ctx, `
 		SELECT test_version_id::text, opens_at, closes_at, closed_at, published_at,
-		       duration_minutes, max_attempts
-		  FROM app.assignments
-		 WHERE id = $1::uuid AND ($2::boolean OR id IN `+visibility.AssignmentIDs(3)+`) FOR UPDATE`,
+		       duration_minutes, max_attempts, mode::text
+		  FROM app.assignments a
+		 WHERE id = $1::uuid AND ($2::boolean OR id IN `+visibility.AssignmentIDs(3)+`) FOR UPDATE OF a`,
 		id, scope.All, opt.String(scope.UserID)).
 		Scan(&row.versionID, &row.opensAt, &row.closesAt, &row.closedAt, &row.publishedAt,
-			&row.durationMin, &row.maxAttempts)
+			&row.durationMin, &row.maxAttempts, &row.mode)
 	switch {
 	case err == nil:
-		return row, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		return lockedRow{}, domain.ErrNotFound
 	default:
 		return lockedRow{}, fmt.Errorf("assignments: load for update: %w", err)
 	}
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM app.attempts WHERE assignment_id = $1::uuid)`,
+		id).Scan(&row.started); err != nil {
+		return lockedRow{}, fmt.Errorf("assignments: attempt check: %w", err)
+	}
+	return row, nil
 }
 
 func replaceTargets(ctx context.Context, tx pgx.Tx, scope access.Scope, id string, in domain.WriteInput) error {

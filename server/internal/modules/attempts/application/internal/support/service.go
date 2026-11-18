@@ -142,7 +142,7 @@ func (s *Service) Create(ctx context.Context, assignmentID, studentID string, at
 		Seed:               seed,
 		BeaconHash:         hash,
 		StartedAt:          now,
-		ExpectedDeadlineAt: r.Deadline(now),
+		ExpectedDeadlineAt: r.GuardedUntil(now),
 	})
 	if err != nil {
 		return domain.Session{}, err
@@ -228,5 +228,6 @@ func (s *Service) Session(ctx context.Context, a domain.AttemptRecord, beacon st
 		GroupAudioPlays: groupPlays,
 		Answers:         answers,
 		Integrity:       r.Integrity,
+		Mode:            r.Mode.OrStrict(),
 	}, nil
 }

@@ -13,12 +13,15 @@ type focusClose struct {
 	flagged bool
 }
 
+// closeForFocusLimit hands in a strict attempt whose absences exceeded an
+// auto_submit rule. A flexible attempt is never closed for leaving, whatever
+// its stored rule says.
 func closeForFocusLimit(ctx context.Context, tx pgx.Tx, attemptID string, now time.Time) (focusClose, error) {
 	var exceeded bool
 	var versionID string
 	var deadline time.Time
 	err := tx.QueryRow(ctx, `SELECT at.test_version_id::text, at.deadline_at,
-  at.status = 'in_progress' AND a.integrity_on_limit_exceeded = 'auto_submit'
+  at.status = 'in_progress' AND a.mode = 'strict' AND a.integrity_on_limit_exceeded = 'auto_submit'
   AND a.integrity_max_focus_loss <> 0
   AND at.focus_loss_count > greatest(0, a.integrity_max_focus_loss)
  FROM app.attempts at JOIN app.assignments a ON a.id = at.assignment_id

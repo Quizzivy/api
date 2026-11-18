@@ -46,8 +46,31 @@ type WindowReport struct {
 	Applied bool   `json:"applied"`
 }
 
-const movingAttempts = `SELECT count(id) FROM app.attempts
- WHERE status = 'in_progress' AND deadline_at > $1`
+// windowDeadline is the deadline a window from $1 to $2 gives a running
+// attempt aliased a, on its assignment aliased s: a strict attempt's moves by
+// the window's length, and a flexible one's is recomputed from its student's
+// close, the assignment's and the override's moved as the same statement
+// moves them, and never earlier than it was. A flexible deadline that itself
+// falls inside the window, which only a teacher's extension past the close
+// can leave there, moves by the window's length too, so the extension is kept.
+const windowDeadline = `CASE WHEN s.mode = 'flexible' THEN greatest(
+       a.deadline_at + CASE WHEN a.deadline_at < $2::timestamptz
+                            THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END,
+       least(s.closed_at, s.closes_at + CASE WHEN s.closed_at IS NULL
+                                              AND s.closes_at >= $1::timestamptz AND s.closes_at < $2::timestamptz
+                                             THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END),
+       (SELECT o.closes_at + CASE WHEN o.closes_at >= $1::timestamptz AND o.closes_at < $2::timestamptz
+                                  THEN $2::timestamptz - $1::timestamptz ELSE interval '0' END
+          FROM app.assignment_student_overrides o
+         WHERE o.assignment_id = a.assignment_id AND o.student_id = a.student_id))
+     ELSE a.deadline_at + ($2::timestamptz - $1::timestamptz) END`
+
+// moving is the running attempts a window from $1 to $2 extends, over
+// app.attempts aliased a and its assignment aliased s.
+const moving = `s.id = a.assignment_id AND a.status = 'in_progress' AND a.deadline_at > $1::timestamptz
+   AND ` + windowDeadline + ` > a.deadline_at`
+
+const movingAttempts = `SELECT count(a.id) FROM app.attempts a, app.assignments s WHERE ` + moving
 
 const movingAssignments = `SELECT count(id) FROM app.assignments
  WHERE closed_at IS NULL AND published_at IS NOT NULL AND closes_at >= $1 AND closes_at < $2`
@@ -58,7 +81,10 @@ const movingOverrides = `SELECT count(*) FROM app.assignment_student_overrides o
 
 // ScheduleWindow schedules a window from startsAt to endsAt, no earlier than a
 // minute ago, and in the same statement extends by its length the deadline of
-// every running attempt that would still be running when it starts, the close
+// every running strict attempt that would still be running when it starts
+// (a flexible one's is recomputed from its student's close as this statement
+// moves it, windowDeadline, and moves only when that close or the deadline
+// itself, extended past the close, falls inside the window), the close
 // of every published, open assignment that would close inside it, and the close
 // of every override on a published assignment that would close inside it, an
 // early-closed assignment's too, because that override is what keeps its
@@ -104,9 +130,9 @@ func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Tim
 		  RETURNING id, starts_at, ends_at, ends_at - starts_at AS length
 		), attempts AS (
 		  UPDATE app.attempts a
-		     SET deadline_at = a.deadline_at + w.length
-		    FROM scheduled w
-		   WHERE a.status = 'in_progress' AND a.deadline_at > w.starts_at
+		     SET deadline_at = `+windowDeadline+`
+		    FROM scheduled w, app.assignments s
+		   WHERE `+moving+`
 		  RETURNING a.id, old.deadline_at AS before, new.deadline_at AS after, w.id AS window_id
 		), assignments AS (
 		  UPDATE app.assignments s
@@ -159,7 +185,7 @@ func ScheduleWindow(ctx context.Context, conn db.Conn, startsAt, endsAt time.Tim
 }
 
 func countMoves(ctx context.Context, tx pgx.Tx, out ScheduleReport) (ScheduleReport, error) {
-	if err := tx.QueryRow(ctx, movingAttempts, out.StartsAt).Scan(&out.Attempts); err != nil {
+	if err := tx.QueryRow(ctx, movingAttempts, out.StartsAt, out.EndsAt).Scan(&out.Attempts); err != nil {
 		return out, err
 	}
 	if err := tx.QueryRow(ctx, movingAssignments, out.StartsAt, out.EndsAt).Scan(&out.Assignments); err != nil {

@@ -38,6 +38,27 @@ func FlaggedKey(attemptID string) string {
 	return "flagged:" + attemptID
 }
 
+// FlaggedBucket is how often, at most, a teacher is told again of the
+// absences on one flagged attempt of a flexible assignment (F1).
+const FlaggedBucket = 15 * time.Minute
+
+// FlaggedAgainKey is the dedupe key of the absences counted on one flagged
+// attempt during the FlaggedBucket at falls in: FlaggedKey and the bucket.
+func FlaggedAgainKey(attemptID string, at time.Time) string {
+	return FlaggedKey(attemptID) + ":" + strconv.FormatInt(at.Unix()/int64(FlaggedBucket/time.Second), 10)
+}
+
+// FlaggedAgainBucket is the bucket a FlaggedAgainKey names, and false for any
+// other key, FlaggedKey's among them.
+func FlaggedAgainBucket(key string) (string, bool) {
+	rest, ok := strings.CutPrefix(key, "flagged:")
+	if !ok {
+		return "", false
+	}
+	_, bucket, ok := strings.Cut(rest, ":")
+	return bucket, ok && bucket != ""
+}
+
 // JoinedKey is the dedupe key of one student joining one class.
 func JoinedKey(classID, studentID string) string {
 	return "joined:" + classID + ":" + studentID

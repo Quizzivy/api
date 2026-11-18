@@ -264,7 +264,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"ai_settings":                  {"SELECT": "*", "UPDATE": "*"},
 	"ai_teacher_credits":           {"SELECT": "*", "INSERT": "*", "UPDATE": "*"},
 	"assignment_student_overrides": {"SELECT": "assignment_id,closes_at,student_id", "UPDATE": "closes_at"},
-	"assignments":                  {"SELECT": "closed_at,closes_at,created_by,id,published_at", "UPDATE": "closes_at"},
+	"assignments":                  {"SELECT": "closed_at,closes_at,created_by,id,mode,published_at", "UPDATE": "closes_at"},
 	"attempt_answers":              {"SELECT": "attempt_id,payload,question_id", "UPDATE": "payload"},
 	"attempt_events":               {"SELECT": "attempt_id,id,received_at", "DELETE": "*"},
 	"attempts":                     {"SELECT": "assignment_id,deadline_at,id,status,student_id,submitted_at", "UPDATE": "deadline_at"},

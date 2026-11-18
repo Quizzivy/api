@@ -157,6 +157,7 @@ func (h Attempts) toAPIAttemptSession(ctx context.Context, studentID string, in 
 			OnLimitExceeded:   openapi.IntegrityPolicyOnLimitExceeded(in.Integrity.OnLimitExceeded),
 			MinAwayMs:         in.Integrity.MinAwayMs,
 		},
+		Mode: openapi.AssignmentMode(in.Mode.OrStrict()),
 	}
 	if in.Superseded {
 		out.Superseded = &in.Superseded
@@ -305,6 +306,7 @@ func (h Attempts) SaveAnswers(ctx context.Context, request openapi.SaveAnswersRe
 		AttemptID: request.Id.String(),
 		StudentID: principal.UserID,
 		SessionID: request.Body.SessionId.String(),
+		ActiveMs:  request.Body.ActiveMs,
 	}
 	var err error
 	if in.Answers, err = toDomainAnswers(request.Body.Answers); err != nil {
@@ -446,14 +448,25 @@ type beaconEvent struct {
 	Meta       map[string]interface{} `json:"meta"`
 }
 
+// maxActiveMs is ActiveMsInput's maximum, which the beacon's text body is
+// held to as the JSON body is by the contract.
+const maxActiveMs = 600_000
+
 type beaconFlush struct {
 	BeaconToken string        `json:"beaconToken"`
 	SessionID   openapi.Uuid  `json:"sessionId"`
 	Events      []beaconEvent `json:"events"`
+	ActiveMs    *int          `json:"activeMs"`
+}
+
+// activeInRange reports whether the beacon's activeMs, when it names one, is
+// within ActiveMsInput's range.
+func (b beaconFlush) activeInRange() bool {
+	return b.ActiveMs == nil || (*b.ActiveMs >= 0 && *b.ActiveMs <= maxActiveMs)
 }
 
 func (b beaconFlush) inputs() ([]openapi.IntegrityEventInput, bool) {
-	if len(b.Events) > maxFlushEvents {
+	if len(b.Events) > maxFlushEvents || !b.activeInRange() {
 		return nil, false
 	}
 	out := make([]openapi.IntegrityEventInput, len(b.Events))
@@ -526,6 +539,7 @@ func authenticatedFlush(ctx context.Context, body *openapi.FlushEventsJSONReques
 	in.StudentID = principal.UserID
 	in.SessionID = body.SessionId.String()
 	in.Events = events
+	in.ActiveMs = body.ActiveMs
 	return nil, nil
 }
 
@@ -549,6 +563,7 @@ func beaconFlushInput(ctx context.Context, raw string, in *domain.FlushInput) (o
 	in.BeaconToken = body.BeaconToken
 	in.SessionID = body.SessionID.String()
 	in.Events = events
+	in.ActiveMs = body.ActiveMs
 	return nil, nil
 }
 
