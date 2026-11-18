@@ -635,3 +635,34 @@ BEGIN
 
   RAISE NOTICE 'seed: collaboration holds';
 END $$;
+
+-- 12's flexible assignment (F1, T-F1.9): flexible, published, open to 01's student through
+-- the class, with fullscreen off for headless Chromium; and the live fixtures of 04 and 10,
+-- whose specs test strict, still strict.
+DO $$
+DECLARE
+  flexible constant uuid := '01935000-0000-7000-8000-000000001201';
+  student constant uuid := '01935000-0000-7000-8000-0000000000a2';
+  bad text;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM app.assignments a
+     WHERE a.id = flexible AND a.mode = 'flexible' AND a.published_at IS NOT NULL
+       AND a.closed_at IS NULL AND NOT a.integrity_require_fullscreen AND a.max_attempts > 1
+       AND EXISTS (SELECT 1 FROM app.assignment_classes ac
+                     JOIN app.class_members m ON m.class_id = ac.class_id
+                    WHERE ac.assignment_id = a.id AND m.user_id = student)) THEN
+    RAISE EXCEPTION 'seed: no published flexible assignment %, fullscreen off, reaching hocvien@quizzivy.com', flexible;
+  END IF;
+
+  SELECT string_agg(a.id::text, ', ') INTO bad
+    FROM app.assignments a
+   WHERE a.mode <> 'strict'
+     AND (a.id::text LIKE '01935000-0000-7000-8000-00000000ee%'
+          OR a.id::text LIKE '01935000-0000-7000-8000-0000000010%');
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: live strict fixture(s) not strict: %', bad;
+  END IF;
+
+  RAISE NOTICE 'seed: flexible assignment holds';
+END $$;
