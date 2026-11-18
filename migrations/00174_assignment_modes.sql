@@ -38,6 +38,21 @@ GRANT SELECT (mode) ON app.assignments TO quizzivy_maintenance;
 -- +goose Down
 SET LOCAL lock_timeout = '5s';
 
+-- Refuses while a flexible assignment exists, as 00147 refuses for a word
+-- limit: v0.14.0 would read it as strict, apply the leaving rule its teacher
+-- turned off, and keep each attempt's deadline at the close, and the mode
+-- cannot be rebuilt once the column goes. The time on the paper is display
+-- only, so dropping it refuses nothing.
+-- +goose StatementBegin
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM app.assignments WHERE mode = 'flexible') THEN
+    RAISE EXCEPTION 'a flexible assignment exists; dropping mode would lose its rule';
+  END IF;
+END
+$$;
+-- +goose StatementEnd
+
 REVOKE SELECT (mode) ON app.assignments FROM quizzivy_maintenance;
 ALTER TABLE app.attempts DROP COLUMN active_reported_at, DROP COLUMN active_ms;
 ALTER TABLE app.assignments DROP COLUMN mode;
