@@ -16,8 +16,8 @@ import (
 // That session must be the attempt's current one or one the attempt has
 // already recorded events under, so a tab that was taken over can still hand
 // in what it holds, and a session id that was never part of the attempt
-// writes nothing. It never changes which session is current. The milestones
-// say that the integrity policy flagged the paper because of them.
+// writes nothing. It never changes which session is current. The milestones say that the integrity policy flagged
+// the paper because of them, or counted another absence on a flexible one.
 func (s *Postgres) Flush(ctx context.Context, in domain.FlushInput, now time.Time) (domain.Milestones, error) {
 	var (
 		studentID  string
@@ -46,11 +46,11 @@ func (s *Postgres) Flush(ctx context.Context, in domain.FlushInput, now time.Tim
 	if !known {
 		return domain.Milestones{}, domain.ErrForbidden
 	}
-	flagged, err := insertEvents(ctx, s.Conn(), in.AttemptID, in.SessionID, in.Events, versionID)
+	found, err := insertEvents(ctx, s.Conn(), in.AttemptID, in.SessionID, in.Events, versionID)
 	if err != nil {
 		return domain.Milestones{}, err
 	}
-	return domain.Milestones{AttemptID: in.AttemptID, Flagged: flagged}, nil
+	return domain.Milestones{AttemptID: in.AttemptID, Flagged: found.flagged, AbsentAgain: found.again}, nil
 }
 
 func authorizeFlush(in domain.FlushInput, studentID string, beaconHash []byte, deadlineAt, now time.Time) error {
