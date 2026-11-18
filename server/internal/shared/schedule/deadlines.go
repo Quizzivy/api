@@ -60,17 +60,28 @@ type Recompute struct {
 // counts in both terms, so a student whose override closes later than the
 // assignment keeps it.
 //
+// A flexible attempt is then moved through every maintenance window ahead
+// that was already scheduled, as scheduling that window moved the attempts in
+// progress then (FlexibleWindowDeadline), so that a close a writer puts inside
+// a scheduled window gives the attempt the deadline it would have had if the
+// window had been scheduled after the write; that move is audited apart, with
+// the reason maintenance and the window's id. A strict attempt is not moved
+// through windows: a strict start is refused instead when its deadline would
+// meet one.
+//
 // tx must be the transaction that changed the window, after it took the
-// assignment row. Each attempt row is locked as it is read, so a concurrent
-// submit, expiry or resume of the same attempt finishes before the deadline
-// moves or sees the new one, and an attempt that was handed in meanwhile is
-// skipped. The lock order is the assignment row, then its attempts.
+// maintenance-windows lock (LockWindows) and then the assignment row. Each
+// attempt row is locked as it is read, so a concurrent submit, expiry or
+// resume of the same attempt finishes before the deadline moves or sees the
+// new one, and an attempt that was handed in meanwhile is skipped. The lock
+// order is the windows lock, the assignment row, then its attempts. The count
+// is of attempts moved, each once however many moves it took.
 func RecomputeDeadlines(ctx context.Context, tx Execer, in Recompute) (int, error) {
 	var students any
 	if len(in.StudentIDs) > 0 {
 		students = in.StudentIDs
 	}
-	var moved int
+	var moved []string
 	err := tx.QueryRow(ctx, `
 		WITH live AS MATERIALIZED (
 		  SELECT at.id, `+DeadlineOf("o")+` AS next_deadline
@@ -97,10 +108,18 @@ func RecomputeDeadlines(ctx context.Context, tx Execer, in Recompute) (int, erro
 		           'reason', $7::text, 'assignmentId', $1::uuid)
 		    FROM moved
 		)
-		SELECT count(*) FROM moved`,
+		SELECT coalesce(array_agg(id::text), '{}') FROM moved`,
 		in.AssignmentID, students, in.ActorID, in.Now, in.IP, in.UserAgent, in.Cause).Scan(&moved)
 	if err != nil {
 		return 0, fmt.Errorf("schedule: recompute deadlines: %w", err)
 	}
-	return moved, nil
+	through, err := moveThroughWindows(ctx, tx, in, students, nil)
+	if err != nil {
+		return 0, err
+	}
+	seen := make(map[string]struct{}, len(moved)+len(through))
+	for _, id := range append(moved, through...) {
+		seen[id] = struct{}{}
+	}
+	return len(seen), nil
 }
