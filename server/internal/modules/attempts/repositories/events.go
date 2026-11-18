@@ -20,7 +20,18 @@ import (
 // paper it reports is credited as a save's is (creditActive), from the
 // current session alone. The milestones say that the integrity policy flagged
 // the paper because of them, or counted another absence on a flexible one.
+//
+// The events, the flag they set and the credit commit together, so a credit
+// that fails takes the flag back with it and the retry finds the flag again
+// and reports it. The attempt row is locked first, as Save locks it, so a
+// save and a flush of the same events never wait on each other's inserts.
 func (s *Postgres) Flush(ctx context.Context, in domain.FlushInput, now time.Time) (domain.Milestones, error) {
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		return domain.Milestones{}, fmt.Errorf("attempts: begin flush: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	var (
 		studentID  string
 		beaconHash []byte
@@ -28,12 +39,13 @@ func (s *Postgres) Flush(ctx context.Context, in domain.FlushInput, now time.Tim
 		versionID  string
 		known      bool
 	)
-	err := s.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT a.student_id, a.beacon_token_hash, a.deadline_at, a.test_version_id,
 		       a.session_id = $2::uuid
 		       OR EXISTS (SELECT 1 FROM app.attempt_events e
 		                   WHERE e.attempt_id = a.id AND e.session_id = $2::uuid)
-		  FROM app.attempts a WHERE a.id = $1::uuid`, in.AttemptID, in.SessionID).
+		  FROM app.attempts a WHERE a.id = $1::uuid
+		   FOR NO KEY UPDATE OF a`, in.AttemptID, in.SessionID).
 		Scan(&studentID, &beaconHash, &deadlineAt, &versionID, &known)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Milestones{}, domain.ErrForbidden
@@ -48,12 +60,15 @@ func (s *Postgres) Flush(ctx context.Context, in domain.FlushInput, now time.Tim
 	if !known {
 		return domain.Milestones{}, domain.ErrForbidden
 	}
-	found, err := insertEvents(ctx, s.Conn(), in.AttemptID, in.SessionID, in.Events, versionID)
+	found, err := insertEvents(ctx, tx, in.AttemptID, in.SessionID, in.Events, versionID)
 	if err != nil {
 		return domain.Milestones{}, err
 	}
-	if err := creditActive(ctx, s.Conn(), in.AttemptID, in.SessionID, in.ActiveMs, now); err != nil {
+	if err := creditActive(ctx, tx, in.AttemptID, in.SessionID, in.ActiveMs, now); err != nil {
 		return domain.Milestones{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Milestones{}, fmt.Errorf("attempts: commit flush: %w", err)
 	}
 	return domain.Milestones{AttemptID: in.AttemptID, Flagged: found.flagged, AbsentAgain: found.again}, nil
 }
