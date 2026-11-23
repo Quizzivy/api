@@ -43,7 +43,19 @@ func TestDashboardRangeAndNewFieldsReachTheResponse(t *testing.T) {
 				t.Fatalf("range=%q want%q", got.Range, want)
 			}
 			out := resp.(openapi.GetDashboard200JSONResponse)
-			if out.TakingNow.Students != 2 || out.TakingNow.Assignments != 3 || len(out.Today) != 1 || out.Today[0].NotSubmitted != 2 || len(out.RecentActivity) != 1 || !out.RecentActivity[0].Flagged || out.Submissions.Total != 4 || out.Submissions.AveragePercent == nil || *out.Submissions.AveragePercent != 63 || out.Submissions.Days[0].Date.Format("2006-01-02") != "2026-10-05" {
+			if len(out.Today) != 1 {
+				t.Fatalf("today=%+v", out.Today)
+			}
+			// The union's discriminator reads kind, so an item without it
+			// would fail response validation.
+			if kind, err := out.Today[0].Discriminator(); err != nil || kind != "opens" {
+				t.Fatalf("today's kind=%q (%v), want opens", kind, err)
+			}
+			today, err := out.Today[0].AsDashboardTodayAssignment()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.TakingNow.Students != 2 || out.TakingNow.Assignments != 3 || today.NotSubmitted != 2 || len(out.RecentActivity) != 1 || !out.RecentActivity[0].Flagged || out.Submissions.Total != 4 || out.Submissions.AveragePercent == nil || *out.Submissions.AveragePercent != 63 || out.Submissions.Days[0].Date.Format("2006-01-02") != "2026-10-05" {
 				t.Fatalf("response=%+v", out)
 			}
 		})

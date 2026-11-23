@@ -60,7 +60,7 @@ func TestRichOptionsSurviveAuthoringVersionRestoreAndStudentDelivery(t *testing.
 	options := payload["options"].([]any)
 	options[0].(map[string]any)["content"] = nil
 	options[0].(map[string]any)["text"] = "changed bank text"
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusOK, id(question), payload)
 	preview := teacher.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+id(test)+"/preview?version=1", nil)
 	assertRichWord(t, preview["questions"].([]any)[0].(map[string]any))
 	current := teacher.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+id(test), nil)
@@ -143,25 +143,25 @@ func TestLegacyEditsCannotSilentlyEraseOptionFormatting(t *testing.T) {
 	option["id"] = firstOption(t, question)["id"]
 	delete(option, "content")
 	kept := option["id"]
-	question = teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	question = teacher.editQuestion(http.StatusOK, id(question), payload)
 	assertRichWord(t, question)
-	question = teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	question = teacher.editQuestion(http.StatusOK, id(question), payload)
 	assertRichWord(t, question)
 	if firstOption(t, question)["id"] != kept {
 		t.Fatal("saving the question changed the option's id")
 	}
 	option["id"] = uuid.NewString()
-	teacher.must(http.StatusBadRequest, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusBadRequest, id(question), payload)
 	option["id"] = firstOption(t, question)["id"]
 	option["text"], payload["prompt"] = "lost marks", "Should roll back"
-	teacher.must(http.StatusBadRequest, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusBadRequest, id(question), payload)
 	unchanged := teacher.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+id(question), nil)
 	assertRichWord(t, unchanged)
 	if unchanged["prompt"] != "Original" {
 		t.Fatal("failed update changed the question")
 	}
 	option["content"] = nil
-	cleared := teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	cleared := teacher.editQuestion(http.StatusOK, id(question), payload)
 	if firstOption(t, cleared)["content"] != nil || firstOption(t, cleared)["text"] != "lost marks" {
 		t.Fatal("explicit removal did not produce the requested plain option")
 	}

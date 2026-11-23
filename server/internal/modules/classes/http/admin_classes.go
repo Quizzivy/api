@@ -112,6 +112,7 @@ func toAPIAdminClassRow(c domain.AdminClass) openapi.AdminClassRow {
 		Id:            httpapi.ParseUUID(c.ID),
 		Name:          c.Name,
 		ScheduleLabel: c.ScheduleLabel,
+		Schedule:      labelledSchedule(c.ScheduleLabel),
 		Room:          c.Room,
 		StudentCount:  c.StudentCount,
 		CreatedAt:     c.CreatedAt,

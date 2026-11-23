@@ -51,6 +51,7 @@ type Server struct {
 	messaginghttp.Staff
 	messaginghttp.Student
 	EmailEvents
+	R8Pending
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

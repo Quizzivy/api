@@ -276,13 +276,24 @@ func toAPIScore(score *stats.ClassScore) *openapi.AttemptScore {
 	return &openapi.AttemptScore{Earned: score.Earned, Total: score.Total, PendingManual: score.PendingManual}
 }
 
+// labelledSchedule is a class's schedule before T-R8.7 derives slots from its
+// weekly series: no slots, and the class's own free-text label, the fallback
+// the contract names for a class without slots.
+func labelledSchedule(label *string) openapi.ClassSchedule {
+	return openapi.ClassSchedule{Slots: []openapi.ScheduleSlot{}, Label: label}
+}
+
+// toAPIAdminClass is the teacher's Class. Until T-R8.7 derives the room from
+// the series, room and ownRoom are both the class's stored room.
 func toAPIAdminClass(c domain.Class) openapi.Class {
 	out := openapi.Class{
 		Id:                  httpapi.ParseUUID(c.ID),
 		Name:                c.Name,
 		Description:         c.Description,
 		ScheduleLabel:       c.ScheduleLabel,
+		Schedule:            labelledSchedule(c.ScheduleLabel),
 		Room:                c.Room,
+		OwnRoom:             c.Room,
 		StudentCount:        c.StudentCount,
 		OpenAssignmentCount: c.OpenAssignmentCount,
 		SelfJoinEnabled:     c.SelfJoinEnabled,
@@ -307,7 +318,9 @@ func toAPIListItem(c domain.ListedClass) openapi.ClassListItem {
 		Name:                c.Name,
 		Description:         c.Description,
 		ScheduleLabel:       c.ScheduleLabel,
+		Schedule:            labelledSchedule(c.ScheduleLabel),
 		Room:                c.Room,
+		OwnRoom:             c.Room,
 		StudentCount:        c.StudentCount,
 		OpenAssignmentCount: c.OpenAssignmentCount,
 		SelfJoinEnabled:     c.SelfJoinEnabled,

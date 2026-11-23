@@ -285,6 +285,16 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
+	// The schedule operations answer 501 until their tasks build them. A
+	// pending case only needs a request the contract accepts, so as points the
+	// kinds the world does not hold yet (session, session-series) at ids it
+	// does hold; a session id is opaque text, so any uuid is a well-formed
+	// one. Each task replaces its cases.
+	sessionsPending   = "T-R8.4: sessions and weekly series"
+	calendarPending   = "T-R8.5: the calendar"
+	attendancePending = "T-R8.6: attendance"
+	weekPending       = "T-R8.8: the student's week"
+
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
@@ -410,7 +420,9 @@ func isolationCases() map[string]isoCase {
 		"tagQuestions": {excuse: map[string]string{"*": "tags only the questions the caller reaches"}, body: fixed(map[string]any{"questionIds": []any{""}, "tags": []any{"đã kiểm tra"}})},
 		"getQuestion":  {},
 		"updateQuestion": {body: func(_ *iso, own *party, slot string) any {
-			return withProseMedia(choiceInput(own), own, slot)
+			body := withProseMedia(choiceInput(own), own, slot)
+			body["expectedUpdatedAt"] = own.c.questionRevision(own.id("question"))
+			return body
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},
@@ -602,6 +614,19 @@ func isolationCases() map[string]isoCase {
 		},
 		"getMySummary":               {},
 		"getNotificationPreferences": {},
+
+		"createClassSession": {pending: sessionsPending, body: fixed(map[string]any{"date": "2026-09-22", "startTime": "18:00", "durationMinutes": 90, "repeatWeekly": false})},
+		"updateClassSession": {pending: sessionsPending, as: map[string]string{"path sessionId": "question"}, body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
+		"deleteClassSession": {pending: sessionsPending, as: map[string]string{"path sessionId": "question"}},
+		"updateSessionSeries": {pending: sessionsPending, as: map[string]string{"path seriesId": "question"},
+			body: fixed(map[string]any{"fromDate": "2026-09-22", "durationMinutes": 90})},
+		"endSessionSeries":       {pending: sessionsPending, as: map[string]string{"path seriesId": "question"}, body: fixed(map[string]any{"lastDate": "2026-12-31"})},
+		"getCalendar":            {pending: calendarPending, query: map[string]string{"from": "2026-09-21", "to": "2026-09-27"}},
+		"listAttendanceSessions": {pending: attendancePending},
+		"getSessionAttendance":   {pending: attendancePending, as: map[string]string{"path sessionId": "question"}},
+		"saveSessionAttendance": {pending: attendancePending, as: map[string]string{"path sessionId": "question"},
+			body: fixed(map[string]any{"marks": []any{map[string]any{"studentId": "", "status": "present"}}})},
+		"getStudentWeek": {pending: weekPending, student: true},
 
 		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
 		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},

@@ -58,7 +58,7 @@ func TestQuestionProseSurvivesSnapshotRestoreAndPolicyGatedDelivery(t *testing.T
 	version := teacher.must(http.StatusCreated, http.MethodPost, "/teacher/tests/"+id(test)+"/publish", nil)
 	payload["prompt"], payload["promptContent"] = "Edited bank", nil
 	payload["explanation"], payload["explanationContent"] = "Edited explanation", nil
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusOK, id(question), payload)
 	preview := teacher.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+id(test)+"/preview?version=1", nil)
 	assertProse(t, preview["questions"].([]any)[0].(map[string]any), false)
 	current := teacher.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+id(test), nil)
@@ -106,12 +106,12 @@ func TestLegacyQuestionWritesPreserveProseOrFailAtomically(t *testing.T) {
 	delete(payload, "promptContent")
 	delete(payload, "explanationContent")
 	payload["points"] = 2
-	assertProse(t, teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload), true)
+	assertProse(t, teacher.editQuestion(http.StatusOK, id(question), payload), true)
 	for _, field := range []string{"prompt", "explanation"} {
 		original := payload[field]
 		payload[field] = "Changed by old client"
 		payload["points"] = 3
-		teacher.must(http.StatusBadRequest, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+		teacher.editQuestion(http.StatusBadRequest, id(question), payload)
 		unchanged := teacher.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+id(question), nil)
 		assertProse(t, unchanged, true)
 		if unchanged["points"] != float64(2) {
@@ -120,7 +120,7 @@ func TestLegacyQuestionWritesPreserveProseOrFailAtomically(t *testing.T) {
 		payload[field] = original
 	}
 	payload["promptContent"], payload["explanationContent"] = nil, nil
-	cleared := teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	cleared := teacher.editQuestion(http.StatusOK, id(question), payload)
 	if cleared["promptContent"] != nil || cleared["explanationContent"] != nil {
 		t.Fatal("explicit null did not clear prose")
 	}

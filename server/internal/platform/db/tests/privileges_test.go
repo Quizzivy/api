@@ -572,3 +572,26 @@ func TestTheMaintenanceRoleMayOnlyQueueTheDecisionEmail(t *testing.T) {
 		}
 	}
 }
+
+// TestTheTimetableTablesHoldWhatT_R8_2Grants pins 00175 to 00178: quizzivy_app
+// reads, adds, changes and removes terms, series, sessions and marks
+// (unmarking deletes a row), through 00009's default privileges, and
+// truncates none; quizzivy_maintenance holds nothing on them.
+func TestTheTimetableTablesHoldWhatT_R8_2Grants(t *testing.T) {
+	conn := migrated(t)
+	for _, table := range []string{"app.terms", "app.class_session_series", "app.class_sessions", "app.attendance_marks"} {
+		for priv, want := range map[string]bool{"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true, "TRUNCATE": false} {
+			if got := hasTablePrivilege(t, conn, appRole, table, priv); got != want {
+				t.Errorf("%s %s on %s = %v, want %v", appRole, priv, table, got, want)
+			}
+		}
+		var holds bool
+		if err := conn.QueryRow(`SELECT has_any_column_privilege($1, $2, 'SELECT, INSERT, UPDATE, REFERENCES')
+			OR has_table_privilege($1, $2, 'DELETE, TRUNCATE, TRIGGER')`, maintenanceRole, table).Scan(&holds); err != nil {
+			t.Fatal(err)
+		}
+		if holds {
+			t.Errorf("%s holds a privilege on %s; no maintenance command reads or writes it", maintenanceRole, table)
+		}
+	}
+}

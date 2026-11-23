@@ -32,6 +32,7 @@ func (h Classes) ListMyClasses(ctx context.Context, _ openapi.ListMyClassesReque
 			TeacherName:      c.TeacherName,
 			TeacherAvatarUrl: c.TeacherAvatarURL,
 			ScheduleLabel:    c.ScheduleLabel,
+			Schedule:         labelledSchedule(c.ScheduleLabel),
 			Room:             c.Room,
 			JoinedAt:         c.JoinedAt,
 		})

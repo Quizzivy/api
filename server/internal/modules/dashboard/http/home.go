@@ -49,12 +49,19 @@ func toAPISubmissions(in domain.Submissions) (openapi.DashboardSubmissions, erro
 	return out, nil
 }
 
-func toAPIToday(in []domain.Today) []openapi.DashboardToday {
+// toAPIToday is the day's assignment opens and closes, each a
+// DashboardTodayAssignment of the DashboardToday union with its kind set, as
+// the union's discriminator reads it. Sessions join the day in T-R8.5.
+func toAPIToday(in []domain.Today) ([]openapi.DashboardToday, error) {
 	out := make([]openapi.DashboardToday, len(in))
 	for i, row := range in {
-		out[i] = openapi.DashboardToday{Kind: openapi.DashboardTodayKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted}
+		if err := out[i].FromDashboardTodayAssignment(openapi.DashboardTodayAssignment{
+			Kind: openapi.DashboardTodayAssignmentKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted,
+		}); err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
 func toAPIActivity(in []domain.Activity) []openapi.DashboardActivity {

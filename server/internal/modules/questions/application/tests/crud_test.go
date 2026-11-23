@@ -487,28 +487,31 @@ func TestTwoEditorsOfAQuestionTellTheSecondWhoSavedFirst(t *testing.T) {
 	}
 }
 
-// TestAnUpdateWithoutExpectedUpdatedAtStillSucceeds: a v0.13.0 client sends
-// no expectedUpdatedAt, and its update is saved whatever changed since, as
-// before R7. Every write still records its writer.
-func TestAnUpdateWithoutExpectedUpdatedAtStillSucceeds(t *testing.T) {
+// TestEveryWriteToAQuestionRecordsItsWriter: each save carries the
+// updatedAt its editor read, as updateQuestion requires since R8 (a body
+// without it is refused by the contract before it reaches the command), and
+// each save, tag and delete records who made it.
+func TestEveryWriteToAQuestionRecordsItsWriter(t *testing.T) {
 	pool := newPool(t)
 	owner, admin := makeAuthor(t, pool), makeAuthor(t, pool)
 	svc := newService(t, pool)
 	ctx := context.Background()
 
-	q := write(t, svc, owner, "Câu của bản cũ")
+	q := write(t, svc, owner, "Câu được sửa nhiều lần")
+	read := q.UpdatedAt
 	for i, editor := range []struct {
 		actor string
 		all   bool
 	}{{owner, false}, {admin, true}, {owner, false}} {
 		saved, err := svc.Commands.Update.Handle(ctx, command.Update{Request: domain.WriteRequest{ID: q.ID, ActorID: editor.actor, All: editor.all,
-			Input: domain.Input{Type: domain.ShortAnswer, Prompt: "Lần sửa " + string(rune('1'+i)), Points: "1.00", Tags: []string{}}}})
+			ExpectedUpdatedAt: &read, Input: domain.Input{Type: domain.ShortAnswer, Prompt: "Lần sửa " + string(rune('1'+i)), Points: "1.00", Tags: []string{}}}})
 		if err != nil {
-			t.Fatalf("save %d without expectedUpdatedAt: %v", i+1, err)
+			t.Fatalf("save %d on the revision it read: %v", i+1, err)
 		}
 		if got := lastWriter(t, pool, q.ID); got != editor.actor || saved.Prompt != "Lần sửa "+string(rune('1'+i)) {
 			t.Errorf("save %d: last writer %q, prompt %q", i+1, got, saved.Prompt)
 		}
+		read = saved.UpdatedAt
 	}
 
 	if _, err := svc.Commands.AddTags.Handle(ctx, command.AddTags{IDs: []string{q.ID}, Tags: []string{"the-admins-tag"}, Scope: access.Scope{UserID: admin, All: true}}); err != nil {

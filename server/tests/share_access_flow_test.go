@@ -163,7 +163,9 @@ func TestAGrantOpensEachOfATestsOperationsAtItsLevel(t *testing.T) {
 			return http.MethodPost, "/teacher/questions/" + id + "/duplicate", nil
 		}},
 		{"updateQuestion", needsContext, question, func(id string) (string, string, *payload) {
-			return http.MethodPatch, "/teacher/questions/" + id, new(jsonPayload(t, plainQuestion("Sửa ngoài đề")))
+			body := plainQuestion("Sửa ngoài đề")
+			body["expectedUpdatedAt"] = a.c.questionRevision(id)
+			return http.MethodPatch, "/teacher/questions/" + id, new(jsonPayload(t, body))
 		}},
 
 		// The edits, each on the revision the last one left.

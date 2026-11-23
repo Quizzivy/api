@@ -382,7 +382,7 @@ func TestAStudentSeesWhenAndWhereAClassMeetsAndNothingElse(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("the student's classes: %d %v", status, body)
 	}
-	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
+	want := []string{"description", "id", "joinedAt", "name", "room", "schedule", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
 	teacher := r.a.me(t)
 	shown := byID(items(body))
 	if len(shown) != 2 {
@@ -407,6 +407,14 @@ func TestAStudentSeesWhenAndWhereAClassMeetsAndNothingElse(t *testing.T) {
 	}
 	if row := shown[id(meeting)]; row["scheduleLabel"] != "Thứ 7 · 08:00" || row["room"] != "C3" {
 		t.Errorf("the meeting class shows schedule %v and room %v", row["scheduleLabel"], row["room"])
+	}
+	// Until T-R8.7 derives slots from the weekly series, a class's schedule is
+	// its label alone, and slots an empty list.
+	for classID, label := range map[string]any{id(meeting): "Thứ 7 · 08:00", id(plain): nil} {
+		schedule, _ := shown[classID]["schedule"].(map[string]any)
+		if slots, ok := schedule["slots"].([]any); !ok || len(slots) != 0 || schedule["label"] != label {
+			t.Errorf("class %s's schedule is %v, want no slots and the label %v", classID, shown[classID]["schedule"], label)
+		}
 	}
 	if row := shown[id(plain)]; row["scheduleLabel"] != nil || row["room"] != nil {
 		t.Errorf("a class with neither shows schedule %v and room %v, want null", row["scheduleLabel"], row["room"])
