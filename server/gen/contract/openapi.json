@@ -4710,10 +4710,11 @@
       },
       "ReferencedBy": {
         "type": "string",
-        "description": "What still references a row whose permanent delete answered\n`RESOURCE_REFERENCED`, carried as `details.referencedBy` by\n`deleteClass` and `deleteUser`. `messages` is a class channel with posts,\nor an account's messages, threads or files. `other` is a reference the\nserver does not name. Later releases add values; a client treats an\nunknown one as `other`.\n",
+        "description": "What still references a row whose permanent delete answered\n`RESOURCE_REFERENCED`, carried as `details.referencedBy` by\n`deleteClass` and `deleteUser`. `messages` is a class channel with posts,\nor an account's messages, threads or files. `attendance` is a mark\ntaken in one of a class's sessions, or a mark an account received or\nmade. `other` is a reference the\nserver does not name. Later releases add values; a client treats an\nunknown one as `other`.\n",
         "enum": [
           "assignments",
           "attempts",
+          "attendance",
           "audit",
           "members",
           "messages",
@@ -15820,7 +15821,7 @@
           },
           "expectedUpdatedAt": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "`updateQuestion` and `editTestQuestion`: the question's\n`updatedAt` the editor last read. When the question has changed\nsince, the write answers `409 STALE_WRITE` naming who changed it,\nand nothing is saved. Optional until R8, which makes it required;\nevery other operation that takes a `QuestionInput` ignores it.\n"
+            "description": "`updateQuestion` and `editTestQuestion`: the question's\n`updatedAt` the editor last read. When the question has changed\nsince, the write answers `409 STALE_WRITE` naming who changed it,\nand nothing is saved. Required on `updateQuestion` since R8;\noptional on `editTestQuestion`; every other operation that takes a\n`QuestionInput` ignores it.\n"
           }
         }
       },
@@ -20273,7 +20274,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/QuestionInput"
+                "description": "A `QuestionInput` whose `expectedUpdatedAt` is required (R8). A\nbody without it answers `400 VALIDATION_FAILED`.\n",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/QuestionInput"
+                  },
+                  {
+                    "required": [
+                      "expectedUpdatedAt"
+                    ]
+                  }
+                ]
               }
             }
           }
@@ -26309,7 +26320,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`RESOURCE_NOT_ARCHIVED` — the account is not disabled.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an individual assignment target, or an assignment it\ncreated), `attempts`, `audit` (audit history it acted in),\n`owned_content` (tests, questions, question groups, media, classes,\njoin codes, published versions or Word imports it owns or created),\n`messages` (a message it sent, a thread it is in, a file it\nuploaded), or `other`.\n",
+            "description": "`RESOURCE_NOT_ARCHIVED` — the account is not disabled.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an individual assignment target, or an assignment it\ncreated), `attempts`, `attendance` (an attendance mark it received\nor made), `audit` (audit history it acted in),\n`owned_content` (tests, questions, question groups, media, classes,\njoin codes, published versions, Word imports, terms, or class\nsessions and their weekly series it owns or created),\n`messages` (a message it sent, a thread it is in, a file it\nuploaded), or `other`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -29247,7 +29258,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`RESOURCE_NOT_ARCHIVED` — the class is not archived.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an assignment targets the class), `members` (a\nmembership in another class came through one of its join codes),\n`messages` (its announcement channel has posts), or `other`.\n",
+            "description": "`RESOURCE_NOT_ARCHIVED` — the class is not archived.\n`RESOURCE_REFERENCED` — something still references it, and\n`details.referencedBy` (`ReferencedBy`) always names what:\n`assignments` (an assignment targets the class), `attendance`\n(one of its sessions has attendance; a class with sessions but no\nattendance deletes, and its sessions with it), `members` (a\nmembership in another class came through one of its join codes),\n`messages` (its announcement channel has posts), or `other`.\n",
             "content": {
               "application/json": {
                 "schema": {
