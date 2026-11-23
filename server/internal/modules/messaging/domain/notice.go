@@ -8,27 +8,31 @@ const ExcerptLength = 80
 
 // Delivery is what a new message tells its thread's readers: the
 // conversation, who wrote the message and what, and the readers it is for.
-// They are the other participant of a direct thread, or the class's active
-// students for an announcement, each enabled, never the sender, and none
-// whose read pointer has already reached the message.
+// They are the other participant of a direct or a colleague thread, or the
+// class's active students for an announcement, each enabled, never the
+// sender, and none whose read pointer has already reached the message.
+// ColleagueLowID and ColleagueHighID are a colleague thread's pair.
 type Delivery struct {
-	ConversationID string
-	Kind           Kind
-	ClassID        string
-	ClassName      string
-	StaffID        string
-	StudentID      string
-	SenderName     string
-	Body           *string
-	Filename       *string
-	Readers        []string
+	ConversationID  string
+	Kind            Kind
+	ClassID         string
+	ClassName       string
+	StaffID         string
+	StudentID       string
+	ColleagueLowID  string
+	ColleagueHighID string
+	SenderName      string
+	Body            *string
+	Filename        *string
+	Readers         []string
 }
 
 // Notice is the in-app item one reader holds for one thread, written again
 // for each new message while the thread stays unread (message.received for
 // a staff reader, message.from_teacher for a student). ClassName is set for
-// an announcement. A staff reader's item leads to StudentID's thread, a
-// student's to TeacherID's thread or ClassID's channel.
+// an announcement. A staff reader's item leads to StudentID's thread, or to
+// ColleagueID's for a colleague thread, never naming a class; a student's to
+// TeacherID's thread or ClassID's channel.
 type Notice struct {
 	ReaderID       string
 	ConversationID string
@@ -37,6 +41,7 @@ type Notice struct {
 	ClassName      *string
 	Excerpt        string
 	StudentID      string
+	ColleagueID    string
 	TeacherID      string
 	ClassID        string
 }
@@ -56,6 +61,8 @@ func (d Delivery) Notices() []Notice {
 	for _, reader := range d.Readers {
 		n := Notice{ReaderID: reader, ConversationID: d.ConversationID, SenderName: d.SenderName, Excerpt: excerpt}
 		switch {
+		case d.Kind == KindColleague:
+			n.ColleagueID = OtherOf(reader, d.ColleagueLowID, d.ColleagueHighID)
 		case d.Kind == KindClass:
 			n.ToStudent, n.ClassID, n.ClassName = true, d.ClassID, &d.ClassName
 		case reader == d.StudentID:

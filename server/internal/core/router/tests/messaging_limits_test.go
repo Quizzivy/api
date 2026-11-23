@@ -36,6 +36,39 @@ func TestAStaffMembersPostsSpendOneBudgetPerCaller(t *testing.T) {
 	}
 }
 
+// TestAColleagueThreadsPostsHaveABudgetOfTheirOwn: a staff member's posts
+// to colleagues spend 30 a minute of their own (F2), apart from the posts to
+// students and classes, and the colleague list and thread are read at most
+// 60 times a minute.
+func TestAColleagueThreadsPostsHaveABudgetOfTheirOwn(t *testing.T) {
+	issuer := testIssuer(t)
+	h := roleRouter(t, issuer, rolePrincipals())
+	post := `{"clientId":"01935000-0000-7000-8000-0000000000d7","body":"Chị gửi em đề nghe"}`
+	colleague := "/teacher/messages/colleagues/01935000-0000-7000-8000-0000000000d8"
+	direct := "/teacher/messages/students/01935000-0000-7000-8000-0000000000d2"
+	for i := range 30 {
+		if rec := sendFrom(t, h, issuer, http.MethodPost, colleague, teacherUser, centreAddress, post); rec.Code != http.StatusNotImplemented {
+			t.Fatalf("post %d to a colleague: %d, want it to reach the handler within the budget of 30 a minute", i+1, rec.Code)
+		}
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodPost, colleague, teacherUser, homeAddress, post); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("the 31st post to a colleague, from another address: %d, want 429", rec.Code)
+	}
+	if rec := sendFrom(t, h, issuer, http.MethodPost, direct, teacherUser, centreAddress, post); rec.Code != http.StatusNotImplemented {
+		t.Errorf("a post to a student once the colleague budget is spent: %d, want the handler: the budgets are apart", rec.Code)
+	}
+	for _, path := range []string{"/teacher/messages/colleagues", colleague} {
+		for i := range 60 {
+			if rec := sendFrom(t, h, issuer, http.MethodGet, path, adminUser, centreAddress, ""); rec.Code != http.StatusNotImplemented {
+				t.Fatalf("read %d of %s: %d, want the handler within 60 a minute", i+1, path, rec.Code)
+			}
+		}
+		if rec := sendFrom(t, h, issuer, http.MethodGet, path, adminUser, homeAddress, ""); rec.Code != http.StatusTooManyRequests {
+			t.Errorf("the 61st read of %s in a minute: %d, want 429", path, rec.Code)
+		}
+	}
+}
+
 func TestAStudentsPostsHaveTheirOwnBudget(t *testing.T) {
 	issuer := testIssuer(t)
 	h := roleRouter(t, issuer, rolePrincipals())

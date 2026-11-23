@@ -129,6 +129,16 @@ func (s *Service) Direct(ctx context.Context, staffID, studentID string) (domain
 	return facts, s.Rules.ReadDirect(facts)
 }
 
+// Colleague resolves colleagueID as a messaging colleague of staffID, by the
+// rules' ReadColleague: the facts, or domain.ErrNotFound.
+func (s *Service) Colleague(ctx context.Context, staffID, colleagueID string) (domain.ColleagueFacts, error) {
+	facts, err := s.Repo.ColleagueFacts(ctx, staffID, colleagueID)
+	if err != nil {
+		return domain.ColleagueFacts{}, err
+	}
+	return facts, s.Rules.ReadColleague(facts)
+}
+
 // SignStudentMessages fills each student message's sender photo, and Mine
 // for reader.
 func (s *Service) SignStudentMessages(ctx context.Context, readerID string, messages []domain.StudentMessage, signed map[string]*string) {

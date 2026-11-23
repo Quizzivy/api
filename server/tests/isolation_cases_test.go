@@ -328,12 +328,13 @@ const (
 	// proves it (D17).
 	anyStudent = "any student may be written to; the thread read is the caller's own"
 
-	// The F2 messaging operations answer 501 until their tasks build them. A
-	// pending case only needs a request the contract accepts, so as points the
-	// kind the world does not hold yet (messaging-colleague) at a user id it
-	// does hold. Each task replaces its cases.
-	recipientsPending = "T-F2.4: the recipients finder's colleagues"
-	colleaguesPending = "T-F2.4: colleague threads"
+	// F2 (T-F2.4): a messaging-colleague is any staff member who opens the
+	// teacher workspace, so another teacher's colleague is the caller's too,
+	// and naming them opens the caller's own thread with them, never another
+	// pair's. colleagueThreadsStayWithTheirParticipants proves it (D17).
+	anyColleague = "any colleague may be written to; the thread read is the caller's own"
+	// The picker refuses a class for colleagues (400) whatever it names.
+	noClassForColleagues = "audience=colleagues takes no class filter, so any classId answers 400 VALIDATION_FAILED, the caller's own included"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
@@ -687,20 +688,23 @@ func isolationCases() map[string]isoCase {
 		"markStaffClassThreadRead":  {excuse: pointed, body: messageRead},
 		"listMessageRecipients": {each: []isoCase{
 			{query: map[string]string{"audience": "students"}},
-			{pending: recipientsPending, query: map[string]string{"audience": "colleagues"}, omit: []string{"classId"}},
+			{query: map[string]string{"audience": "colleagues"}, blind: map[string]string{"query classId": noClassForColleagues}},
 		}},
-		"listColleagueThreads":           {pending: colleaguesPending},
-		"getColleagueThread":             {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}},
-		"postColleagueMessage":           {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}, body: messagePost},
-		"markColleagueThreadRead":        {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}, body: messageRead},
-		"listStudentThreads":             {student: true},
-		"getStudentDirectThread":         {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
-		"postStudentDirectMessage":       {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
-		"markStudentDirectThreadRead":    {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
-		"getStudentClassThread":          {student: true, omit: []string{"after"}, excuse: paged},
-		"markStudentClassThreadRead":     {student: true, excuse: pointed, body: messageRead},
-		"uploadMessageAttachment":        {format: "png"},
-		"getStaffMessageAttachmentUrl":   {},
+		"listColleagueThreads":        {},
+		"getColleagueThread":          {omit: []string{"after"}, excuse: paged, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"postColleagueMessage":        {fresh: freshAttachment, excuse: posted, body: messagePost, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"markColleagueThreadRead":     {excuse: pointed, body: messageRead, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"listStudentThreads":          {student: true},
+		"getStudentDirectThread":      {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
+		"postStudentDirectMessage":    {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
+		"markStudentDirectThreadRead": {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
+		"getStudentClassThread":       {student: true, omit: []string{"after"}, excuse: paged},
+		"markStudentClassThreadRead":  {student: true, excuse: pointed, body: messageRead},
+		"uploadMessageAttachment":     {format: "png"},
+		"getStaffMessageAttachmentUrl": {each: []isoCase{
+			{},
+			{as: map[string]string{"path id": "colleague-attachment"}},
+		}},
 		"getStudentMessageAttachmentUrl": {student: true},
 		"updateNotificationPreferences":  {},
 		"updatePreferences":              {},

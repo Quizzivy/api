@@ -1,6 +1,7 @@
 // Package domain is the messaging context (D17): one announcement channel per
-// class and direct threads between a staff member and a student, who may
-// start one, who reads it and who posts in it. Messages are never edited or
+// class, direct threads between a staff member and a student, and colleague
+// threads between two staff members (F2); who may start one, who reads it
+// and who posts in it. Messages are never edited or
 // deleted, and nothing here is audited: the append-only messages table is the
 // record, readable only by its participants.
 package domain
@@ -62,8 +63,9 @@ var (
 	// scope, an account that is no messaging peer of theirs, or a missing id,
 	// answered alike so ids stay unguessable.
 	ErrNotFound = errors.New("messaging: not found")
-	// ErrNotAllowed is a direct post the pair no longer qualifies for: the
-	// student's account is disabled or no longer a student. The thread stays
+	// ErrNotAllowed is a post the pair no longer qualifies for: a direct
+	// thread's student is disabled or no longer a student, or a colleague is
+	// disabled or no longer opens the teacher workspace. The thread stays
 	// readable (MESSAGING_NOT_ALLOWED).
 	ErrNotAllowed = errors.New("messaging: this pair may not message")
 	// ErrClassArchived is an announcement to an archived class, whose channel
@@ -75,11 +77,13 @@ var (
 )
 
 // ThreadRef names a thread as the staff side addresses it: a class channel by
-// its class, a direct thread by its student.
+// its class, a direct thread by its student, a colleague thread by the
+// colleague.
 type ThreadRef struct {
-	Kind      Kind
-	ClassID   string
-	StudentID string
+	Kind        Kind
+	ClassID     string
+	StudentID   string
+	ColleagueID string
 }
 
 // Class names one class, for the classes a thread's student is in.

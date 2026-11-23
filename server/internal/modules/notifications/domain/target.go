@@ -24,7 +24,9 @@ type requirement struct {
 	assignment bool
 	attempt    bool
 	test       bool
-	student    bool
+	// peer is a staff member's thread: a student's direct thread or a
+	// colleague's, exactly one of the two.
+	peer bool
 	// thread is a student's thread: a teacher's direct thread or a class's
 	// channel, exactly one of the two.
 	thread bool
@@ -39,7 +41,7 @@ var routes = map[Route]requirement{
 	RouteStudentAssignment: {assignment: true},
 	RouteSharedWithMe:      {},
 	RouteTest:              {test: true},
-	RouteMessages:          {student: true},
+	RouteMessages:          {peer: true},
 	RouteStudentMessages:   {thread: true},
 	RouteDashboard:         {},
 }
@@ -47,14 +49,16 @@ var routes = map[Route]requirement{
 // Target is where a click on a notification goes, stored as the contract's
 // NotificationTarget. RouteAssignment and RouteStudentAssignment need
 // AssignmentID, RouteAttempt and RouteResult need AttemptID, RouteTest needs
-// TestID, RouteMessages needs StudentID, RouteStudentMessages needs one of
-// TeacherID and ClassID, and any id may accompany any other route.
+// TestID, RouteMessages needs one of StudentID and ColleagueID (a colleague
+// thread, F2), RouteStudentMessages needs one of TeacherID and ClassID, and
+// any id may accompany any other route.
 type Target struct {
 	Route        Route  `json:"route"`
 	AssignmentID string `json:"assignmentId,omitempty"`
 	AttemptID    string `json:"attemptId,omitempty"`
 	TestID       string `json:"testId,omitempty"`
 	StudentID    string `json:"studentId,omitempty"`
+	ColleagueID  string `json:"colleagueId,omitempty"`
 	TeacherID    string `json:"teacherId,omitempty"`
 	ClassID      string `json:"classId,omitempty"`
 }
@@ -66,13 +70,13 @@ func (t Target) Validate() error {
 	if !known {
 		return ErrInvalidTarget
 	}
-	for _, id := range []string{t.AssignmentID, t.AttemptID, t.TestID, t.StudentID, t.TeacherID, t.ClassID} {
+	for _, id := range []string{t.AssignmentID, t.AttemptID, t.TestID, t.StudentID, t.ColleagueID, t.TeacherID, t.ClassID} {
 		if !idOrNone(id) {
 			return ErrInvalidTarget
 		}
 	}
 	if needs.assignment && t.AssignmentID == "" || needs.attempt && t.AttemptID == "" || needs.test && t.TestID == "" ||
-		needs.student && t.StudentID == "" || needs.thread && (t.TeacherID == "") == (t.ClassID == "") {
+		needs.peer && (t.StudentID == "") == (t.ColleagueID == "") || needs.thread && (t.TeacherID == "") == (t.ClassID == "") {
 		return ErrInvalidTarget
 	}
 	return nil

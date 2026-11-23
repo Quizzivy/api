@@ -24,7 +24,8 @@ func recipientIDs(t *testing.T, c *client, query url.Values) ([]string, any) {
 // teacher's and one in no class, each row carrying exactly the contract's
 // fields and nothing the leak review keeps out; the filters, the paging and
 // the 400s the contract names; another teacher's class answers 404 as a
-// missing one does; colleagues answer 501 until T-F2.4; a student is refused.
+// missing one does; colleagues (T-F2.4) are listed by name with their role
+// and no class; a student is refused.
 func TestTheNewMessagePickerListsStudents(t *testing.T) {
 	w := boot(t)
 	teacher := w.signedIn(w.createStaff("teacher"))
@@ -120,8 +121,27 @@ func TestTheNewMessagePickerListsStudents(t *testing.T) {
 			t.Errorf("%s: %d %v, want 400 VALIDATION_FAILED", name, status, got)
 		}
 	}
-	if status, _ := teacher.call(http.MethodGet, "/teacher/messages/recipients?audience=colleagues", nil); status != http.StatusNotImplemented {
-		t.Errorf("the colleagues audience: %d, want 501 until T-F2.4 builds it", status)
+	colleague := w.signedIn(w.createStaff("assistant"))
+	for c, name := range map[*client]string{teacher: "An Giáo viên ", other: "Bình Giáo viên ", colleague: "Chi Trợ giảng "} {
+		w.named(c, name+tag)
+	}
+	colleagues := url.Values{"audience": {"colleagues"}, "q": {tag}}
+	got := teacher.must(http.StatusOK, http.MethodGet, "/teacher/messages/recipients?"+colleagues.Encode(), nil)
+	staff := objects(got["recipients"])
+	if len(staff) != 2 || id(staff[0]) != w.named(other, "Bình Giáo viên "+tag) || staff[0]["roleBuiltinKey"] != "teacher" ||
+		staff[1]["roleBuiltinKey"] != "assistant" || staff[1]["roleName"] == nil || got["nextCursor"] != nil {
+		t.Errorf("the colleagues: %v, want the other teacher and the assistant by name, with their roles, never the caller or a student", got)
+	}
+	for _, row := range staff {
+		if len(row["classNames"].([]any)) != 0 || len(row["otherClassNames"].([]any)) != 0 || row["canPost"] != true || row["threadExists"] != false {
+			t.Errorf("a colleague row: %v, want no class names, canPost and no thread yet", row)
+		}
+		if _, leaked := row["email"]; leaked {
+			t.Errorf("a colleague row carries an email: %v", row)
+		}
+	}
+	if status, got := teacher.call(http.MethodGet, "/teacher/messages/recipients?audience=colleagues&cursor=bm90LWEtY3Vyc29y", nil); status != http.StatusBadRequest || errorCode(got) != "VALIDATION_FAILED" {
+		t.Errorf("a colleagues cursor this list never gave: %d %v, want 400", status, got)
 	}
 
 	created := teacher.must(http.StatusCreated, http.MethodPost, "/teacher/students", map[string]any{

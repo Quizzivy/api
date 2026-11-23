@@ -65,7 +65,8 @@ func appOver(dbx db.Context) *application.Application {
 // role may not delete messages, so under it the rows stay, marked.
 func (p *pooled) cleanUp() {
 	ctx := context.Background()
-	threads := `SELECT v.id FROM app.conversations v WHERE v.staff_id = ANY($1::uuid[]) OR v.class_id = ANY($2::uuid[])`
+	threads := `SELECT v.id FROM app.conversations v WHERE v.staff_id = ANY($1::uuid[]) OR v.class_id = ANY($2::uuid[])
+		OR v.colleague_low_id = ANY($1::uuid[]) OR v.colleague_high_id = ANY($1::uuid[])`
 	for _, sql := range []string{
 		`DELETE FROM app.conversation_reads WHERE conversation_id IN (` + threads + `)`,
 		`DELETE FROM app.messages WHERE conversation_id IN (` + threads + `)`,
@@ -152,6 +153,14 @@ func announcementBy(who actor.Actor, class string) poster {
 	}
 }
 
+func colleagueBy(who actor.Actor, colleague string) poster {
+	return func(app *application.Application, clientID, body string) (domain.Posted, error) {
+		return app.Commands.PostColleague.Handle(context.Background(), command.PostColleague{
+			Actor: who, ColleagueID: colleague, ClientID: clientID, Body: text(body),
+		})
+	}
+}
+
 type result struct {
 	posted domain.Posted
 	err    error
@@ -172,8 +181,9 @@ func TestAThreadsPostsTakeTheirIdsInTheOrderTheyCommit(t *testing.T) {
 	teacher := p.user("Cô Ngọc", "teacher")
 	admin := p.user("Quản trị", "admin")
 	student := p.user("Học viên Khoa", "student", teacher)
+	colleague := p.user("Thầy Lâm", "teacher")
 	class := p.class(teacher, "Lớp 8A")
-	ngoc, boss := by(teacher), byAdmin(admin)
+	ngoc, boss, lam := by(teacher), byAdmin(admin), by(colleague)
 
 	for name, c := range map[string]struct {
 		first, held, waiting poster
@@ -183,6 +193,13 @@ func TestAThreadsPostsTakeTheirIdsInTheOrderTheyCommit(t *testing.T) {
 			first: directBy(ngoc, student), held: directBy(ngoc, student), waiting: directBy(ngoc, student),
 			read: func(after string) ([]domain.Message, error) {
 				th, err := p.app.Queries.StaffDirectThread.Handle(context.Background(), query.StaffDirectThread{ActorID: teacher, StudentID: student, Cursor: domain.Cursor{After: after}})
+				return th.Page.Messages, err
+			},
+		},
+		"a colleague thread, one post from each side": {
+			first: colleagueBy(ngoc, colleague), held: colleagueBy(ngoc, colleague), waiting: colleagueBy(lam, teacher),
+			read: func(after string) ([]domain.Message, error) {
+				th, err := p.app.Queries.ColleagueThread.Handle(context.Background(), query.ColleagueThread{ActorID: colleague, ColleagueID: teacher, Cursor: domain.Cursor{After: after}})
 				return th.Page.Messages, err
 			},
 		},
@@ -317,6 +334,41 @@ func TestConcurrentFirstPostsMakeOneThread(t *testing.T) {
 		}
 		if a.Message.ConversationID != b.Message.ConversationID {
 			t.Errorf("attempt %d: the posts went to threads %s and %s", attempt, a.Message.ConversationID, b.Message.ConversationID)
+		}
+	}
+}
+
+// TestTwoColleaguesWritingFirstAtOnceMakeOneThread: each of a pair writes
+// first at the same moment, on separate connections, so each post finds no
+// thread and makes one; the pair's unique index and ON CONFLICT DO NOTHING
+// leave one thread holding both messages.
+func TestTwoColleaguesWritingFirstAtOnceMakeOneThread(t *testing.T) {
+	p := newPooled(t)
+	for attempt := range 6 {
+		a, b := p.user("Cô An", "teacher"), p.user("Thầy Bảo", "teacher")
+		posts := [2]poster{colleagueBy(by(a), b), colleagueBy(by(b), a)}
+		var results [2]result
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := range 2 {
+			wg.Go(func() {
+				<-start
+				posted, err := posts[i](p.app, uuid.NewString(), "Chào đồng nghiệp.")
+				results[i] = result{posted, err}
+			})
+		}
+		close(start)
+		wg.Wait()
+		for i, r := range results {
+			if r.err != nil {
+				t.Fatalf("attempt %d: post %d: %v", attempt, i, r.err)
+			}
+		}
+		threads := p.count(`SELECT count(*)::int FROM app.conversations WHERE kind = 'colleague'
+			AND colleague_low_id = least($1::uuid, $2::uuid) AND colleague_high_id = greatest($1::uuid, $2::uuid)`, a, b)
+		if threads != 1 || results[0].posted.Message.ConversationID != results[1].posted.Message.ConversationID || !results[0].posted.Created || !results[1].posted.Created {
+			t.Errorf("attempt %d: %d threads, the posts in %s and %s: want one thread holding both", attempt, threads,
+				results[0].posted.Message.ConversationID, results[1].posted.Message.ConversationID)
 		}
 	}
 }

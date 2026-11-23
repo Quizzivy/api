@@ -69,7 +69,10 @@ func (f RecipientFilter) Check() (RecipientFilter, error) {
 
 // Recipient is a row of the picker. A student's ClassNames are the caller's
 // current classes they are in, not archived, and OtherClassNames the rest of
-// their current classes, by name only; both empty for a student in no class.
+// their current classes, by name only; both empty for a student in no class
+// and for a colleague. A colleague's RoleName and RoleBuiltinKey are their
+// role's stored name and built-in key (nil for a custom role); a student's
+// are nil. ThreadExists is the caller's own thread with the row.
 type Recipient struct {
 	ID              string
 	Name            string
@@ -77,6 +80,8 @@ type Recipient struct {
 	AvatarURL       *string
 	ClassNames      []string
 	OtherClassNames []string
+	RoleName        *string
+	RoleBuiltinKey  *string
 	ThreadExists    bool
 	CanPost         bool
 }
@@ -94,7 +99,9 @@ const recipientCursor = "recipients:"
 
 // RecipientCursor is the opaque cursor of the page after the row id: the
 // next page starts after that row's (folded name, id), read again from the
-// account, so the cursor stays a fixed size whatever the name.
+// account, so the cursor stays a fixed size whatever the name. The row is
+// read again only while it is one of the audience's own rows, so a cursor
+// naming any other account ends the list rather than placing it.
 func RecipientCursor(id string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(recipientCursor + id))
 }
