@@ -1977,6 +1977,111 @@ func TestAConversationIsAClassChannelOrADirectThreadAndNothingBetween(t *testing
 	})
 }
 
+// newColleague inserts a staff account to pair with the fixture's admin and
+// returns the pair, the smaller uuid first, as a colleague thread stores it.
+func newColleague(t *testing.T, tx *sql.Tx, staff string) (low, high string) {
+	t.Helper()
+	var other string
+	if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+		VALUES ('gv-' || uuidv7() || '@example.com', 'Đồng nghiệp', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&other); err != nil {
+		t.Fatalf("colleague fixture: %v", err)
+	}
+	if err := tx.QueryRow(`SELECT LEAST($1::uuid, $2::uuid)::text, GREATEST($1::uuid, $2::uuid)::text`, staff, other).Scan(&low, &high); err != nil {
+		t.Fatal(err)
+	}
+	return low, high
+}
+
+// A colleague thread (00180, T-F2.2) names its pair, ordered low-first, and
+// nothing else, and no other kind names a colleague. The widened kind check
+// still refuses any other kind ('group', in the test above). Each refusal is
+// given the pair ($1 low, $2 high), the fixture's student ($3) and class ($4).
+func TestAColleagueThreadIsAnOrderedPairAndNothingElse(t *testing.T) {
+	for _, c := range []messagingRefusal{
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at)
+			SELECT 'colleague', $2, $1, now() WHERE $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at)
+			SELECT 'colleague', $1, $1, now() WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, last_message_at)
+			SELECT 'colleague', $1, now() WHERE $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_high_id, last_message_at)
+			SELECT 'colleague', $2, now() WHERE $1::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, class_id, last_message_at)
+			SELECT 'colleague', $1, $2, $4, now() WHERE $3::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, staff_id, last_message_at)
+			SELECT 'colleague', $1, $2, $1, now() WHERE $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"conversations_colleague_shape", `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, student_id, last_message_at)
+			SELECT 'colleague', $1, $2, $3, now() WHERE $4::uuid IS NOT NULL`},
+		{"conversations_colleague_columns", `INSERT INTO app.conversations (kind, staff_id, student_id, colleague_low_id, last_message_at)
+			SELECT 'direct', $2, $3, $1, now() WHERE $4::uuid IS NOT NULL`},
+		{"conversations_colleague_columns", `INSERT INTO app.conversations (kind, staff_id, student_id, colleague_high_id, last_message_at)
+			SELECT 'direct', $1, $3, $2, now() WHERE $4::uuid IS NOT NULL`},
+		{"conversations_colleague_columns", `INSERT INTO app.conversations (kind, class_id, colleague_low_id, colleague_high_id, last_message_at)
+			SELECT 'class', $4, $1, $2, now() WHERE $3::uuid IS NOT NULL`},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			low, high := newColleague(t, tx, f.adminID)
+			rejectsWith(t, tx, c.constraint, c.insert, low, high, f.studentID, f.classID)
+		})
+	}
+
+	// One thread per pair: the pair written a second time is refused, and so is
+	// the pair written high-first, by the order check before the index.
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		low, high := newColleague(t, tx, f.adminID)
+		const insert = `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at) VALUES ('colleague', $1, $2, now())`
+		mustExec(t, tx, insert, low, high)
+		rejectsWith(t, tx, "conversations_colleague_key", insert, low, high)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		low, high := newColleague(t, tx, f.adminID)
+		const insert = `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at) VALUES ('colleague', $1, $2, now())`
+		mustExec(t, tx, insert, low, high)
+		rejectsWith(t, tx, "conversations_colleague_shape", insert, high, low)
+	})
+
+	// The key binds a pair, not a person: the admin has a thread with each
+	// colleague, beside a direct thread and a class channel of the same users.
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		const insert = `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at) VALUES ('colleague', $1, $2, now())`
+		for range 2 {
+			low, high := newColleague(t, tx, f.adminID)
+			mustExec(t, tx, insert, low, high)
+		}
+		newDirect(t, tx, f.adminID, f.studentID)
+		mustExec(t, tx, `INSERT INTO app.conversations (kind, class_id, last_message_at) VALUES ('class', $1, now())`, f.classID)
+		var threads int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.conversations WHERE kind = 'colleague' AND $1 IN (colleague_low_id, colleague_high_id)`, f.adminID).Scan(&threads); err != nil || threads != 2 {
+			t.Errorf("the admin has %d colleague threads (%v), want 2", threads, err)
+		}
+	})
+}
+
+// TestAThreadWrittenTheV0150WayStillLands is the rolling deploy of 00180: a
+// v0.15.0 pod opens a direct thread and a class channel with the statements of
+// messaging/repositories at v0.15.0, naming none of the new columns and
+// inferring the conflict from 00164's partial indexes. Each lands once, a
+// repeat is a no-op, and neither names a colleague.
+func TestAThreadWrittenTheV0150WayStillLands(t *testing.T) {
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		for range 2 {
+			mustExec(t, tx, `INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at) VALUES ('direct', $1::uuid, $2::uuid, now())
+				ON CONFLICT (staff_id, student_id) WHERE kind = 'direct' DO NOTHING`, f.adminID, f.studentID)
+			mustExec(t, tx, `INSERT INTO app.conversations (kind, class_id, last_message_at) VALUES ('class', $1::uuid, now())
+				ON CONFLICT (class_id) WHERE kind = 'class' DO NOTHING`, f.classID)
+		}
+		var rows, paired int
+		if err := tx.QueryRow(`SELECT count(*), count(*) FILTER (WHERE colleague_low_id IS NOT NULL OR colleague_high_id IS NOT NULL)
+			FROM app.conversations WHERE (kind = 'direct' AND staff_id = $1 AND student_id = $2) OR (kind = 'class' AND class_id = $3)`,
+			f.adminID, f.studentID, f.classID).Scan(&rows, &paired); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 2 || paired != 0 {
+			t.Errorf("the v0.15.0 writes left %d rows, %d naming a colleague; want the thread and the channel, neither paired", rows, paired)
+		}
+	})
+}
+
 func TestAMessageIsATrimmedBodyOrAFileAndIsSentOnce(t *testing.T) {
 	refusesEachMessagingRow(t, []messagingRefusal{
 		{"messages_body_check", `INSERT INTO app.messages (conversation_id, sender_id, client_id, body)
