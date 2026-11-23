@@ -76,6 +76,9 @@ type Repository interface {
 	// Reaches answers ErrNotFound unless scope reaches class classID, archived
 	// or not, in one query.
 	Reaches(ctx context.Context, scope access.Scope, classID string) error
+	// MemberClasses returns, in one query, the classes studentID is an active
+	// member of that are not archived, for the student's week.
+	MemberClasses(ctx context.Context, studentID string) ([]string, error)
 
 	// Create locks classID, refusing ErrClassArchived, and stores the series
 	// build makes of the class's own room (nil for none), or, when build

@@ -322,12 +322,6 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
-	// The schedule operations answer 501 until their tasks build them. A
-	// pending case only needs a request the contract accepts, so as points the
-	// kinds it names at ids the world holds; a session id is opaque text, so
-	// any uuid is a well-formed one. Each task replaces its cases.
-	weekPending = "T-R8.8: the student's week"
-
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
@@ -669,7 +663,7 @@ func isolationCases() map[string]isoCase {
 			{fresh: freshStartedOneOff, body: fixed(oneMark())},
 			{fresh: freshStartedOccurrence, as: map[string]string{"path sessionId": "occurrence"}, body: fixed(oneMark())},
 		}},
-		"getStudentWeek": {pending: weekPending, student: true},
+		"getStudentWeek": {student: true, query: map[string]string{"start": scheduleDay(3)}},
 
 		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
 		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},

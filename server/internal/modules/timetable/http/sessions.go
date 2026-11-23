@@ -1,7 +1,7 @@
 // Package http is the timetable's transport: a class's sessions under
 // /teacher/classes/{id}/sessions, one session under /teacher/sessions, a
-// weekly series under /teacher/session-series and the calendar under
-// /teacher/calendar.
+// weekly series under /teacher/session-series, the calendar under
+// /teacher/calendar, and a student's week under /app/week.
 package http
 
 import (

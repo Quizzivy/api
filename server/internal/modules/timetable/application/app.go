@@ -3,7 +3,7 @@
 // one-off, changing a weekly session from a date on and stopping it, and the
 // reads that compute the sessions of a range and the calendar (T-R8.5); and
 // its attendance (T-R8.6): a session's register, saving it, and the sessions
-// that take one.
+// that take one; and a student's week (T-R8.8).
 package application
 
 import (
@@ -44,6 +44,8 @@ type Queries struct {
 	AttendanceSessions cqrs.QueryHandler[query.AttendanceSessions, domain.SessionPage]
 	SessionAttendance  cqrs.QueryHandler[query.SessionAttendance, domain.Register]
 
+	StudentWeek cqrs.QueryHandler[query.StudentWeek, domain.Week]
+
 	// ActiveSeries is the classes module's ScheduleSource (adapters.ClassSchedules).
 	ActiveSeries cqrs.QueryHandler[query.ActiveSeries, []domain.Series]
 }
@@ -70,6 +72,8 @@ func New(repo domain.Repository) *Application {
 			AttendanceSessions: query.AttendanceSessionsHandler{Service: service},
 			SessionAttendance:  query.SessionAttendanceHandler{Service: service},
 
+			StudentWeek: query.StudentWeekHandler{Service: service},
+
 			ActiveSeries: query.ActiveSeriesHandler{Service: service},
 		},
 		service: service,
@@ -88,6 +92,13 @@ func (a *Application) WithTerms(terms ports.Terms) *Application {
 // calendar holds sessions only.
 func (a *Application) WithCalendar(terms ports.TermsAhead, assignments ports.Assignments) *Application {
 	a.Queries.Calendar = query.CalendarHandler{Service: a.service, Terms: terms, Assignments: assignments}
+	return a
+}
+
+// WithDueItems lists in a student's week the assignments due reads. Until
+// then the week holds sessions only.
+func (a *Application) WithDueItems(due ports.DueItems) *Application {
+	a.Queries.StudentWeek = query.StudentWeekHandler{Service: a.service, Due: due}
 	return a
 }
 
