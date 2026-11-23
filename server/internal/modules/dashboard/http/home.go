@@ -49,15 +49,24 @@ func toAPISubmissions(in domain.Submissions) (openapi.DashboardSubmissions, erro
 	return out, nil
 }
 
-// toAPIToday is the day's assignment opens and closes, each a
-// DashboardTodayAssignment of the DashboardToday union with its kind set, as
-// the union's discriminator reads it. Sessions join the day in T-R8.5.
+// toAPIToday is the day's items, each of the DashboardToday union with its
+// kind set, as the union's discriminator reads it: an assignment's opening or
+// closing as a DashboardTodayAssignment, a session as a DashboardTodaySession.
 func toAPIToday(in []domain.Today) ([]openapi.DashboardToday, error) {
 	out := make([]openapi.DashboardToday, len(in))
 	for i, row := range in {
-		if err := out[i].FromDashboardTodayAssignment(openapi.DashboardTodayAssignment{
-			Kind: openapi.DashboardTodayAssignmentKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted,
-		}); err != nil {
+		var err error
+		if s := row.Session; s != nil {
+			err = out[i].FromDashboardTodaySession(openapi.DashboardTodaySession{
+				Kind: openapi.DashboardTodaySessionKindSession, At: row.At.UTC(), SessionId: s.ID,
+				ClassId: httpapi.ParseUUID(s.ClassID), ClassName: s.ClassName, Room: s.Room,
+			})
+		} else {
+			err = out[i].FromDashboardTodayAssignment(openapi.DashboardTodayAssignment{
+				Kind: openapi.DashboardTodayAssignmentKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted,
+			})
+		}
+		if err != nil {
 			return nil, err
 		}
 	}

@@ -136,3 +136,40 @@ func TestTheSummaryCarriesWhatIsSharedWithTheCaller(t *testing.T) {
 		t.Fatalf("summary %+v, want sharedWithMe 3 and unreadMessages 100", got)
 	}
 }
+
+// TestATodaySessionReachesTheResponseAsASessionItem maps a session of the
+// day to a DashboardTodaySession with kind session, its opaque id, its class
+// and its room, beside an assignment item.
+func TestATodaySessionReachesTheResponseAsASessionItem(t *testing.T) {
+	at := time.Date(2026, 11, 23, 11, 0, 0, 0, time.FixedZone("ICT", 7*60*60))
+	room := "P.204"
+	class := principals()["a Teacher"].UserID
+	app := &application.Application{Queries: application.Queries{Summary: cqrs.HandlerFunc[query.Summary, domain.Summary](func(context.Context, query.Summary) (domain.Summary, error) {
+		return domain.Summary{Home: domain.Home{Today: []domain.Today{
+			{Kind: "opens", At: at, AssignmentID: class, Title: "paper"},
+			{Kind: domain.TodaySessionKind, At: at, Session: &domain.TodaySession{ID: "019535d9-3df7-79fb-b466-fa907fa17f9e.20261123", ClassID: class, ClassName: "IELTS A", Room: &room}},
+		}}}, nil
+	})}}
+	resp, err := dashboardhttp.NewDashboard(app).GetDashboard(context.Background(), openapi.GetDashboardRequestObject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := resp.(openapi.GetDashboard200JSONResponse).Today
+	if len(today) != 2 {
+		t.Fatalf("today=%+v", today)
+	}
+	if kind, err := today[1].Discriminator(); err != nil || kind != "session" {
+		t.Fatalf("the session's kind=%q (%v)", kind, err)
+	}
+	session, err := today[1].AsDashboardTodaySession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.SessionId != "019535d9-3df7-79fb-b466-fa907fa17f9e.20261123" || session.ClassId.String() != class || session.ClassName != "IELTS A" ||
+		session.Room == nil || *session.Room != room || session.At.Location() != time.UTC || !session.At.Equal(at) {
+		t.Errorf("the session reads %+v", session)
+	}
+	if kind, _ := today[0].Discriminator(); kind != "opens" {
+		t.Errorf("the assignment's kind=%q", kind)
+	}
+}

@@ -168,15 +168,26 @@ type MessageReceivedParams struct {
 // on WeekOf, the Monday's date in the teacher's own zone as 00:00 UTC of
 // that day, so that a teacher in another zone than the centre's reads their
 // own Monday: papers handed in, answers waiting for a mark and flagged
-// attempts on the classes ClassNames names (at most five). T-R7.14's
-// scheduler writes the figures; FullName is read when it is sent.
+// attempts on the classes ClassNames names (at most five), and the week's
+// attendance on each class that had a session marked (T-R8.9), none on a
+// summary written before it. T-R7.14's scheduler writes the figures; FullName
+// is read when it is sent.
 type WeeklySummaryParams struct {
-	WeekOf     time.Time `json:"weekOf"`
-	Count      int       `json:"count"`
-	ToGrade    int       `json:"toGrade"`
-	Flagged    int       `json:"flagged"`
-	ClassNames []string  `json:"classNames"`
-	FullName   string    `json:"fullName,omitempty"`
+	WeekOf     time.Time          `json:"weekOf"`
+	Count      int                `json:"count"`
+	ToGrade    int                `json:"toGrade"`
+	Flagged    int                `json:"flagged"`
+	ClassNames []string           `json:"classNames"`
+	Attendance []WeeklyAttendance `json:"attendance,omitempty"`
+	FullName   string             `json:"fullName,omitempty"`
+}
+
+// WeeklyAttendance is one class's line in a weekly summary: Rate, a whole
+// percent, across its Sessions marked sessions of the week.
+type WeeklyAttendance struct {
+	ClassName string `json:"className"`
+	Rate      int    `json:"rate"`
+	Sessions  int    `json:"sessions"`
 }
 
 // Credits is a number of AI credits, which an email writes with its

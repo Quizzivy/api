@@ -12,6 +12,8 @@ import (
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
 	organizationquery "quizzivy/internal/modules/organization/application/query"
 	sharingquery "quizzivy/internal/modules/sharing/application/query"
+	timetablequery "quizzivy/internal/modules/timetable/application/query"
+	timetabledomain "quizzivy/internal/modules/timetable/domain"
 	"quizzivy/internal/shared/cqrs"
 )
 
@@ -37,3 +39,8 @@ type SharedWithMe = cqrs.QueryHandler[sharingquery.CountSharedWithMe, int]
 
 // UnreadMessages is the messaging module's own count of a staff member's unread messages, the nav's Messages count.
 type UnreadMessages = cqrs.QueryHandler[messagingquery.StaffUnread, int]
+
+// Sessions is the timetable module's own query for the sessions that start in
+// a range in the classes a scope reaches, the day's sessions beside its
+// assignments.
+type Sessions = cqrs.QueryHandler[timetablequery.Occurrences, []timetabledomain.Session]
