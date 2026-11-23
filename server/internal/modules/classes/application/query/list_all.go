@@ -10,8 +10,9 @@ import (
 )
 
 // ListAll reads a page of every teacher's classes for the Admin console, each
-// with its teacher's photo signed and its active code opened, with the tab
-// counts beside them. A photo that cannot be signed and a code that cannot be
+// with its teacher's photo signed, its active code opened and the timetable of
+// its active series, read for the whole page at once, with the tab counts
+// beside them. A photo that cannot be signed and a code that cannot be
 // opened are left out, not an error.
 type ListAll struct {
 	Input domain.AdminListInput
@@ -38,6 +39,13 @@ func (s ListAllHandler) Handle(ctx context.Context, q ListAll) (ListAllResult, e
 		return ListAllResult{}, err
 	}
 	if err := s.openCodes(ctx, items); err != nil {
+		return ListAllResult{}, err
+	}
+	classes := make([]*domain.Class, len(items))
+	for i := range items {
+		classes[i] = &items[i].Class
+	}
+	if err := s.AttachSchedule(ctx, classes...); err != nil {
 		return ListAllResult{}, err
 	}
 	s.signAvatars(ctx, items)

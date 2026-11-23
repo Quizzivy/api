@@ -68,6 +68,16 @@ func (a *Application) WithAvatars(avatars ports.Avatars) *Application {
 	return a
 }
 
+// WithSchedules supplies the reader of the classes' active weekly series,
+// from which every class surface and the join preview derive the schedule's
+// slots and the room (T-R8.7). Without one no class has a series: its
+// schedule is its label alone and its room its own.
+func (a *Application) WithSchedules(source ports.ScheduleSource) *Application {
+	a.service.Schedules = source
+	a.enrolment.Schedules = source
+	return a
+}
+
 type Commands struct {
 	Delete         cqrs.CommandHandler[command.Delete, cqrs.Nothing]
 	AddMember      cqrs.CommandHandler[command.AddMember, domain.Member]

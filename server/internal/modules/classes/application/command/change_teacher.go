@@ -40,6 +40,9 @@ func (s ChangeTeacherHandler) Handle(ctx context.Context, cmd ChangeTeacher) (do
 		s.announce(ctx, cmd, change)
 	}
 	class := change.Class
+	if err := s.AttachSchedule(ctx, &class); err != nil {
+		return domain.Class{}, err
+	}
 	return class, s.AttachAverage(ctx, &class)
 }
 

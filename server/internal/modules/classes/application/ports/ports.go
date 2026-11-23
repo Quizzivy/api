@@ -2,7 +2,9 @@ package ports
 
 import (
 	"context"
+	"time"
 
+	"quizzivy/internal/modules/classes/domain"
 	notificationscommand "quizzivy/internal/modules/notifications/application/command"
 	organizationmodel "quizzivy/internal/modules/organization/application/model"
 	organizationquery "quizzivy/internal/modules/organization/application/query"
@@ -27,3 +29,14 @@ type Avatars interface {
 
 // SignInPolicy is how the centre lets people sign in and join: the organization module's SignInPolicy query. Only whether joining with a code is on is read.
 type SignInPolicy = cqrs.QueryHandler[organizationquery.SignInPolicy, organizationmodel.SignInPolicy]
+
+// ScheduleSource reads the active weekly series of classes from the timetable
+// (adapters.ClassSchedules): those whose last date is the calendar day of now
+// or later in the series' own zone, or that have none. It answers any number
+// of classes in one query, so a list page costs one read whatever its length,
+// keyed by class id; a class with no active series is absent. It applies no
+// scope: every caller has reached the classes it names already, by its scope,
+// its membership or a valid join code.
+type ScheduleSource interface {
+	ActiveSeries(ctx context.Context, classIDs []string, now time.Time) (map[string][]domain.WeeklySeries, error)
+}

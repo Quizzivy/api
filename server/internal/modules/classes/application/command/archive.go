@@ -26,5 +26,8 @@ func (s ArchiveHandler) Handle(ctx context.Context, cmd Archive) (domain.Class, 
 	if err != nil {
 		return domain.Class{}, err
 	}
+	if err := s.AttachSchedule(ctx, &class); err != nil {
+		return domain.Class{}, err
+	}
 	return class, s.AttachAverage(ctx, &class)
 }

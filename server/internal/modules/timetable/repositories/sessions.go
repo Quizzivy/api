@@ -58,6 +58,19 @@ func (p *Postgres) Series(ctx context.Context, w domain.Window) ([]domain.Series
 	return out, nil
 }
 
+// ActiveSeries returns the series of classIDs that may still be active, in
+// one query.
+func (p *Postgres) ActiveSeries(ctx context.Context, classIDs []string, now time.Time) ([]domain.Series, error) {
+	out, err := db.QueryMany(ctx, p, `SELECT `+seriesColumns+`
+		  FROM app.class_session_series s JOIN app.classes c ON c.id = s.class_id
+		 WHERE s.class_id = ANY($1::uuid[]) AND (s.ends_on IS NULL OR s.ends_on >= $2::date)
+		 ORDER BY s.class_id, s.weekday, s.start_time, s.id`, []any{classIDs, day(now.UTC().AddDate(0, 0, -1))}, scanSeriesRows)
+	if err != nil {
+		return nil, fmt.Errorf("timetable: load active series: %w", err)
+	}
+	return out, nil
+}
+
 // Find resolves id under scope, reading without a lock.
 func (p *Postgres) Find(ctx context.Context, scope access.Scope, id domain.SessionID) (domain.Found, error) {
 	if !id.Occurrence() {
