@@ -39,4 +39,8 @@ type Repository interface {
 	// is addressed to, enabled, whose override closes after the assignment's
 	// own close: the students an override gave time the assignment does not.
 	ClosesGranted(ctx context.Context, assignmentID string, studentIDs []string) (Extension, error)
+	// CalendarWindows reads, in one query, the published assignments the
+	// input's scope reaches whose own window opens or closes in its range,
+	// each naming the target classes the scope reaches.
+	CalendarWindows(ctx context.Context, in CalendarInput) ([]CalendarWindow, error)
 }
