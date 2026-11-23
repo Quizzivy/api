@@ -193,11 +193,11 @@ var catalogue = []File{
 			col("class_id", "Mã lớp của kênh thông báo, trống với các loại khác (classes.csv)", "Class ID of an announcement channel, empty for the other kinds (classes.csv)"),
 			col("staff_id", "Mã tài khoản của nhân viên trong tin nhắn riêng với học viên, trống với các loại khác (users.csv)", "Account ID of the staff member in direct messages with a student, empty for the other kinds (users.csv)"),
 			col("student_id", "Mã tài khoản của học viên trong tin nhắn riêng, trống với các loại khác (users.csv)", "Account ID of the student in direct messages, empty for the other kinds (users.csv)"),
-			col("colleague_a_id", "Mã tài khoản của một trong hai nhân viên nhắn tin với nhau, trống với các loại khác (users.csv)", "Account ID of one of the two staff members writing to each other, empty for the other kinds (users.csv)"),
-			col("colleague_b_id", "Mã tài khoản của nhân viên còn lại; thứ tự của hai cột không cho biết ai nhắn trước (users.csv)", "Account ID of the other staff member; the order of the two columns does not say who wrote first (users.csv)"),
 			col("message_count", "Số tin nhắn", "Number of messages"),
 			col("first_message_at", "Lúc gửi tin nhắn đầu tiên", "When the first message was sent"),
 			col("last_message_at", "Lúc gửi tin nhắn gần nhất", "When the latest message was sent"),
+			col("colleague_a_id", "Mã tài khoản của một trong hai nhân viên nhắn tin với nhau, trống với các loại khác (users.csv)", "Account ID of one of the two staff members writing to each other, empty for the other kinds (users.csv)"),
+			col("colleague_b_id", "Mã tài khoản của nhân viên còn lại; thứ tự của hai cột không cho biết ai nhắn trước (users.csv)", "Account ID of the other staff member; the order of the two columns does not say who wrote first (users.csv)"),
 		}},
 }
 

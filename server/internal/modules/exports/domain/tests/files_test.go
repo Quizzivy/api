@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -168,6 +169,24 @@ func TestTheReadmeSaysAColleagueThreadIsCountsAndTwoParticipants(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestMessagesSummaryKeepsR7sColumnsInPlace fails when a column is added
+// anywhere but the end of messages_summary.csv: a reader that takes the file
+// by position (a spreadsheet macro, R5's consumers) would read the wrong cell.
+func TestMessagesSummaryKeepsR7sColumnsInPlace(t *testing.T) {
+	r7 := []string{"id", "kind", "class_id", "staff_id", "student_id", "message_count", "first_message_at", "last_message_at"}
+	want := append(slices.Clone(r7), "colleague_a_id", "colleague_b_id")
+	for _, file := range domain.Files(false) {
+		if file.Name != domain.MessagesFile {
+			continue
+		}
+		if got := file.Header(); !slices.Equal(got, want) {
+			t.Fatalf("%s header = %v, want %v: R7's columns first and in place, F2's after them", file.Name, got, want)
+		}
+		return
+	}
+	t.Fatalf("%s is not a file of the export", domain.MessagesFile)
 }
 
 func TestTheReadmeUsesWindowsLineEndings(t *testing.T) {
