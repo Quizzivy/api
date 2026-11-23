@@ -20,6 +20,7 @@ import (
 	questionshttp "quizzivy/internal/modules/questions/http"
 	sharinghttp "quizzivy/internal/modules/sharing/http"
 	testshttp "quizzivy/internal/modules/tests/http"
+	timetablehttp "quizzivy/internal/modules/timetable/http"
 )
 
 // Modules is every module's transport, as core assembled it.
@@ -43,6 +44,7 @@ type Modules struct {
 	Leads         leadshttp.Leads
 	Sharing       sharinghttp.Sharing
 	Messaging     messaginghttp.Staff
+	Timetable     timetablehttp.Timetable
 	// StudentMessaging is the student side of messaging, /app/messages.
 	StudentMessaging messaginghttp.Student
 }

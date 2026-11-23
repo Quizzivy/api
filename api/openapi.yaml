@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Quizzivy API
-  version: 0.14.1
+  version: 0.15.0
   contact:
     name: Thuong
     url: https://github.com/SekiroKenjii/Quizzivy
@@ -69,7 +69,8 @@ info:
       `section`, `question`, `version-question`, `version-recording`,
       `question-group`, `media`, `import`, `import-source`, `class`,
       `assignment`, `attempt`, `student`, `notification`, `override`,
-      `question-set`, `share`, `messaging-peer` or `attachment`. A `share` is
+      `question-set`, `share`, `messaging-peer`, `attachment`, `session` or
+      `session-series`. A `share` is
       a grant (`ShareGrant.id`), which its content's owner and its recipient
       can name. A `messaging-peer` is a student a staff member may read a
       direct thread with: one they have a thread with, have taught, now or
@@ -80,8 +81,14 @@ info:
       the student's autosave, events and plays name them. A section unit's
       `id` names a question or a group, as its `kind` says, and is declared
       as a question; the suite checks the group branch separately.
+      A `session` is a class session (`SessionId`): a one-off's uuid, or a
+      weekly occurrence `{seriesId}.{yyyymmdd}`, which may have no row yet. It
+      is opaque text, never a uuid, so the uuid rule above does not find it,
+      and every operation that takes one declares it. A `session-series` is
+      the weekly series such occurrences come from (`SessionSeries.id`).
       `kind` is `none` for an id that names no owned resource: an option, a
-      gap, a session, an idempotency key, a fresh identity the caller
+      gap, an attempt's tab session (the `sessionId` a tab holds for an
+      attempt), an idempotency key, a fresh identity the caller
       supplies, a cursor that only marks a position in the caller's own list
       (`before` on `listNotifications`), or an id the operation resolves only
       inside the resource its path names, such as a group's own members on
@@ -142,6 +149,11 @@ tags:
     description: The students a teacher reaches, with their accounts, passwords and classes.
   - name: teacher-classes
     description: Classes, their members and their join codes.
+  - name: teacher-schedule
+    description: |
+      Calendar, sessions and attendance: a class's weekly series and one-off
+      sessions, a change to one date, the teacher's calendar, and the register
+      of each session that has started.
   - name: teacher-ai
     description: |
       The AI assistant's suggestions and the teacher's own credits. Every
@@ -191,7 +203,8 @@ tags:
     description: |
       The centre's own settings: who it is and how it is reached, its logos,
       how people sign in, and how long it keeps answers, focus events and
-      disabled accounts. One document for the whole installation.
+      disabled accounts. One document for the whole installation, beside the
+      centre's terms, which attendance rates and the gradebook read.
   - name: admin-leads
     description: |
       The consultation requests the public form sends (`submitLead`): the
@@ -647,6 +660,42 @@ components:
       format: date-time
       description: RFC 3339, UTC. Rendered in `Asia/Ho_Chi_Minh` by the client.
 
+    LocalDate:
+      type: string
+      format: date
+      description: |
+        A calendar day, `YYYY-MM-DD`, with no time and no zone. Each field
+        that holds one says whose zone it is read in.
+      examples: ['2026-09-22']
+
+    LocalTime:
+      type: string
+      pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+      description: A wall-clock time, `HH:MM` on a 24-hour clock, read in the zone its series or session names.
+      examples: ['18:00']
+
+    IsoWeekday:
+      type: integer
+      minimum: 1
+      maximum: 7
+      description: ISO 8601 numbering, Monday 1 to Sunday 7.
+
+    SessionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: |
+        A class session, opaque to the client: a one-off session's uuid, or a
+        weekly occurrence written `{seriesId}.{yyyymmdd}` with the date it
+        was scheduled for, which stays its id when the session moves. An
+        occurrence's id is the same whether or not it has a row. One that is
+        malformed, unknown or outside the caller's reach answers 404, never
+        400, so it carries no pattern. A session of an archived class that
+        starts at or after the class was archived does not exist, for every
+        read and write; the class's sessions before it stay, and restoring
+        the class brings the later ones back.
+      examples: ['019535d9-3df7-79fb-b466-fa907fa17f9e.20260922']
+
     Points:
       type: number
       format: double
@@ -984,6 +1033,70 @@ components:
         width: { type: integer, minimum: 1 }
         height: { type: integer, minimum: 1 }
 
+    # ---------------------------------------------------------------- terms
+
+    TermName:
+      type: string
+      minLength: 1
+      maxLength: 60
+      description: Trimmed by the server; a name that is blank once trimmed is refused with `VALIDATION_FAILED` naming `name`.
+      examples: ['Học kỳ 1']
+
+    Term:
+      type: object
+      description: |
+        A term of the centre's year (DG-93). Terms are organisation-wide and
+        never overlap, so a day is in one term at most. Attendance rates cover
+        the term that holds today, and a weekly series runs to the end of the
+        term that holds its first date.
+      required: [id, name, startsOn, endsOn, state]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { $ref: '#/components/schemas/TermName' }
+        startsOn:
+          $ref: '#/components/schemas/LocalDate'
+          description: The first day of the term, inclusive.
+        endsOn:
+          $ref: '#/components/schemas/LocalDate'
+          description: The last day of the term, inclusive. Never before `startsOn`.
+        state:
+          type: string
+          enum: [current, upcoming, past]
+          description: |
+            Against today in the caller's time zone (the profile preference,
+            else `Asia/Ho_Chi_Minh`): `current` while today is between
+            `startsOn` and `endsOn`, `upcoming` before it, `past` after it.
+
+    TermList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: Every term, newest first (by `startsOn`, descending).
+          items: { $ref: '#/components/schemas/Term' }
+
+    TermCreate:
+      type: object
+      required: [name, startsOn, endsOn]
+      additionalProperties: false
+      properties:
+        name: { $ref: '#/components/schemas/TermName' }
+        startsOn: { $ref: '#/components/schemas/LocalDate' }
+        endsOn: { $ref: '#/components/schemas/LocalDate' }
+
+    TermPatch:
+      type: object
+      description: The fields to change. A field left out keeps its value; the range is judged as it stands after the change.
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: { $ref: '#/components/schemas/TermName' }
+        startsOn: { $ref: '#/components/schemas/LocalDate' }
+        endsOn: { $ref: '#/components/schemas/LocalDate' }
+
     # ---------------------------------------------------------------- leads
 
     LeadRecipients:
@@ -1193,6 +1306,12 @@ components:
         - JOIN_CODE_REVOKED
         # classes
         - CLASS_ARCHIVED
+        # schedule
+        - TERM_OVERLAPS
+        - SESSION_IN_SERIES
+        - SESSION_HAS_ATTENDANCE
+        - SESSION_NOT_STARTED
+        - SESSION_CANCELLED
         # students
         - EMAIL_TAKEN
         - STUDENT_SHARED
@@ -2601,10 +2720,12 @@ components:
         What still references a row whose permanent delete answered
         `RESOURCE_REFERENCED`, carried as `details.referencedBy` by
         `deleteClass` and `deleteUser`. `messages` is a class channel with posts,
-        or an account's messages, threads or files. `other` is a reference the
+        or an account's messages, threads or files. `attendance` is a mark
+        taken in one of a class's sessions, or a mark an account received or
+        made. `other` is a reference the
         server does not name. Later releases add values; a client treats an
         unknown one as `other`.
-      enum: [assignments, attempts, audit, members, messages, owned_content, other]
+      enum: [assignments, attempts, attendance, audit, members, messages, owned_content, other]
 
     MediaReplacementCounts:
       type: object
@@ -3543,7 +3664,7 @@ components:
 
     Class:
       type: object
-      required: [id, name, studentCount, openAssignmentCount, selfJoinEnabled, archivedAt, createdAt]
+      required: [id, name, schedule, studentCount, openAssignmentCount, selfJoinEnabled, archivedAt, createdAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
@@ -3558,7 +3679,20 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 60
-          description: Where the class meets. Plain text, trimmed; `null` for none.
+          description: |
+            Where the class meets, derived: the class's own room, else the one
+            room every active series of the class shares (`ClassSchedule`),
+            else `null`. `createClass` and `updateClass` set the class's own
+            room, which `ownRoom` reads; an edit form prefills from `ownRoom`,
+            never from this. Plain text, trimmed.
+        ownRoom:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: |
+            The class's own room, as `createClass` and `updateClass` set it,
+            `null` for none. Teacher responses only.
+        schedule: { $ref: '#/components/schemas/ClassSchedule' }
         studentCount: { type: integer, minimum: 0 }
         openAssignmentCount:
           type: integer
@@ -3600,7 +3734,7 @@ components:
         with `withCodes`, the caller holds `teaching.classes.write`, and
         `getJoinCode` would read that class's code for that caller; otherwise it is
         `null`.
-      required: [id, name, studentCount, openAssignmentCount, selfJoinEnabled, archivedAt, createdAt, averageScore]
+      required: [id, name, schedule, studentCount, openAssignmentCount, selfJoinEnabled, archivedAt, createdAt, averageScore]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
@@ -3615,7 +3749,20 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 60
-          description: Where the class meets. Plain text, trimmed; `null` for none.
+          description: |
+            Where the class meets, derived: the class's own room, else the one
+            room every active series of the class shares (`ClassSchedule`),
+            else `null`. `createClass` and `updateClass` set the class's own
+            room, which `ownRoom` reads; an edit form prefills from `ownRoom`,
+            never from this. Plain text, trimmed.
+        ownRoom:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: |
+            The class's own room, as `createClass` and `updateClass` set it,
+            `null` for none. Teacher responses only.
+        schedule: { $ref: '#/components/schemas/ClassSchedule' }
         studentCount: { type: integer, minimum: 0 }
         openAssignmentCount:
           type: integer
@@ -3638,6 +3785,39 @@ components:
             - $ref: '#/components/schemas/AttemptScore'
             - type: 'null'
         createdAt: { $ref: '#/components/schemas/Timestamp' }
+
+    ClassSchedule:
+      type: object
+      description: |
+        When a class meets, as structured data the client words in the
+        reader's language ("T2 · T4 · T6, 18:00", "Mon · Wed · Fri, 18:00").
+        `slots` come from the class's active series, those whose last date is
+        today or later in their own zone or that have none, deduplicated and
+        ordered by weekday, then start time. `label` is the class's own
+        free-text `scheduleLabel`, the fallback a client shows when there are
+        no slots. Neither holds a session date, a note or a cancellation.
+      required: [slots, label]
+      additionalProperties: false
+      properties:
+        slots:
+          type: array
+          maxItems: 14
+          items: { $ref: '#/components/schemas/ScheduleSlot' }
+        label:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 120
+          description: The class's `scheduleLabel`; `null` for none.
+
+    ScheduleSlot:
+      type: object
+      description: One weekly meeting time, in the zone of the series it comes from.
+      required: [weekday, startTime, durationMinutes]
+      additionalProperties: false
+      properties:
+        weekday: { $ref: '#/components/schemas/IsoWeekday' }
+        startTime: { $ref: '#/components/schemas/LocalTime' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
 
     JoinCodeInfo:
       type: object
@@ -3716,13 +3896,18 @@ components:
     AdminClassRow:
       type: object
       description: A row of `listAllClasses`.
-      required: [id, name, scheduleLabel, room, teacher, studentCount, joinCode, createdAt]
+      required: [id, name, scheduleLabel, room, schedule, teacher, studentCount, joinCode, createdAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
         name: { type: string, minLength: 1, maxLength: 120 }
         scheduleLabel: { type: [string, 'null'], minLength: 1, maxLength: 120 }
-        room: { type: [string, 'null'], minLength: 1, maxLength: 60 }
+        room:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: The derived room, as `Class.room`.
+        schedule: { $ref: '#/components/schemas/ClassSchedule' }
         teacher: { $ref: '#/components/schemas/AdminClassTeacher' }
         studentCount: { type: integer, minimum: 0, description: "Live members, as `Class.studentCount` counts them." }
         joinCode:
@@ -3802,8 +3987,10 @@ components:
       description: |
         A class as its student sees it (S-10): the name, who teaches it, when
         and where it meets, and when they joined. Never the join code, a count,
-        the roster or an average.
-      required: [id, name, description, teacherId, teacherName, teacherAvatarUrl, scheduleLabel, room, joinedAt]
+        the roster or an average. Its `schedule` is the weekly pattern and the
+        label only: no session dates, notes or cancellations, which the
+        student reads in `getStudentWeek`.
+      required: [id, name, description, teacherId, teacherName, teacherAvatarUrl, scheduleLabel, room, schedule, joinedAt]
       additionalProperties: false
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
@@ -3824,8 +4011,542 @@ components:
           description: When the class meets, as its teacher worded it.
         room:
           type: [string, 'null']
-          description: Where the class meets.
+          description: Where the class meets, derived as `Class.room` is.
+        schedule: { $ref: '#/components/schemas/ClassSchedule' }
         joinedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    # --------------------------------------------------------------- schedule
+
+    SessionMinutes:
+      type: integer
+      minimum: 15
+      maximum: 480
+      description: How long a session lasts, in minutes.
+
+    SessionRoom:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 60
+      description: Plain text, trimmed; `null` for none.
+
+    SessionNote:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 200
+      description: |
+        A note on one date, which the class's students read in their week
+        ("Room 3 this week"). Plain text, trimmed; `null` for none.
+
+    SessionSeries:
+      type: object
+      description: |
+        A weekly session of a class (DG-92): one weekday, start time, length
+        and room, from `startsOn` to `endsOn`. Its occurrences are computed
+        for the range a screen asks for, and one has a row only once it is
+        changed on its date or has attendance. A series never runs more than
+        731 days.
+      required: [id, classId, weekday, startTime, durationMinutes, room, startsOn, endsOn, timeZone]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        classId: { $ref: '#/components/schemas/Uuid' }
+        weekday: { $ref: '#/components/schemas/IsoWeekday' }
+        startTime: { $ref: '#/components/schemas/LocalTime' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room: { $ref: '#/components/schemas/SessionRoom' }
+        startsOn:
+          $ref: '#/components/schemas/LocalDate'
+          description: The first day the series may meet, in `timeZone`.
+        endsOn:
+          description: The last day it may meet, inclusive, in `timeZone`; `null` until the teacher stops it.
+          oneOf:
+            - $ref: '#/components/schemas/LocalDate'
+            - type: 'null'
+        timeZone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            The IANA zone its dates and times are read in: the profile zone of
+            the teacher who created it, else `Asia/Ho_Chi_Minh`.
+          examples: ['Asia/Ho_Chi_Minh']
+
+    ClassSession:
+      type: object
+      description: |
+        One session of a class: a one-off, or one occurrence of a weekly
+        series with any change made to its date. An occurrence reads the same
+        whether or not it has a row.
+      required: [id, classId, className, seriesId, series, date, startsAt, durationMinutes, room, note, cancelled, changed, hasAttendance]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/SessionId' }
+        classId: { $ref: '#/components/schemas/Uuid' }
+        className: { type: string }
+        seriesId:
+          description: The series of an occurrence; `null` for a one-off.
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        series:
+          description: |
+            The series of an occurrence as it stands, so a client can offer to
+            edit the repeating session without another read; `null` for a
+            one-off.
+          oneOf:
+            - $ref: '#/components/schemas/SessionSeries'
+            - type: 'null'
+        date:
+          $ref: '#/components/schemas/LocalDate'
+          description: |
+            The day it happens on now: in its series' zone for an occurrence,
+            in the caller's time zone for a one-off, which keeps none. A moved
+            occurrence keeps the date it was scheduled for in `id` and shows
+            its new date here.
+        startsAt: { $ref: '#/components/schemas/Timestamp' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room:
+          $ref: '#/components/schemas/SessionRoom'
+          description: The room it meets in on this date, the date's own, else its series', else `null`.
+        note: { $ref: '#/components/schemas/SessionNote' }
+        cancelled: { type: boolean }
+        changed:
+          type: boolean
+          description: |
+            A change to this date makes it differ from its series: a move, a
+            length, a room or a note. Always false for a one-off.
+        hasAttendance:
+          type: boolean
+          description: At least one student is marked on it.
+
+    SessionCreate:
+      type: object
+      description: |
+        A new session of a class. With `repeatWeekly` it starts a weekly
+        series on the weekday of `date`, which runs to `endsOn`, else to the
+        last day of the term that holds `date`, else until the teacher stops
+        it. Without it, a one-off on `date`.
+
+        The date and time are read in the caller's time zone (the profile
+        preference, else `Asia/Ho_Chi_Minh`), which a series keeps. A `date`
+        more than two years after today, or an `endsOn` before `date` or more
+        than 731 days after it, is refused with `VALIDATION_FAILED` naming the
+        field; so is an `endsOn` without `repeatWeekly`.
+      required: [date, startTime, durationMinutes, repeatWeekly]
+      additionalProperties: false
+      properties:
+        date: { $ref: '#/components/schemas/LocalDate' }
+        startTime: { $ref: '#/components/schemas/LocalTime' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: Left out, the class's own room; `null`, none. Trimmed by the server.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        repeatWeekly: { type: boolean }
+        endsOn: { $ref: '#/components/schemas/LocalDate' }
+
+    SessionPatch:
+      type: object
+      description: |
+        A change to one session. On an occurrence it is a change to that date
+        alone, which the series keeps however the series is later edited, and
+        `id` keeps the date the occurrence was scheduled for even when `date`
+        moves it. A field left out keeps its value.
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        date:
+          $ref: '#/components/schemas/LocalDate'
+          description: The day it moves to. It and `startTime` are read as `ClassSession.date` is, in the series' zone or, for a one-off, the caller's.
+        startTime: { $ref: '#/components/schemas/LocalTime' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: |
+            Trimmed by the server. On a one-off, `null` means no room. On a
+            weekly occurrence, `null` clears the date's own room, and the
+            series' room applies again.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        note:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
+          description: As `ClassSession.note`; `null` removes it.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        cancelled:
+          type: boolean
+          description: true cancels the session, false restores it; either is idempotent.
+
+    SeriesPatch:
+      type: object
+      description: |
+        A change to a weekly series from `fromDate` on, with at least one
+        field beside it. Dates before it are never rewritten: the series ends
+        the day before, and a new series with the change starts on
+        `fromDate`. When the occurrence on today's date already has
+        attendance, the change starts tomorrow instead.
+
+        A change to one date of the old series from then on is dropped,
+        unless it has attendance; `SeriesEditResult.droppedChanges` counts
+        them. A field left out keeps the old series' value.
+      required: [fromDate]
+      minProperties: 2
+      additionalProperties: false
+      properties:
+        fromDate:
+          $ref: '#/components/schemas/LocalDate'
+          description: |
+            In the series' zone. A date before today there, or after the
+            series' last date, is refused with `VALIDATION_FAILED` naming
+            `fromDate`.
+        weekday: { $ref: '#/components/schemas/IsoWeekday' }
+        startTime: { $ref: '#/components/schemas/LocalTime' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 60
+          description: Trimmed by the server; `null` meets in no room.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    SeriesEditResult:
+      type: object
+      required: [series, droppedChanges]
+      additionalProperties: false
+      properties:
+        series:
+          $ref: '#/components/schemas/SessionSeries'
+          description: The new series. Its `startsOn` is the date the change took effect from, tomorrow when today had attendance.
+        droppedChanges:
+          type: integer
+          minimum: 0
+          description: Changes to single dates of the old series from that date on that were removed.
+
+    SeriesEnd:
+      type: object
+      required: [lastDate]
+      additionalProperties: false
+      properties:
+        lastDate:
+          $ref: '#/components/schemas/LocalDate'
+          description: |
+            The last day the series meets, in its zone. A date before its
+            `startsOn` removes the series, since none of it has happened; one
+            more than 731 days after `startsOn` is refused with
+            `VALIDATION_FAILED` naming `lastDate`.
+
+    Calendar:
+      type: object
+      description: |
+        The caller's teaching between two dates: the sessions of the classes
+        in their class scope, and the opening and closing of the assignments
+        in their assignment scope, each on its own window. Per-student
+        overrides are not drawn.
+      required: [sessions, assignmentEvents, terms]
+      additionalProperties: false
+      properties:
+        sessions:
+          type: array
+          description: Every session that starts in the range, cancelled ones included, ordered by `startsAt`.
+          items: { $ref: '#/components/schemas/ClassSession' }
+        assignmentEvents:
+          type: array
+          description: Ordered by `at`.
+          items: { $ref: '#/components/schemas/CalendarAssignmentEvent' }
+        terms:
+          type: array
+          description: |
+            Every term that ends on or after `from`, oldest first, so the New
+            session dialog can say how long a series will repeat. A teacher
+            reads terms only here.
+          items: { $ref: '#/components/schemas/CalendarTerm' }
+
+    CalendarAssignmentEvent:
+      type: object
+      description: A published assignment opening or closing inside the range.
+      required: [kind, at, assignmentId, title, classNames]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [opens, closes] }
+        at: { $ref: '#/components/schemas/Timestamp' }
+        assignmentId: { $ref: '#/components/schemas/Uuid' }
+        title: { type: string }
+        classNames:
+          type: array
+          description: The target classes in the caller's class scope, by name.
+          items: { type: string }
+
+    CalendarTerm:
+      type: object
+      required: [id, name, startsOn, endsOn]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { $ref: '#/components/schemas/TermName' }
+        startsOn: { $ref: '#/components/schemas/LocalDate' }
+        endsOn: { $ref: '#/components/schemas/LocalDate' }
+
+    AttendanceStatus:
+      type: string
+      description: |
+        DG-92's statuses. A student with no mark is unmarked, which is no
+        status: it is left out of the rate. Late counts as attended.
+      enum: [present, late, absent]
+
+    AttendanceCounts:
+      type: object
+      required: [present, late, absent]
+      additionalProperties: false
+      properties:
+        present: { type: integer, minimum: 0 }
+        late: { type: integer, minimum: 0 }
+        absent: { type: integer, minimum: 0 }
+
+    AttendanceSessionRow:
+      type: object
+      description: A session that has started, in the Attendance page's lists.
+      required: [id, classId, className, room, startsAt, marked, studentCount, counts]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/SessionId' }
+        classId: { $ref: '#/components/schemas/Uuid' }
+        className: { type: string }
+        room: { $ref: '#/components/schemas/SessionRoom' }
+        startsAt: { $ref: '#/components/schemas/Timestamp' }
+        marked:
+          type: boolean
+          description: At least one student is marked on it.
+        studentCount:
+          type: integer
+          minimum: 0
+          description: The students its register lists, as `getSessionAttendance` counts them.
+        counts:
+          description: The marks by status; `null` while `marked` is false.
+          oneOf:
+            - $ref: '#/components/schemas/AttendanceCounts'
+            - type: 'null'
+
+    AttendanceSessionList:
+      type: object
+      required: [items, nextBefore, notMarked]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: |
+            Newest first. A page never splits sessions that start at the same
+            instant, so it may hold more than `limit`.
+          items: { $ref: '#/components/schemas/AttendanceSessionRow' }
+        nextBefore:
+          description: The last item's `startsAt` when older sessions match, else `null`. Send it as `before` for the next page.
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        notMarked:
+          type: integer
+          minimum: 0
+          description: |
+            The sessions in the caller's class scope, and of `classId` when it
+            is sent, that have started and have no attendance, whatever the
+            page and its other filters: the Attendance tab's badge.
+
+    SessionAttendance:
+      type: object
+      description: |
+        The register of one session: its roster, each student's mark and
+        their attendance rate. The roster is the class's active student
+        members, plus anyone already marked on the session, sorted as
+        `listClassMembers` sorts them.
+      required: [session, term, rateScope, counts, students]
+      additionalProperties: false
+      properties:
+        session: { $ref: '#/components/schemas/ClassSession' }
+        term:
+          description: The term that holds today in the caller's time zone, which the rates cover; `null` when there is none.
+          oneOf:
+            - type: object
+              required: [id, name]
+              additionalProperties: false
+              properties:
+                id: { $ref: '#/components/schemas/Uuid' }
+                name: { $ref: '#/components/schemas/TermName' }
+            - type: 'null'
+        rateScope:
+          type: string
+          enum: [term, overall]
+          description: '`term` when `term` is set, else `overall`: the rates then cover every session of the class.'
+        counts:
+          type: object
+          description: The roster by mark; `unmarked` counts the students with none.
+          required: [present, late, absent, unmarked]
+          additionalProperties: false
+          properties:
+            present: { type: integer, minimum: 0 }
+            late: { type: integer, minimum: 0 }
+            absent: { type: integer, minimum: 0 }
+            unmarked: { type: integer, minimum: 0 }
+        students:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceStudent' }
+
+    AttendanceStudent:
+      type: object
+      required: [studentId, fullName, avatarUrl, status, note, rate]
+      additionalProperties: false
+      properties:
+        studentId: { $ref: '#/components/schemas/Uuid' }
+        fullName: { type: string }
+        avatarUrl:
+          type: [string, 'null']
+          description: The student's profile photo, a presigned GET valid 24 hours; `null` when they have none or no store is configured.
+        status:
+          description: The mark on this session; `null` while unmarked.
+          oneOf:
+            - $ref: '#/components/schemas/AttendanceStatus'
+            - type: 'null'
+        note:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 500
+          description: The teacher's note on this mark. Only the class's teachers read it, and the audit log records only that it changed.
+        rate:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 100
+          description: |
+            (present + late) ÷ (present + late + absent), as a whole percent
+            rounded half up, over the student's marks on the class's
+            non-cancelled sessions in `rateScope`. Unmarked sessions are left
+            out. `null` when the student has no mark there.
+
+    AttendanceSave:
+      type: object
+      required: [marks]
+      additionalProperties: false
+      properties:
+        marks:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: '#/components/schemas/AttendanceMarkInput' }
+
+    AttendanceMarkInput:
+      type: object
+      description: |
+        One student's mark. A student the request leaves out keeps theirs.
+      required: [studentId, status]
+      additionalProperties: false
+      properties:
+        studentId: { $ref: '#/components/schemas/Uuid' }
+        status:
+          description: '`null` unmarks the student, and removes their note with the mark.'
+          oneOf:
+            - $ref: '#/components/schemas/AttendanceStatus'
+            - type: 'null'
+        note:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 500
+          description: |
+            Trimmed by the server. Left out, the stored note is kept; `null`
+            removes it. A note beside a `null` status is refused.
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    StudentWeek:
+      type: object
+      description: |
+        The student's week, Monday to Sunday in their time zone: their
+        classes' sessions and the assignments due. It holds no counts,
+        members, attendance or other students.
+      required: [start, end, days]
+      additionalProperties: false
+      properties:
+        start:
+          $ref: '#/components/schemas/LocalDate'
+          description: The Monday.
+        end:
+          $ref: '#/components/schemas/LocalDate'
+          description: The Sunday.
+        days:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: One per day, Monday first, including empty days.
+          items: { $ref: '#/components/schemas/StudentWeekDay' }
+
+    StudentWeekDay:
+      type: object
+      required: [date, items]
+      additionalProperties: false
+      properties:
+        date: { $ref: '#/components/schemas/LocalDate' }
+        items:
+          type: array
+          description: Ordered by time, a session's `startsAt` and a due item's `closesAt`.
+          items: { $ref: '#/components/schemas/WeekItem' }
+
+    WeekItem:
+      description: Discriminated by `kind`.
+      oneOf:
+        - $ref: '#/components/schemas/WeekSessionItem'
+        - $ref: '#/components/schemas/WeekDueItem'
+      discriminator:
+        propertyName: kind
+        mapping:
+          session: '#/components/schemas/WeekSessionItem'
+          due: '#/components/schemas/WeekDueItem'
+
+    WeekSessionItem:
+      type: object
+      description: |
+        A session of a class the student is an active member of, the class
+        not archived. A cancelled one stays, flagged.
+      required: [kind, classId, className, startsAt, durationMinutes, room, note, cancelled]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [session] }
+        classId: { $ref: '#/components/schemas/Uuid' }
+        className: { type: string }
+        startsAt: { $ref: '#/components/schemas/Timestamp' }
+        durationMinutes: { $ref: '#/components/schemas/SessionMinutes' }
+        room:
+          $ref: '#/components/schemas/SessionRoom'
+          description: As `ClassSession.room`.
+        note: { $ref: '#/components/schemas/SessionNote' }
+        cancelled: { type: boolean }
+
+    WeekDueItem:
+      type: object
+      description: |
+        An assignment that targets the student, whose close for them, their
+        override included, falls in the week, and that they have not handed
+        in.
+      required: [kind, assignmentId, title, closesAt, state, durationMinutes]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [due] }
+        assignmentId: { $ref: '#/components/schemas/Uuid' }
+        title: { type: string }
+        closesAt:
+          $ref: '#/components/schemas/Timestamp'
+          description: The student's own close, their override included.
+        state:
+          type: string
+          enum: [not_started, in_progress]
+          description: '`in_progress` while the student has an attempt under way.'
+        durationMinutes:
+          type: [integer, 'null']
+          minimum: 1
+          description: The test's time limit for the student, their override included; `null` for none.
 
     # ------------------------------------------------------------------ media
 
@@ -6574,7 +7295,11 @@ components:
         submissions: { $ref: '#/components/schemas/DashboardSubmissions' }
         today:
           type: array
-          maxItems: 20
+          maxItems: 40
+          description: |
+            Today in the actor's zone, oldest first by `at`: published
+            assignment openings and effective closings, and the sessions of the
+            caller's classes that are not cancelled.
           items: { $ref: '#/components/schemas/DashboardToday' }
         recentActivity:
           type: array
@@ -6630,10 +7355,39 @@ components:
         count: { type: integer, minimum: 0 }
 
     DashboardToday:
+      description: Discriminated by `kind`.
+      oneOf:
+        - $ref: '#/components/schemas/DashboardTodayAssignment'
+        - $ref: '#/components/schemas/DashboardTodaySession'
+      discriminator:
+        propertyName: kind
+        mapping:
+          opens: '#/components/schemas/DashboardTodayAssignment'
+          closes: '#/components/schemas/DashboardTodayAssignment'
+          session: '#/components/schemas/DashboardTodaySession'
+
+    DashboardTodaySession:
+      type: object
+      additionalProperties: false
+      required: [kind, at, sessionId, classId, className, room]
+      description: A session of a class in the caller's class scope that meets today and is not cancelled.
+      properties:
+        kind: { type: string, enum: [session] }
+        at:
+          $ref: '#/components/schemas/Timestamp'
+          description: When it starts.
+        sessionId: { $ref: '#/components/schemas/SessionId' }
+        classId: { $ref: '#/components/schemas/Uuid' }
+        className: { type: string }
+        room:
+          $ref: '#/components/schemas/SessionRoom'
+          description: As `ClassSession.room`.
+
+    DashboardTodayAssignment:
       type: object
       additionalProperties: false
       required: [kind, at, assignmentId, title, notSubmitted]
-      description: Published assignment openings and effective closings today in the actor's zone, oldest first.
+      description: A published assignment opening, or closing on its effective close, today in the actor's zone.
       properties:
         kind: { type: string, enum: [opens, closes] }
         at: { $ref: '#/components/schemas/Timestamp' }
@@ -8410,8 +9164,9 @@ components:
             `updateQuestion` and `editTestQuestion`: the question's
             `updatedAt` the editor last read. When the question has changed
             since, the write answers `409 STALE_WRITE` naming who changed it,
-            and nothing is saved. Optional until R8, which makes it required;
-            every other operation that takes a `QuestionInput` ignores it.
+            and nothing is saved. Required on `updateQuestion` since R8;
+            optional on `editTestQuestion`; every other operation that takes a
+            `QuestionInput` ignores it.
 
     MatchItemInput:
       type: object
@@ -8714,21 +9469,36 @@ paths:
       responses:
         '200':
           description: |
-            **Leak review (§6.5).** Exactly three fields. No student names, no
+            **Leak review (§6.5).** Exactly five fields. No student names, no
             counts, no member list, no assignment titles. `classId` is included
             because the confirm step needs an idempotency key for the subsequent
             enrolment; it is a uuidv7 that reveals only the class's creation time
             and grants nothing on its own.
+
+            `schedule` and `room` (R8, D5) are the weekly pattern and the room
+            only: the facts a teacher prints on a flyer, returned only for a
+            valid, usable code. No session dates, notes or cancellations, and no
+            member, session or attempt counts (DG-02).
           content:
             application/json:
               schema:
                 type: object
-                required: [classId, className, teacherName]
+                required: [classId, className, teacherName, schedule, room]
                 additionalProperties: false
                 properties:
                   classId: { $ref: '#/components/schemas/Uuid' }
                   className: { type: string }
                   teacherName: { type: string }
+                  schedule:
+                    description: The class's weekly pattern and label, as on `Class`; `null` when it has neither slots nor a label.
+                    oneOf:
+                      - $ref: '#/components/schemas/ClassSchedule'
+                      - type: 'null'
+                  room:
+                    type: [string, 'null']
+                    minLength: 1
+                    maxLength: 60
+                    description: The derived room, as `Class.room`.
         '400': { $ref: '#/components/responses/BadRequest' }
         '404':
           description: |
@@ -11127,7 +11897,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/QuestionInput' }
+            schema:
+              description: |
+                A `QuestionInput` whose `expectedUpdatedAt` is required (R8). A
+                body without it answers `400 VALIDATION_FAILED`.
+              allOf:
+                - $ref: '#/components/schemas/QuestionInput'
+                - required: [expectedUpdatedAt]
       responses:
         '200':
           description: Saved. Published versions are unaffected — they hold their own snapshot (§7).
@@ -14634,9 +15410,11 @@ paths:
             `RESOURCE_REFERENCED` — something still references it, and
             `details.referencedBy` (`ReferencedBy`) always names what:
             `assignments` (an individual assignment target, or an assignment it
-            created), `attempts`, `audit` (audit history it acted in),
+            created), `attempts`, `attendance` (an attendance mark it received
+            or made), `audit` (audit history it acted in),
             `owned_content` (tests, questions, question groups, media, classes,
-            join codes, published versions or Word imports it owns or created),
+            join codes, published versions, Word imports, terms, or class
+            sessions and their weekly series it owns or created),
             `messages` (a message it sent, a thread it is in, a file it
             uploaded), or `other`.
           content:
@@ -16496,6 +17274,103 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /admin/settings/terms:
+    get:
+      operationId: listTerms
+      x-permission: system.settings.write
+      tags: [admin-settings]
+      summary: The centre's terms
+      description: Every term, newest first, each with its state against today in the caller's time zone.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TermList' }
+    post:
+      operationId: createTerm
+      x-permission: system.settings.write
+      tags: [admin-settings]
+      summary: Add a term
+      description: |
+        Adds a term. Terms never overlap, ends included: a term that shares a
+        day with another is refused, judged by the database inside the write.
+        One audit row, `term.created`, entity `term`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TermCreate' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Term' }
+        '400':
+          description: |
+            The body fails its schema, or `VALIDATION_FAILED` naming `name` (blank
+            once trimmed) or `endsOn` (before `startsOn`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: |
+            `TERM_OVERLAPS` — the range shares a day with another term, which
+            `details.termId` and `details.name` name. Nothing was stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/settings/terms/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    patch:
+      operationId: updateTerm
+      x-permission: system.settings.write
+      tags: [admin-settings]
+      summary: Change a term
+      description: |
+        Changes a term's name or range, judged as `createTerm` judges a new
+        one. Attendance rates read the terms when they are computed, so a
+        changed range changes them from the next read. One audit row,
+        `term.updated`, with the fields that changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TermPatch' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Term' }
+        '400':
+          description: As `createTerm`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`TERM_OVERLAPS` — as `createTerm`, naming the other term.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      operationId: deleteTerm
+      x-permission: system.settings.write
+      tags: [admin-settings]
+      summary: Remove a term
+      description: |
+        Removes a term. Nothing else changes: while no term holds today,
+        attendance rates cover every session (`rateScope: overall`), and a
+        series that ran to the term's end keeps the last date it was given.
+        One audit row, `term.deleted`.
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /teacher/classes:
     get:
       operationId: listClasses
@@ -16610,7 +17485,9 @@ paths:
             `RESOURCE_NOT_ARCHIVED` — the class is not archived.
             `RESOURCE_REFERENCED` — something still references it, and
             `details.referencedBy` (`ReferencedBy`) always names what:
-            `assignments` (an assignment targets the class), `members` (a
+            `assignments` (an assignment targets the class), `attendance`
+            (one of its sessions has attendance; a class with sessions but no
+            attendance deletes, and its sessions with it), `members` (a
             membership in another class came through one of its join codes),
             `messages` (its announcement channel has posts), or `other`.
           content:
@@ -16909,6 +17786,362 @@ paths:
         '204': { $ref: '#/components/responses/NoContent' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ================================================================= schedule
+
+  /teacher/classes/{id}/sessions:
+    parameters: [{ $ref: '#/components/parameters/IdPath' }]
+    post:
+      operationId: createClassSession
+      x-resource:
+        - { in: path, name: id, kind: class }
+      x-permission: teaching.classes.write
+      tags: [teacher-schedule]
+      summary: Add a session to a class, once or every week
+      description: |
+        Adds a one-off session, or with `repeatWeekly` a weekly series
+        (`SessionCreate`), to a class in the caller's class scope. A series
+        stores no occurrences: they are computed when read. The room defaults
+        to the class's own room.
+
+        An archived class is refused with `409 CLASS_ARCHIVED` once it has been
+        found for the caller, so another teacher's archived class answers 404
+        as a missing one does. One audit row, `session.created`, whose entity
+        is the one-off (`class_session`) or the series
+        (`class_session_series`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionCreate' }
+      responses:
+        '201':
+          description: The one-off, or the series' first occurrence, on `date`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassSession' }
+        '400':
+          description: The body fails its schema, or `VALIDATION_FAILED` naming `date` or `endsOn` (`SessionCreate`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`CLASS_ARCHIVED` — the class is archived, so it takes no new session.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/sessions/{sessionId}:
+    parameters:
+      - { name: sessionId, in: path, required: true, schema: { $ref: '#/components/schemas/SessionId' } }
+    patch:
+      operationId: updateClassSession
+      x-resource:
+        - { in: path, name: sessionId, kind: session }
+      x-permission: teaching.classes.write
+      tags: [teacher-schedule]
+      summary: Change one session, or one date of a weekly series
+      description: |
+        Moves a session, changes its length, room or note, or cancels and
+        restores it (`SessionPatch`). On an occurrence that has no row yet the
+        row is written first, in the same transaction; the series itself is
+        not changed. A session with attendance may be changed too: its marks
+        stay with it.
+
+        One audit row: `session.cancelled` when the request cancels it, else
+        `session.updated`, entity `class_session`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionPatch' }
+      responses:
+        '200':
+          description: The session as it now reads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteClassSession
+      x-resource:
+        - { in: path, name: sessionId, kind: session }
+      x-permission: teaching.classes.write
+      tags: [teacher-schedule]
+      summary: Remove a one-off session
+      description: |
+        Removes a one-off session that has no attendance. An occurrence of a
+        weekly series is cancelled with `updateClassSession` instead, or the
+        series is ended with `endSessionSeries`. One audit row,
+        `session.deleted`, entity `class_session`.
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `SESSION_IN_SERIES` — the session is an occurrence of a weekly
+            series; cancel it instead. `SESSION_HAS_ATTENDANCE` — a student is
+            marked on it; it can only be cancelled. Nothing was removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/sessions/{sessionId}/attendance:
+    parameters:
+      - { name: sessionId, in: path, required: true, schema: { $ref: '#/components/schemas/SessionId' } }
+    get:
+      operationId: getSessionAttendance
+      x-resource:
+        - { in: path, name: sessionId, kind: session }
+      x-permission: teaching.attendance
+      tags: [teacher-schedule]
+      summary: The register of one session
+      description: |
+        The session's roster with each student's mark, note and attendance
+        rate (`SessionAttendance`). A session that has not started, or a
+        cancelled one, is read all the same; `saveSessionAttendance` refuses
+        to mark it.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionAttendance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveSessionAttendance
+      x-resource:
+        - { in: path, name: sessionId, kind: session }
+        - { in: body, name: /marks/-/studentId, kind: student }
+      x-permission: teaching.attendance
+      tags: [teacher-schedule]
+      summary: Save the register of one session
+      description: |
+        Sets, changes or removes the marks the request names
+        (`AttendanceMarkInput`); every other student's mark is kept. On an
+        occurrence that has no row yet the row is written first, once
+        however many requests race for it.
+
+        Every `studentId` must be an active student member of the class or a
+        student already marked on this session. One that is not, a student
+        named twice, or a note beside a `null` status answers `422
+        VALIDATION_FAILED` for the whole request and names the ids in
+        `details.studentIds`; nothing is written. A student who does not
+        exist and one the caller may not know exist answer the same.
+
+        One audit row, `attendance.saved`, entity `class_session`, in the
+        statement that writes the marks: a change per student whose status
+        changed, from and to (`null` for unmarked), and "note changed" for a
+        changed note, never its text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AttendanceSave' }
+      responses:
+        '200':
+          description: The register as saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionAttendance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`SESSION_CANCELLED` — the session is cancelled, so it takes no attendance. Restore it first.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            `SESSION_NOT_STARTED` — the session starts more than 15 minutes from
+            now; attendance is taken once it has started. `VALIDATION_FAILED` —
+            `details.studentIds` names the marks refused, as above.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/session-series/{seriesId}:
+    parameters:
+      - { name: seriesId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    patch:
+      operationId: updateSessionSeries
+      x-resource:
+        - { in: path, name: seriesId, kind: session-series }
+      x-permission: teaching.classes.write
+      tags: [teacher-schedule]
+      summary: Change a weekly session from a date on
+      description: |
+        Splits the series at the effective `fromDate` (`SeriesPatch`): the old
+        series ends the day before and keeps every date before it as it was,
+        attendance included, and a new series carries the change from then
+        on. One audit row, `session_series.updated`, entity
+        `class_session_series`, naming both series and `droppedChanges`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SeriesPatch' }
+      responses:
+        '200':
+          description: The new series, and how many single-date changes were dropped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SeriesEditResult' }
+        '400':
+          description: The body fails its schema, or `VALIDATION_FAILED` naming `fromDate` (`SeriesPatch`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/session-series/{seriesId}/end:
+    parameters:
+      - { name: seriesId, in: path, required: true, schema: { $ref: '#/components/schemas/Uuid' } }
+    post:
+      operationId: endSessionSeries
+      x-resource:
+        - { in: path, name: seriesId, kind: session-series }
+      x-permission: teaching.classes.write
+      tags: [teacher-schedule]
+      summary: Stop repeating a weekly session
+      description: |
+        Sets the series' last date (`SeriesEnd`) and removes its single-date
+        changes that happen after it, judged by when each one happens, not by
+        the date it was scheduled for. The past is never rewritten: a
+        `lastDate` before yesterday in the series' zone, or after the series'
+        current last date, answers `400 VALIDATION_FAILED` naming `lastDate`.
+        A series that has not started yet (`startsOn` today or later) is
+        removed when `lastDate` is before `startsOn`.
+        One audit row, `session_series.ended`, entity `class_session_series`,
+        whether the series ended or was removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SeriesEnd' }
+      responses:
+        '200':
+          description: The series as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionSeries' }
+        '204':
+          description: The series was removed, since it has not started and `lastDate` is before its first date.
+        '400':
+          description: The body fails its schema, or `VALIDATION_FAILED` naming `lastDate` (`SeriesEnd`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`SESSION_HAS_ATTENDANCE` — an occurrence after `lastDate` has attendance, which an end would cut off from its series. Nothing was changed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /teacher/calendar:
+    get:
+      operationId: getCalendar
+      x-resource:
+        - { in: query, name: classId, kind: class }
+      x-resource-list: session
+      x-permission: workspace.teacher
+      tags: [teacher-schedule]
+      summary: The caller's sessions and assignment events between two dates
+      description: |
+        The sessions of the classes in the caller's class scope that start in
+        the range, cancelled ones included, and the opening and closing of the
+        assignments in their assignment scope that fall in it (`Calendar`).
+        Occurrences are computed for the range; reading writes nothing.
+
+        `from` and `to` are local dates in the caller's time zone (the
+        profile preference, else `Asia/Ho_Chi_Minh`). With `classId`, the
+        sessions of that class and the events of the assignments that target
+        it.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: The first day, inclusive.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: to
+          in: query
+          required: true
+          description: The day after the last, exclusive. `to` minus `from` is 1 to 42 days, else `400 VALIDATION_FAILED` naming `to`.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: classId
+          in: query
+          required: false
+          description: One class. A class outside the caller's class scope answers 404, as an unknown one does.
+          schema: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Calendar' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /teacher/attendance/sessions:
+    get:
+      operationId: listAttendanceSessions
+      x-resource:
+        - { in: query, name: classId, kind: class }
+      x-resource-list: session
+      x-permission: teaching.attendance
+      tags: [teacher-schedule]
+      summary: Sessions that have started, for the register
+      description: |
+        Started, non-cancelled sessions of the classes in the caller's class
+        scope, newest first (`AttendanceSessionList`): a session counts as
+        started from its `startsAt`. `since` and `before` bound `startsAt`, and
+        `marked` keeps the sessions with attendance or without. `limit=1`
+        gives the latest one.
+
+        Paged by a cursor: ask again with `before` set to `nextBefore` for the
+        next older page.
+      parameters:
+        - name: classId
+          in: query
+          required: false
+          description: One class. A class outside the caller's class scope answers 404, as an unknown one does.
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: before
+          in: query
+          required: false
+          description: Sessions that start before this instant, exclusive.
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: since
+          in: query
+          required: false
+          description: Sessions that start at or after this instant, inclusive.
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: marked
+          in: query
+          required: false
+          description: true keeps the sessions with attendance, false those without. Left out, both.
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: One page. An empty `items` when no session matches.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceSessionList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # =================================================================== student
@@ -17384,6 +18617,35 @@ paths:
       x-rate-limit:
         perIp: { perMinute: 120, perHour: 600 }
         perCode: { perHour: 200 }
+
+  /app/week:
+    get:
+      operationId: getStudentWeek
+      x-permission: learning.take_tests
+      tags: [student]
+      summary: The student's week
+      description: |
+        This week (DG-81): the sessions of the classes the student is an
+        active member of, archived classes left out, and the assignments due
+        for them in the week (`StudentWeek`). It takes no id, so it reads the
+        caller's own classes and assignments only. Occurrences are computed
+        for the week; reading writes nothing.
+      parameters:
+        - name: start
+          in: query
+          required: false
+          description: |
+            Any day of the week wanted; the week is the ISO week, Monday to
+            Sunday, that holds it in the student's time zone (the profile
+            preference, else `Asia/Ho_Chi_Minh`). Left out, the current week.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentWeek' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /app/assignments:
     get:

@@ -19,6 +19,18 @@ BEGIN
     RAISE EXCEPTION 'seed: bank choice question(s) with fewer than two options: %', bad;
   END IF;
 
+  -- Ties: every member is tied to their class's teacher, as the binary writes it with the
+  -- enrolment (shared/ties). Since 00179 no trigger writes it, so a seed that adds a member
+  -- writes the tie too, or the teacher cannot write to the student first.
+  SELECT string_agg(m.class_id::text || '/' || m.user_id::text, ', ') INTO bad
+    FROM app.class_members m
+    JOIN app.classes c ON c.id = m.class_id
+   WHERE c.teacher_id <> m.user_id
+     AND NOT EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = c.teacher_id AND t.student_id = m.user_id);
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: member(s) not tied to their class''s teacher: %', bad;
+  END IF;
+
   SELECT string_agg(q.id::text, ', ') INTO bad
     FROM app.questions q
    WHERE q.type IN ('single_choice', 'multiple_choice')
@@ -680,4 +692,152 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'seed: flexible assignment holds';
+END $$;
+
+-- 13's timetable (R8, T-R8.16): the current term, the four classes' weekly series as CAL_EV
+-- draws them and as the create command writes them, stored rows only where a write would
+-- leave one, marks only on sessions that have started, ATT_RATE in IELTS 6.5 Evening as the
+-- register reads it, the Student deck's one per-date change, and sessions in the current week
+-- for Gia Bảo, the Student deck's student. A database seeded more than ten weeks ago has no
+-- current term, since 13 inserts with DO NOTHING; reset the database and seed again.
+DO $$
+DECLARE
+  term constant uuid := '01935000-0000-7000-8000-000000001301';
+  lan constant uuid := '01935000-0000-7000-8000-000000000601';
+  bao constant uuid := '01935000-0000-7000-8000-000000800104';
+  today constant date := (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date;
+  t app.terms;
+  bad text;
+  found int;
+BEGIN
+  SELECT * INTO t FROM app.terms WHERE id = term;
+  IF t.id IS NULL OR t.name <> 'Term 3' THEN
+    RAISE EXCEPTION 'seed: Term 3 (%) is missing', term;
+  END IF;
+  IF NOT (today BETWEEN t.starts_on AND t.ends_on) THEN
+    RAISE EXCEPTION 'seed: Term 3 (% to %) does not hold today, %: seeded more than ten weeks ago? reset the database and seed again',
+      t.starts_on, t.ends_on, today;
+  END IF;
+
+  -- CAL_EV's sessions, one series a weekday, each Lan's class's, in the class's room, from the
+  -- term's first week to its last day, as "Repeat every week" from that week writes it.
+  SELECT string_agg(coalesce(s.id::text, 'missing ' || v.n), ', ') INTO bad
+    FROM (VALUES
+      (11, 1, 1, '18:00', 90), (12, 1, 3, '18:00', 90), (13, 1, 5, '18:00', 90),
+      (14, 2, 2, '17:30', 90), (15, 2, 4, '17:30', 90),
+      (16, 3, 6, '09:00', 120), (17, 3, 7, '09:00', 120),
+      (18, 4, 6, '14:00', 90)
+    ) AS v(n, class_n, weekday, start_time, minutes)
+    LEFT JOIN app.class_session_series s ON s.id = ('01935000-0000-7000-8000-0000000013' || v.n)::uuid
+    LEFT JOIN app.classes c ON c.id = s.class_id
+   WHERE s.id IS NULL
+      OR s.class_id <> ('01935000-0000-7000-8000-0000008003' || lpad(v.class_n::text, 2, '0'))::uuid
+      OR c.teacher_id <> lan OR c.archived_at IS NOT NULL
+      OR s.weekday <> v.weekday OR s.start_time <> v.start_time::time OR s.duration_minutes <> v.minutes
+      OR s.room IS DISTINCT FROM c.room OR s.time_zone <> 'Asia/Ho_Chi_Minh'
+      OR s.starts_on <> t.starts_on + (v.weekday - 1) OR s.ends_on IS DISTINCT FROM t.ends_on;
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: series not as CAL_EV draws them: %', bad;
+  END IF;
+
+  SELECT string_agg(c.name, ', ' ORDER BY c.name) INTO bad
+    FROM app.classes c
+   WHERE EXISTS (SELECT 1 FROM app.class_session_series s
+                  WHERE s.class_id = c.id AND s.id::text LIKE '01935000-0000-7000-8000-00000000131_');
+  IF bad IS DISTINCT FROM 'IELTS 6.5 Evening, IELTS Foundation A, Kids Starters B, TOEIC 600 Weekend' THEN
+    RAISE EXCEPTION 'seed: expected series on the deck''s four classes, found %', bad;
+  END IF;
+
+  -- A stored occurrence is on a date its series meets, as the session id {seriesId}.{yyyymmdd}
+  -- names it, and is one a write would keep: it has attendance, or it differs from the series.
+  SELECT string_agg(r.id::text, ', ') INTO bad
+    FROM app.class_sessions r
+    JOIN app.class_session_series s ON s.id = r.series_id
+   WHERE s.id::text LIKE '01935000-0000-7000-8000-00000000131_'
+     AND (extract(isodow FROM r.series_date) <> s.weekday OR r.series_date < s.starts_on
+          OR r.series_date > s.ends_on
+          OR NOT (EXISTS (SELECT 1 FROM app.attendance_marks a WHERE a.session_id = r.id)
+                  OR r.cancelled_at IS NOT NULL OR r.note IS NOT NULL
+                  OR (r.room IS NOT NULL AND r.room IS DISTINCT FROM s.room)
+                  OR r.duration_minutes <> s.duration_minutes
+                  OR r.starts_at <> (r.series_date + s.start_time) AT TIME ZONE s.time_zone));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: stored occurrence(s) on no date of their series, or with nothing to keep: %', bad;
+  END IF;
+
+  -- Marks only on a session that has started and is not cancelled, for a member of its class,
+  -- by its teacher (T-R8.6's rules).
+  SELECT string_agg(a.session_id::text || '/' || a.student_id::text, ', ') INTO bad
+    FROM app.attendance_marks a
+    JOIN app.class_sessions r ON r.id = a.session_id
+    JOIN app.classes c ON c.id = r.class_id
+   WHERE r.series_id::text LIKE '01935000-0000-7000-8000-00000000131_'
+     AND (r.starts_at > now() OR r.cancelled_at IS NOT NULL OR a.marked_by <> c.teacher_id
+          OR a.marked_at < r.starts_at
+          OR NOT EXISTS (SELECT 1 FROM app.class_members m WHERE m.class_id = r.class_id AND m.user_id = a.student_id));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: mark(s) T-R8.6 would refuse: %', bad;
+  END IF;
+
+  -- ATT_RATE: the eight's rate in IELTS 6.5 Evening over the eight weeks 13 took, as the
+  -- register reads it (present and late over everything marked, non-cancelled sessions that
+  -- start in the term's days in its zone, whole percent rounded half up), in the deck's order.
+  -- A register taken since, on the page or by a spec, moves the page's figure, not this check.
+  SELECT string_agg(coalesce(rate::text, '-'), ', ' ORDER BY v.place) INTO bad
+    FROM (VALUES (1, 1), (2, 2), (3, 4), (4, 5), (5, 7), (6, 9), (7, 8), (8, 10)) AS v(place, n)
+    LEFT JOIN LATERAL (
+      SELECT ((200 * count(*) FILTER (WHERE a.status IN ('present', 'late')) + count(*)) / (2 * count(*)))::int AS rate
+        FROM app.attendance_marks a
+        JOIN app.class_sessions r ON r.id = a.session_id
+       WHERE r.class_id = '01935000-0000-7000-8000-000000800301' AND r.cancelled_at IS NULL
+         AND a.student_id = ('01935000-0000-7000-8000-0000008001' || lpad(to_hex(v.n), 2, '0'))::uuid
+         AND r.starts_at >= t.starts_on::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+         AND r.starts_at < (t.ends_on + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+         AND r.series_date < t.starts_on + 56
+      HAVING count(*) > 0
+    ) AS x ON true;
+  IF bad IS DISTINCT FROM '100, 92, 85, 96, 71, 88, 100, 79' THEN
+    RAISE EXCEPTION 'seed: IELTS 6.5 Evening''s rates for the deck''s eight are %, not ATT_RATE''s 100, 92, 85, 96, 71, 88, 100, 79', bad;
+  END IF;
+
+  -- Eight weeks taken in every class, every session of them.
+  SELECT string_agg(c.name || ' ' || coalesce(n.taken, 0), ', ' ORDER BY c.name) INTO bad
+    FROM app.classes c
+    LEFT JOIN (SELECT r.class_id, count(DISTINCT r.id)::int AS taken
+                 FROM app.class_sessions r JOIN app.attendance_marks a ON a.session_id = r.id
+                WHERE r.series_id::text LIKE '01935000-0000-7000-8000-00000000131_'
+                  AND r.series_date < t.starts_on + 56
+                GROUP BY r.class_id) AS n ON n.class_id = c.id
+   WHERE c.id::text LIKE '01935000-0000-7000-8000-00000080030_';
+  IF bad IS DISTINCT FROM 'IELTS 6.5 Evening 24, IELTS Foundation A 16, Kids Starters B 8, TOEIC 600 Weekend 16' THEN
+    RAISE EXCEPTION 'seed: expected eight weeks of registers (24, 16, 8, 16), found %', bad;
+  END IF;
+
+  -- "Room 3 this week": one change of Foundation A's Thursday in the ninth week, another
+  -- room than the series' and a note, at the series' time, not cancelled and not taken.
+  SELECT count(*) INTO found
+    FROM app.class_sessions r
+    JOIN app.class_session_series s ON s.id = r.series_id
+   WHERE r.id = '01935000-0000-7000-8000-000000001321'
+     AND s.id = '01935000-0000-7000-8000-000000001315' AND r.series_date = t.starts_on + 59
+     AND r.note = 'Room 3 this week' AND r.room = 'Room 3' AND s.room IS DISTINCT FROM 'Room 3'
+     AND r.starts_at = (r.series_date + s.start_time) AT TIME ZONE s.time_zone
+     AND r.cancelled_at IS NULL
+     AND NOT EXISTS (SELECT 1 FROM app.attendance_marks a WHERE a.session_id = r.id);
+  IF found <> 1 THEN
+    RAISE EXCEPTION 'seed: the per-date change "Room 3 this week" (…1321) is missing or not as the deck draws it';
+  END IF;
+
+  -- Gia Bảo meets IELTS 6.5 Evening and Foundation A this week (Mon to Sun in the centre's zone).
+  SELECT count(*) INTO found
+    FROM app.class_session_series s
+    JOIN app.class_members m ON m.class_id = s.class_id AND m.user_id = bao
+    CROSS JOIN LATERAL (SELECT date_trunc('week', today)::date + (s.weekday - 1) AS on_date) AS d
+   WHERE s.id::text LIKE '01935000-0000-7000-8000-00000000131_'
+     AND d.on_date BETWEEN s.starts_on AND coalesce(s.ends_on, d.on_date);
+  IF found <> 5 THEN
+    RAISE EXCEPTION 'seed: expected Gia Bảo to have five sessions this week, found %', found;
+  END IF;
+
+  RAISE NOTICE 'seed: timetable holds';
 END $$;

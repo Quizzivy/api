@@ -12,6 +12,7 @@ import (
 	notificationsapp "quizzivy/internal/modules/notifications/application"
 	organizationapp "quizzivy/internal/modules/organization/application"
 	sharingapp "quizzivy/internal/modules/sharing/application"
+	timetableapp "quizzivy/internal/modules/timetable/application"
 	"quizzivy/internal/platform/config"
 	"quizzivy/internal/platform/db"
 )
@@ -24,9 +25,10 @@ type dashboardModules struct {
 	ai            *aiapp.Application
 	sharing       *sharingapp.Application
 	messaging     *messagingapp.Application
+	timetable     *timetableapp.Application
 }
 
-// dashboard reads the Admin console's figures in the centre's own zone, against its usage limits. The AI credits are offered to it only while the assistant is configured, so the Overview shows no credit-request row and the usage no AI figure while it is off.
+// dashboard lists the day's sessions of the actor's classes beside its assignments through the timetable's Occurrences query (T-R8.9), and reads the Admin console's figures in the centre's own zone, against its usage limits. The AI credits are offered to it only while the assistant is configured, so the Overview shows no credit-request row and the usage no AI figure while it is off.
 func dashboard(cfg config.Config, dbx db.Context, m dashboardModules, aiOn bool) (dashboardhttp.Dashboard, error) {
 	zone, err := config.AppLocation()
 	if err != nil {
@@ -37,6 +39,7 @@ func dashboard(cfg config.Config, dbx db.Context, m dashboardModules, aiOn bool)
 		WithNotifications(m.notifications.Queries.Summary).
 		WithSharedWithMe(m.sharing.Queries.CountSharedWithMe).
 		WithUnreadMessages(m.messaging.Queries.StaffUnread).
+		WithSessions(m.timetable.Queries.Occurrences).
 		WithAdmin(m.organization.Queries.Branding, m.audit.Queries.Recent, cfg.Limits, zone)
 	if aiOn {
 		app.WithCredits(m.ai.Queries.AdminCredits)

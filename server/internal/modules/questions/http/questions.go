@@ -224,11 +224,12 @@ func (h Questions) UpdateQuestion(ctx context.Context, request openapi.UpdateQue
 	if h.app == nil || request.Body == nil {
 		return nil, httpx.ErrNotImplemented
 	}
-	req, ok := writeRequest(ctx, request.Id.String(), ToQuestionInput(*request.Body))
+	body := UpdateInput(*request.Body)
+	req, ok := writeRequest(ctx, request.Id.String(), ToQuestionInput(body))
 	if !ok {
 		return nil, httpx.ErrNotImplemented
 	}
-	req.ExpectedUpdatedAt = request.Body.ExpectedUpdatedAt
+	req.ExpectedUpdatedAt = body.ExpectedUpdatedAt
 
 	q, err := h.app.Commands.Update.Handle(ctx, command.Update{Request: req, SetID: uuidString(request.Params.SetId)})
 	if errors.Is(err, domain.ErrSetNotFound) {

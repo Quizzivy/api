@@ -83,8 +83,8 @@ func TestEveryDeclaredValueIsKnown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requirements) != 217 {
-		t.Errorf("%d operations declare a permission, want 217", len(requirements))
+	if len(requirements) != 231 {
+		t.Errorf("%d operations declare a permission, want 231", len(requirements))
 	}
 	for pattern, requirement := range requirements {
 		for _, k := range requirement.Keys() {
@@ -405,6 +405,10 @@ func TestEachRoleMeetsExactlyTheOperationsItsPermissionsAllow(t *testing.T) {
 	for _, pattern := range []string{"GET /admin/leads", "GET /admin/leads/{id}", "PATCH /admin/leads/{id}", "DELETE /admin/leads/{id}"} {
 		adminOnly[pattern] = true
 	}
+	// R8's terms are organisation-wide, under system.settings.write (T-R8.3).
+	for _, pattern := range []string{"GET /admin/settings/terms", "POST /admin/settings/terms", "PATCH /admin/settings/terms/{id}", "DELETE /admin/settings/terms/{id}"} {
+		adminOnly[pattern] = true
+	}
 	for pattern, requirement := range requirements {
 		staff := strings.Contains(pattern, " /teacher/") || strings.Contains(pattern, " /admin/")
 		student := strings.Contains(pattern, " /app/")
@@ -451,8 +455,8 @@ func TestTheAssistantMeetsOnlyItsSixRows(t *testing.T) {
 			t.Errorf("%s as the Assistant: %d, want %d", pattern, got, want)
 		}
 	}
-	if refused != 111 {
-		t.Errorf("the Assistant is refused %d operations, want 111: seventy-five staff operations (five of them content.share's, one the class announcement), the seventeen AI ones and the nineteen /app ones", refused)
+	if refused != 121 {
+		t.Errorf("the Assistant is refused %d operations, want 121: eighty-four staff operations (five of them content.share's, one the class announcement, four R8's terms and five its sessions and series), the seventeen AI ones and the twenty /app ones", refused)
 	}
 }
 

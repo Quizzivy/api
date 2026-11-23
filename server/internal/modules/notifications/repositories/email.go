@@ -154,7 +154,11 @@ func paramsOf(e domain.Email) (email.Params, error) {
 		return email.AICreditRequestDecidedParams{RequestID: ids.RequestID}, nil
 	case domain.EmailWeeklySummary:
 		if s := e.Summary; s != nil {
-			return email.WeeklySummaryParams{WeekOf: s.Week.Monday(), Count: s.Count, ToGrade: s.ToGrade, Flagged: s.Flagged, ClassNames: s.ClassNames}, nil
+			out := email.WeeklySummaryParams{WeekOf: s.Week.Monday(), Count: s.Count, ToGrade: s.ToGrade, Flagged: s.Flagged, ClassNames: s.ClassNames}
+			for _, a := range s.Attendance {
+				out.Attendance = append(out.Attendance, email.WeeklyAttendance{ClassName: a.ClassName, Rate: a.Rate, Sessions: a.Sessions})
+			}
+			return out, nil
 		}
 	}
 	return nil, fmt.Errorf("notifications: %s is not an email the module sends", e.Template)

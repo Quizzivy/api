@@ -605,6 +605,7 @@ func wantValidationFailure(t *testing.T, rec *httptest.ResponseRecorder, want st
 
 var unnamed = map[string]string{
 	"SetPasswordWithLink": "newPassword answers with the password rule's sentence, as changePassword does, and is the first property by name",
+	"UpdateSessionSeries": "SeriesPatch requires fromDate beside at least one other field, so a body of durationMinutes alone is refused for the missing fromDate before its type is read",
 }
 
 func wrongTypedFirstProperty(t *testing.T, op *openapi3.Operation) (property, body string, ok bool) {

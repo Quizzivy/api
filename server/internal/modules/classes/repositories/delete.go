@@ -17,13 +17,15 @@ const entityClass = "class"
 
 var classReferences = map[string]domain.Reference{
 	"assignment_classes_class_id_fkey": domain.ReferencedByAssignments,
+	"attendance_marks_session_id_fkey": domain.ReferencedByAttendance,
 	"class_members_join_code_id_fkey":  domain.ReferencedByMembers,
 	"conversations_class_id_fkey":      domain.ReferencedByMessages,
 }
 
 // ClassReferencedBy names what a foreign key holds when it refuses a class's
-// deletion, directly or through the cascade to its join codes. A constraint
-// the map does not name is ReferencedByOther, so the refusal is still a 409.
+// deletion, directly or through the cascade to its join codes or its sessions
+// (a session with attendance holds the class, T-R8.2). A constraint the map
+// does not name is ReferencedByOther, so the refusal is still a 409.
 func ClassReferencedBy(constraint string) domain.Reference {
 	if by, ok := classReferences[constraint]; ok {
 		return by

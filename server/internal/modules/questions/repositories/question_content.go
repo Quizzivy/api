@@ -46,8 +46,9 @@ func prepareQuestionContent(ctx context.Context, tx pgx.Tx, write *domain.WriteI
 	return validateStoredContent(write)
 }
 
-// fresh is nil when the update names no revision, as a v0.13 client's does,
-// or names the one it locked, and otherwise domain.ErrStaleWrite naming the
+// fresh is nil when the update names no revision, as a test's
+// editTestQuestion may and a copy made on write does, or names the one it
+// locked, and otherwise domain.ErrStaleWrite naming the
 // question's last write, which the editor had not seen.
 func fresh(last provenance.LastWrite, expected *time.Time) error {
 	if expected == nil || last.At.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond)) {

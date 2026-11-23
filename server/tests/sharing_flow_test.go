@@ -160,7 +160,7 @@ func TestASharedTestIsCoEditedWithAForkPublishedRevokedAndCopied(t *testing.T) {
 
 	draft := colleague.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+mine, nil)
 	colleague.must(http.StatusOK, http.MethodPatch, "/teacher/tests/"+mine, map[string]any{"expectedUpdatedAt": draft["updatedAt"], "title": "Bản sao đã sửa " + nonce(t)})
-	colleague.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+copyQuestions[0].(string), plainQuestion("Câu của bản sao đã sửa"))
+	colleague.editQuestion(http.StatusOK, copyQuestions[0].(string), plainQuestion("Câu của bản sao đã sửa"))
 	if prompt := owner.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+fork, nil)["prompt"]; prompt != "Câu đồng nghiệp đã sửa" {
 		t.Errorf("the owner's question reads %q after the colleague edited their copy, want it unchanged", prompt)
 	}

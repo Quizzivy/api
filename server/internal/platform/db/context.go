@@ -140,5 +140,12 @@ func IsCheckViolation(err error, name string) bool {
 	return errors.As(err, &pg) && pg.Code == pgerrcode.CheckViolation && pg.ConstraintName == name
 }
 
+// IsExclusionViolation reports whether err is Postgres refusing a row that
+// conflicts with another under the named exclusion constraint (23P01).
+func IsExclusionViolation(err error, name string) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == pgerrcode.ExclusionViolation && pg.ConstraintName == name
+}
+
 // EscapeLike makes user text safe inside a LIKE pattern with ESCAPE '\'.
 func EscapeLike(s string) string { return likeEscaper.Replace(s) }

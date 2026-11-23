@@ -17,7 +17,8 @@ func (s *Postgres) LookupByCode(ctx context.Context, code domain.JoinCodeLookup)
 		SELECT c.id::text, c.name, c.self_join_enabled AND c.archived_at IS NULL,
 		       jc.lookup_scheme, jc.key_id, jc.code_hash,
 		       jc.revoked_at, jc.expires_at, jc.max_uses, jc.uses_count,
-		       (SELECT coalesce(t.display_name, t.full_name) FROM app.users t WHERE t.id = c.teacher_id)
+		       (SELECT coalesce(t.display_name, t.full_name) FROM app.users t WHERE t.id = c.teacher_id),
+		       c.schedule_label, c.room
 		  FROM app.class_join_codes jc
 		  JOIN app.classes c ON c.id = jc.class_id
 		 WHERE jc.code_hash = ANY($1::bytea[])
@@ -29,7 +30,7 @@ func (s *Postgres) LookupByCode(ctx context.Context, code domain.JoinCodeLookup)
 		&r.ClassID, &r.ClassName, &r.SelfJoinEnabled,
 		&r.Lookup.Scheme, &r.Lookup.KeyID, &r.Lookup.Hash,
 		&r.RevokedAt, &r.ExpiresAt, &r.MaxUses, &r.UsesCount,
-		&r.TeacherName)
+		&r.TeacherName, &r.ScheduleLabel, &r.Room)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

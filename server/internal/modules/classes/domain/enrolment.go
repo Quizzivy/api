@@ -40,16 +40,35 @@ type EnrolResult struct {
 	TeacherID   string
 }
 
-// EnrolledClass is the §7 Class shape the join endpoints return.
+// EnrolledClass is the §7 Class shape the join endpoints return. Timetable,
+// read once the enrolment has committed, is nil until then; a pointer keeps
+// an EnrolResult comparable, as a refusal is compared whole.
 type EnrolledClass struct {
 	ID              string
 	Name            string
 	Description     *string
 	ScheduleLabel   *string
 	Room            *string
+	Timetable       *Timetable
 	StudentCount    int
 	SelfJoinEnabled bool
 	CreatedAt       time.Time
+}
+
+// Slots are the class's weekly meeting times, none until Timetable is read.
+func (c EnrolledClass) Slots() []ScheduleSlot {
+	if c.Timetable == nil {
+		return nil
+	}
+	return c.Timetable.Slots
+}
+
+// DerivedRoom is where the class meets, as Class.DerivedRoom.
+func (c EnrolledClass) DerivedRoom() *string {
+	if c.Timetable == nil {
+		return c.Room
+	}
+	return RoomOf(c.Room, *c.Timetable)
 }
 
 // Meta is the request context §6.5 requires on every enrolment audit row.

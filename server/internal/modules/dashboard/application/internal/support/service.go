@@ -15,6 +15,7 @@ type Service struct {
 	Notifications ports.UnreadNotifications
 	SharedWithMe  ports.SharedWithMe
 	Messages      ports.UnreadMessages
+	Sessions      ports.Sessions
 	Branding      ports.Branding
 	Recent        ports.RecentChanges
 	Credits       ports.AICredits

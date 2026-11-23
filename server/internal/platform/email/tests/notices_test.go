@@ -75,7 +75,8 @@ func noticeFixture(t *testing.T, tmpl email.Template, name string) email.Params 
 	case email.MessageReceived:
 		return email.MessageReceivedParams{ConversationID: someThread, StudentID: someStudent, FullName: name, SenderName: "Lê Hà My", Count: 1}
 	case email.WeeklySummary:
-		return email.WeeklySummaryParams{WeekOf: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), Count: 12, ToGrade: 3, Flagged: 1, ClassNames: []string{"IELTS Foundation A", "TOEIC 2"}, FullName: name}
+		return email.WeeklySummaryParams{WeekOf: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), Count: 12, ToGrade: 3, Flagged: 1, ClassNames: []string{"IELTS Foundation A", "TOEIC 2"},
+			Attendance: []email.WeeklyAttendance{{ClassName: "IELTS Foundation A", Rate: 92, Sessions: 3}, {ClassName: "TOEIC 2", Rate: 100, Sessions: 1}}, FullName: name}
 	case email.AIAllowanceWarning:
 		return email.AIAllowanceWarningParams{Month: november, FullName: name, Used: 16_500, Allowance: 20_000}
 	case email.AICreditRequest:
@@ -287,6 +288,9 @@ func golden(t *testing.T) map[string]email.Letter {
 	one := noticeFixture(t, email.SubmissionsDigest, "Nguyễn Văn An").(email.SubmissionsDigestParams)
 	one.Count, one.ToGrade = 1, 0
 	add("submissions_digest.one", one, true)
+	unmarked := noticeFixture(t, email.WeeklySummary, "Nguyễn Văn An").(email.WeeklySummaryParams)
+	unmarked.Attendance = nil
+	add("weekly_summary.unmarked", unmarked, true)
 	declined := noticeFixture(t, email.AICreditRequestDecided, "Nguyễn Văn An").(email.AICreditRequestDecidedParams)
 	declined.Decision = email.CreditsDeclined
 	add("ai_credit_request_decided.declined", declined, true)

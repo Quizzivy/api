@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"quizzivy/internal/modules/notifications/domain"
+	timetabledomain "quizzivy/internal/modules/timetable/domain"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/answered"
 	"quizzivy/internal/shared/visibility"
@@ -78,13 +79,57 @@ func (r *scheduledRun) WeeklyHeld(ctx context.Context, teacherID string, week do
 	return email, inApp, nil
 }
 
+// weeklyAttendanceQuery tallies, per active class of the teacher's, the marks
+// on its sessions that start in the week and are not cancelled, as the
+// timetable's register tallies a rate: present and late attend, absent does
+// not. A marked session always has a row of app.attendance_marks, so the join
+// leaves out the unmarked ones, and a class with none has no row.
+const weeklyAttendanceQuery = `
+SELECT c.name, count(DISTINCT s.id)::int,
+       count(*) FILTER (WHERE a.status IN ('present', 'late'))::int, count(*)::int
+  FROM app.classes c
+  JOIN app.class_sessions s ON s.class_id = c.id
+  JOIN app.attendance_marks a ON a.session_id = s.id
+ WHERE c.teacher_id = $1::uuid AND c.archived_at IS NULL AND s.cancelled_at IS NULL
+   AND s.starts_at >= $2::timestamptz AND s.starts_at < $3::timestamptz
+ GROUP BY c.id, c.name
+ ORDER BY c.name, c.id`
+
 func (r *scheduledRun) Summarise(ctx context.Context, teacherID string, week domain.Week) (domain.WeeklyFigures, error) {
 	s := domain.WeeklyFigures{Week: week}
 	if err := r.tx.QueryRow(ctx, summariseQuery, teacherID, week.From, week.To, domain.MaxSummaryClasses).
 		Scan(&s.Count, &s.ToGrade, &s.Flagged, &s.ClassNames); err != nil {
 		return domain.WeeklyFigures{}, fmt.Errorf("notifications: a weekly summary: %w", err)
 	}
+	attendance, err := weeklyAttendance(ctx, r.tx, teacherID, week)
+	if err != nil {
+		return domain.WeeklyFigures{}, err
+	}
+	s.Attendance = attendance
 	return s, nil
+}
+
+// weeklyAttendance is the teacher's attendance line per class for week, by
+// class name, with the rate the timetable gives a tally (Tally.Rate).
+func weeklyAttendance(ctx context.Context, q db.Querier, teacherID string, week domain.Week) ([]domain.ClassAttendance, error) {
+	rows, err := db.QueryMany(ctx, q, weeklyAttendanceQuery, []any{teacherID, week.From, week.To},
+		func(rows pgx.Rows) (domain.ClassAttendance, error) {
+			var (
+				a     domain.ClassAttendance
+				tally timetabledomain.Tally
+			)
+			if err := rows.Scan(&a.ClassName, &a.Sessions, &tally.Attended, &tally.Counted); err != nil {
+				return domain.ClassAttendance{}, err
+			}
+			if rate := tally.Rate(); rate != nil {
+				a.Rate = *rate
+			}
+			return a, nil
+		})
+	if err != nil {
+		return nil, fmt.Errorf("notifications: a weekly summary's attendance: %w", err)
+	}
+	return rows, nil
 }
 
 const publishWeekly = `

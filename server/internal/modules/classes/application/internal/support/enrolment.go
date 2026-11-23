@@ -15,13 +15,14 @@ import (
 
 // Enrolment carries what the enrolment handlers share: their ports and the helpers they call.
 type Enrolment struct {
-	Repo     domain.Repository
-	Keys     domain.JoinCodeKeys
-	Now      func() time.Time
-	Notifier ports.Notifier
-	Zones    ports.Zones
-	Policy   ports.SignInPolicy
-	Logger   *slog.Logger
+	Repo      domain.Repository
+	Keys      domain.JoinCodeKeys
+	Now       func() time.Time
+	Notifier  ports.Notifier
+	Zones     ports.Zones
+	Policy    ports.SignInPolicy
+	Schedules ports.ScheduleSource
+	Logger    *slog.Logger
 }
 
 func NewEnrolment(repo domain.Repository, keys domain.JoinCodeKeys) *Enrolment {

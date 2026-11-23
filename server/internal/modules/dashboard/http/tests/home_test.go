@@ -43,7 +43,19 @@ func TestDashboardRangeAndNewFieldsReachTheResponse(t *testing.T) {
 				t.Fatalf("range=%q want%q", got.Range, want)
 			}
 			out := resp.(openapi.GetDashboard200JSONResponse)
-			if out.TakingNow.Students != 2 || out.TakingNow.Assignments != 3 || len(out.Today) != 1 || out.Today[0].NotSubmitted != 2 || len(out.RecentActivity) != 1 || !out.RecentActivity[0].Flagged || out.Submissions.Total != 4 || out.Submissions.AveragePercent == nil || *out.Submissions.AveragePercent != 63 || out.Submissions.Days[0].Date.Format("2006-01-02") != "2026-10-05" {
+			if len(out.Today) != 1 {
+				t.Fatalf("today=%+v", out.Today)
+			}
+			// The union's discriminator reads kind, so an item without it
+			// would fail response validation.
+			if kind, err := out.Today[0].Discriminator(); err != nil || kind != "opens" {
+				t.Fatalf("today's kind=%q (%v), want opens", kind, err)
+			}
+			today, err := out.Today[0].AsDashboardTodayAssignment()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.TakingNow.Students != 2 || out.TakingNow.Assignments != 3 || today.NotSubmitted != 2 || len(out.RecentActivity) != 1 || !out.RecentActivity[0].Flagged || out.Submissions.Total != 4 || out.Submissions.AveragePercent == nil || *out.Submissions.AveragePercent != 63 || out.Submissions.Days[0].Date.Format("2006-01-02") != "2026-10-05" {
 				t.Fatalf("response=%+v", out)
 			}
 		})
@@ -122,5 +134,42 @@ func TestTheSummaryCarriesWhatIsSharedWithTheCaller(t *testing.T) {
 	}
 	if body, ok := got.(openapi.GetTeacherSummary200JSONResponse); !ok || body.SharedWithMe != 3 || body.UnreadNotifications != 1 || body.UnreadMessages != 100 {
 		t.Fatalf("summary %+v, want sharedWithMe 3 and unreadMessages 100", got)
+	}
+}
+
+// TestATodaySessionReachesTheResponseAsASessionItem maps a session of the
+// day to a DashboardTodaySession with kind session, its opaque id, its class
+// and its room, beside an assignment item.
+func TestATodaySessionReachesTheResponseAsASessionItem(t *testing.T) {
+	at := time.Date(2026, 11, 23, 11, 0, 0, 0, time.FixedZone("ICT", 7*60*60))
+	room := "P.204"
+	class := principals()["a Teacher"].UserID
+	app := &application.Application{Queries: application.Queries{Summary: cqrs.HandlerFunc[query.Summary, domain.Summary](func(context.Context, query.Summary) (domain.Summary, error) {
+		return domain.Summary{Home: domain.Home{Today: []domain.Today{
+			{Kind: "opens", At: at, AssignmentID: class, Title: "paper"},
+			{Kind: domain.TodaySessionKind, At: at, Session: &domain.TodaySession{ID: "019535d9-3df7-79fb-b466-fa907fa17f9e.20261123", ClassID: class, ClassName: "IELTS A", Room: &room}},
+		}}}, nil
+	})}}
+	resp, err := dashboardhttp.NewDashboard(app).GetDashboard(context.Background(), openapi.GetDashboardRequestObject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := resp.(openapi.GetDashboard200JSONResponse).Today
+	if len(today) != 2 {
+		t.Fatalf("today=%+v", today)
+	}
+	if kind, err := today[1].Discriminator(); err != nil || kind != "session" {
+		t.Fatalf("the session's kind=%q (%v)", kind, err)
+	}
+	session, err := today[1].AsDashboardTodaySession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.SessionId != "019535d9-3df7-79fb-b466-fa907fa17f9e.20261123" || session.ClassId.String() != class || session.ClassName != "IELTS A" ||
+		session.Room == nil || *session.Room != room || session.At.Location() != time.UTC || !session.At.Equal(at) {
+		t.Errorf("the session reads %+v", session)
+	}
+	if kind, _ := today[0].Discriminator(); kind != "opens" {
+		t.Errorf("the assignment's kind=%q", kind)
 	}
 }

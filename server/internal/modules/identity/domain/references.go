@@ -9,6 +9,7 @@ type Reference string
 const (
 	ReferencedByAssignments  Reference = "assignments"
 	ReferencedByAttempts     Reference = "attempts"
+	ReferencedByAttendance   Reference = "attendance"
 	ReferencedByAudit        Reference = "audit"
 	ReferencedByMessages     Reference = "messages"
 	ReferencedByOwnedContent Reference = "owned_content"

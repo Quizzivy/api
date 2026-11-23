@@ -46,6 +46,7 @@ type Commands struct {
 }
 
 type Queries struct {
+	Calendar      cqrs.QueryHandler[query.CalendarWindows, []domain.CalendarWindow]
 	Facets        cqrs.QueryHandler[query.Facets, domain.Facets]
 	ForStudent    cqrs.QueryHandler[query.ForStudent, domain.StudentSections]
 	Get           cqrs.QueryHandler[query.Get, domain.Assignment]
@@ -68,6 +69,7 @@ func New(repo domain.Repository) *Application {
 			DeleteOverride: command.DeleteOverrideHandler{Service: service},
 		},
 		Queries: Queries{
+			Calendar:      query.CalendarWindowsHandler{Service: service},
 			Facets:        query.FacetsHandler{Service: service},
 			ForStudent:    query.ForStudentHandler{Service: service},
 			Get:           query.GetHandler{Service: service},

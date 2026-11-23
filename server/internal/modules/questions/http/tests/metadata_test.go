@@ -43,11 +43,12 @@ func TestQuestionAuthoringWireCapAndClosedMetadata(t *testing.T) {
 			reached := false
 			handler := validate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(204) }))
 			for _, method := range []string{http.MethodPost, http.MethodPatch} {
-				path := "/teacher/questions"
+				path, sent := "/teacher/questions", raw
 				if method == http.MethodPatch {
 					path += "/019535d9-3df7-79fb-b466-fa907fa17f9e"
+					sent = withExpectedUpdatedAt(t, raw)
 				}
-				req := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
+				req := httptest.NewRequest(method, path, strings.NewReader(string(sent)))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				reached = false

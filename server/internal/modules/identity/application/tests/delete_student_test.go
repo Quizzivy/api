@@ -169,3 +169,53 @@ func TestARefusedDeletionNamesTheMessagesAUserHolds(t *testing.T) {
 		}
 	}
 }
+
+// TestARefusedDeletionNamesTheAttendanceAndTimetableAUserHolds keeps T-R8.2's
+// keys to app.users mapped: a student with a mark, and a user who took one,
+// answer referencedBy attendance; a user who made a term, a weekly series or
+// a session answers owned_content. Each is a 409, never a 500.
+func TestARefusedDeletionNamesTheAttendanceAndTimetableAUserHolds(t *testing.T) {
+	w := newRosterWorld(t)
+	ctx := context.Background()
+	admin := domain.WriteRequest{ActorID: w.admin, All: true, Grants: access.NewSet(access.All()...)}
+	session := func(t *testing.T) string {
+		t.Helper()
+		return w.id(t, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by) VALUES ($1, now(), 90, $2) RETURNING id::text`, w.classA, w.a)
+	}
+	for name, c := range map[string]struct {
+		hold func(t *testing.T, user string)
+		want domain.Reference
+	}{
+		"has a mark": {func(t *testing.T, user string) {
+			w.enrol(t, w.classA, user)
+			w.exec(t, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at) VALUES ($1, $2, 'absent', $3, now())`, session(t), user, w.a)
+		}, domain.ReferencedByAttendance},
+		"took a mark": {func(t *testing.T, user string) {
+			w.exec(t, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at) VALUES ($1, $2, 'present', $3, now())`, session(t), w.member, user)
+		}, domain.ReferencedByAttendance},
+		"made a term": {func(t *testing.T, user string) {
+			// A day of its own, far from any other test's term: terms never overlap.
+			w.exec(t, `INSERT INTO app.terms (name, starts_on, ends_on, created_by)
+				SELECT 'Học kỳ', d, d, $1 FROM (SELECT DATE '4000-01-01' + (random() * 1000000)::int AS d) AS day`, user)
+		}, domain.ReferencedByOwnedContent},
+		"made a series": {func(t *testing.T, user string) {
+			w.exec(t, `INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, starts_on, time_zone, created_by)
+				VALUES ($1, 2, '18:00', 90, DATE '2026-09-08', 'Asia/Ho_Chi_Minh', $2)`, w.classA, user)
+		}, domain.ReferencedByOwnedContent},
+		"made a session": {func(t *testing.T, user string) {
+			w.exec(t, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by) VALUES ($1, now(), 90, $2)`, w.classA, user)
+		}, domain.ReferencedByOwnedContent},
+	} {
+		user := w.user(t, "student", "Người giữ "+name, nil)
+		c.hold(t, user)
+		w.exec(t, `UPDATE app.users SET disabled_at = now() WHERE id = $1`, user)
+		_, err := w.app.Commands.DeleteStudent.Handle(ctx, command.DeleteStudent{Request: admin, ID: user})
+		var refused *domain.ReferencedError
+		if !errors.Is(err, domain.ErrReferenced) || !errors.As(err, &refused) || refused.By != c.want {
+			t.Errorf("deleting a user who %s answered %v, want %s", name, err, c.want)
+		}
+		if w.id(t, `SELECT count(*)::text FROM app.users WHERE id = $1`, user) != "1" {
+			t.Errorf("the user who %s was deleted", name)
+		}
+	}
+}

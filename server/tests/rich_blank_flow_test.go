@@ -69,7 +69,7 @@ func TestRichBlankLifecycleFreezesAndGradesStableBindings(t *testing.T) {
 	assertGapGraph(t, preview["questions"].([]any)[0].(map[string]any), false)
 	assertNoAnswerFields(t, preview)
 	payload["blanks"].([]any)[0].(map[string]any)["acceptedAnswers"] = []string{"changed"}
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusOK, id(question), payload)
 	current := teacher.must(http.StatusOK, http.MethodGet, "/teacher/tests/"+id(test), nil)
 	restored := teacher.must(http.StatusOK, http.MethodPost, "/teacher/tests/"+id(test)+"/versions/1/draft", map[string]any{"expectedUpdatedAt": current["updatedAt"]})
 	copiedID := restored["sections"].([]any)[0].(map[string]any)["questionIds"].([]any)[0].(string)
@@ -108,7 +108,7 @@ func TestRichBlankWritesRejectMissingOrDuplicateBindingsAtomically(t *testing.T)
 		payload := richBlankPayload()
 		payload["blanks"].([]any)[0].(map[string]any)["gapId"] = gap
 		payload["points"] = 3
-		teacher.must(http.StatusBadRequest, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+		teacher.editQuestion(http.StatusBadRequest, id(question), payload)
 		unchanged := teacher.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+id(question), nil)
 		assertGapGraph(t, unchanged, false)
 		if unchanged["points"] != float64(2) {

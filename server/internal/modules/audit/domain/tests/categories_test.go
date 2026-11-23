@@ -56,9 +56,9 @@ func TestTheEntitiesTheBriefNamesAreInTheirFamilies(t *testing.T) {
 			t.Errorf("%s is in %s (%v), want %s", entity, got, ok, want)
 		}
 	}
-	for _, entity := range []string{"maintenance_window", "attempt_events", "ai_settings", "ai_teacher_credits", "ai_credit_periods", "ai_credit_requests", "audit_log", "organization"} {
+	for _, entity := range []string{"maintenance_window", "attempt_events", "ai_settings", "ai_teacher_credits", "ai_credit_periods", "ai_credit_requests", "audit_log", "organization", "term"} {
 		if _, ok := domain.CategoryOf(entity); ok {
-			t.Errorf("%s is in a category: organization, export, maintenance, retention and AI entries are under All only", entity)
+			t.Errorf("%s is in a category: organization, term, export, maintenance, retention and AI entries are under All only", entity)
 		}
 	}
 }

@@ -1,9 +1,10 @@
-// Package model is what the organization module answers other modules: the sign-in policy identity and classes enforce, and the centre's name and contact lines that head every email.
+// Package model is what the organization module answers other modules: the sign-in policy identity and classes enforce, the centre's name and contact lines that head every email, and the terms the timetable and the gradebook count by.
 package model
 
 import (
 	"slices"
 	"strings"
+	"time"
 )
 
 // SignInPolicy is how people sign in, as the centre last saved it.
@@ -40,4 +41,22 @@ type Branding struct {
 	FrontDeskPhone string
 	FrontDeskHours string
 	Address        string
+}
+
+// Term is one of the centre's terms (T-R8.3): StartsOn and EndsOn are its
+// first and last day, both included, each held as midnight UTC, the form a
+// DATE column reads. Terms never overlap, so a day is in one term at most.
+type Term struct {
+	ID       string
+	Name     string
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// Holds reports whether the calendar day of day, read in day's own location,
+// is one of the term's days.
+func (t Term) Holds(day time.Time) bool {
+	y, m, d := day.Date()
+	at := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return !at.Before(t.StartsOn) && !at.After(t.EndsOn)
 }

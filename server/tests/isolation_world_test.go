@@ -306,6 +306,11 @@ func (w *world) teacherWorld(name string) *party {
 
 	p.ids["class"] = c.class("Lớp cách ly " + name)
 	p.code = c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+p.ids["class"]+"/join-code", map[string]any{})["code"].(string)
+	weekly := c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+p.ids["class"]+"/sessions", map[string]any{
+		"date": scheduleDay(7), "startTime": "18:00", "durationMinutes": 90, "repeatWeekly": true,
+	})
+	p.ids["session-series"], p.ids["occurrence"] = weekly["seriesId"].(string), id(weekly)
+	p.ids["session"] = id(c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+p.ids["class"]+"/sessions", oneOffSession()))
 	created := c.must(http.StatusCreated, http.MethodPost, "/teacher/students", map[string]any{
 		"email": "hocvien-" + name + "-" + nonce(w.t) + "@example.com", "fullName": "Học viên " + name, "classIds": []string{p.ids["class"]},
 	})
@@ -484,6 +489,8 @@ func (w *world) snapshotOf(p *party) string {
 		  UNION ALL SELECT row_to_json(x)::text FROM app.classes x WHERE x.teacher_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.class_join_codes x JOIN app.classes c ON c.id = x.class_id WHERE c.teacher_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.class_members x JOIN app.classes c ON c.id = x.class_id WHERE c.teacher_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.class_session_series x JOIN app.classes c ON c.id = x.class_id WHERE c.teacher_id = $1::uuid
+		  UNION ALL SELECT row_to_json(x)::text FROM app.class_sessions x JOIN app.classes c ON c.id = x.class_id WHERE c.teacher_id = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.assignments x WHERE x.created_by = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.assignment_student_overrides x JOIN app.assignments a ON a.id = x.assignment_id WHERE a.created_by = $1::uuid
 		  UNION ALL SELECT row_to_json(x)::text FROM app.attempts x JOIN app.assignments a ON a.id = x.assignment_id WHERE a.created_by = $1::uuid
