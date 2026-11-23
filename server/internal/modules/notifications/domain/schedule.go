@@ -152,12 +152,26 @@ func WeeklyKey(week Week) string {
 // papers handed in, of those the ones with an answer waiting for a mark,
 // attempts flagged, and the names of the classes they came from, at most
 // five: the fields the contract gives summary.weekly.
+//
+// Attendance is the week's attendance on each of those classes that had a
+// session marked in it, by class name: the email's line per class; the in-app
+// item does not carry it.
 type WeeklyFigures struct {
 	Week       Week
 	Count      int
 	ToGrade    int
 	Flagged    int
 	ClassNames []string
+	Attendance []ClassAttendance
+}
+
+// ClassAttendance is one class's attendance over a week: Rate, a whole
+// percent, of the marks on its Sessions marked sessions that start in the
+// week and are not cancelled.
+type ClassAttendance struct {
+	ClassName string
+	Rate      int
+	Sessions  int
 }
 
 // MaxSummaryClasses is the most class names a weekly summary carries.

@@ -13,7 +13,9 @@ Tuần bắt đầu từ {{template "week" .}} ở {{template "classes" .Params.
 Bài đã nộp: {{.Params.Count}}
 Bài chờ chấm: {{.Params.ToGrade}}
 Lượt bị gắn cờ: {{.Params.Flagged}}
-
+{{with .Params.Attendance}}
+{{range .}}{{.ClassName}}: chuyên cần {{.Rate}}% qua {{.Sessions}} buổi
+{{end}}{{end}}
 Xem chi tiết trên trang Tổng quan:
 
 {{.Link}}
@@ -34,7 +36,8 @@ Chọn loại email bạn muốn nhận:
 <tr><td style="padding:2px 16px 2px 0;vertical-align:top">Bài chờ chấm</td><td style="padding:2px 0;font-weight:bold">{{.Params.ToGrade}}</td></tr>
 <tr><td style="padding:2px 16px 2px 0;vertical-align:top">Lượt bị gắn cờ</td><td style="padding:2px 0;font-weight:bold">{{.Params.Flagged}}</td></tr>
 </table>
-<p>Xem chi tiết trên trang Tổng quan:</p>
+{{with .Params.Attendance}}<p>{{range $i, $a := .}}{{if $i}}<br>{{end}}{{$a.ClassName}}: chuyên cần <b>{{$a.Rate}}%</b> qua {{$a.Sessions}} buổi{{end}}</p>
+{{end}}<p>Xem chi tiết trên trang Tổng quan:</p>
 <p><a href="{{.Link}}">Mở trang Tổng quan</a></p>
 <p style="font-size:14px;word-break:break-all">{{.Link}}</p>
 <p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Chọn loại email bạn muốn nhận</a></p>

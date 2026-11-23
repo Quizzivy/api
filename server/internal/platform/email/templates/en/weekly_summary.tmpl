@@ -13,7 +13,9 @@ The week from {{template "week" .}} in {{template "classes" .Params.ClassNames}}
 Papers handed in: {{.Params.Count}}
 To grade: {{.Params.ToGrade}}
 Flagged: {{.Params.Flagged}}
-
+{{with .Params.Attendance}}
+{{range .}}{{.ClassName}}: attendance {{.Rate}}% across {{.Sessions}} {{if eq .Sessions 1}}session{{else}}sessions{{end}}
+{{end}}{{end}}
 See the details on your dashboard:
 
 {{.Link}}
@@ -34,7 +36,8 @@ Change which emails you get:
 <tr><td style="padding:2px 16px 2px 0;vertical-align:top">To grade</td><td style="padding:2px 0;font-weight:bold">{{.Params.ToGrade}}</td></tr>
 <tr><td style="padding:2px 16px 2px 0;vertical-align:top">Flagged</td><td style="padding:2px 0;font-weight:bold">{{.Params.Flagged}}</td></tr>
 </table>
-<p>See the details on your dashboard:</p>
+{{with .Params.Attendance}}<p>{{range $i, $a := .}}{{if $i}}<br>{{end}}{{$a.ClassName}}: attendance <b>{{$a.Rate}}%</b> across {{$a.Sessions}} {{if eq $a.Sessions 1}}session{{else}}sessions{{end}}{{end}}</p>
+{{end}}<p>See the details on your dashboard:</p>
 <p><a href="{{.Link}}">Open your dashboard</a></p>
 <p style="font-size:14px;word-break:break-all">{{.Link}}</p>
 <p style="margin:32px 0 0;font-size:14px"><a href="{{.Settings}}">Change which emails you get</a></p>
