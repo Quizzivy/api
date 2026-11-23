@@ -39,6 +39,17 @@ VALUES
    '01935000-0000-7000-8000-00000000ee02'::uuid, 'admin',
    '01935000-0000-7000-8000-0000000000a1'::uuid)
 ON CONFLICT (class_id, user_id) DO NOTHING;
+
+-- The tie the binary writes with each enrolment (shared/ties, T-R7.9): the
+-- class's teacher has taught the student, so may write to them first.
+INSERT INTO app.messaging_ties (staff_id, student_id, since)
+SELECT c.teacher_id, m.user_id, m.joined_at
+  FROM app.class_members m
+  JOIN app.classes c ON c.id = m.class_id
+ WHERE m.class_id = '01935000-0000-7000-8000-0000000000c1'
+   AND m.user_id IN ('01935000-0000-7000-8000-00000000ee01', '01935000-0000-7000-8000-00000000ee02')
+   AND c.teacher_id <> m.user_id
+ON CONFLICT (staff_id, student_id) DO NOTHING;
 -- Lê Thu Trang stays out of every class on purpose: the "—" in the Lớp column
 -- is a state the deck never draws and therefore the one most likely to break.
 

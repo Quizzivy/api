@@ -403,8 +403,8 @@ BEGIN
 END $$;
 
 -- Khang, created by Minh and put in his class, its only member, as a teacher adds a
--- student: the membership and the tie the classes module writes with it (00167's trigger
--- would add the same tie at the commit). He has signed in, and read what is below.
+-- student: the membership and the tie the classes module writes with it. He has signed
+-- in, and read what is below.
 INSERT INTO app.users
   (id, email, full_name, role_id, password_hash, must_change_password, created_by, created_at,
    last_sign_in_at, last_sign_in_method, last_active_at)

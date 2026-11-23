@@ -82,6 +82,17 @@ SELECT c.id::uuid, u.id, 'admin', c.teacher::uuid
   JOIN app.users u ON u.email = ANY (c.emails)
 ON CONFLICT DO NOTHING;
 
+-- The tie the binary writes with each enrolment (shared/ties, T-R7.9): the
+-- class's teacher has taught the student, so may write to them first.
+INSERT INTO app.messaging_ties (staff_id, student_id, since)
+SELECT c.teacher_id, m.user_id, m.joined_at
+  FROM app.class_members m
+  JOIN app.classes c ON c.id = m.class_id
+ WHERE m.class_id IN ('01935000-0000-7000-8000-000000900101', '01935000-0000-7000-8000-000000900102',
+                      '01935000-0000-7000-8000-000000900103')
+   AND c.teacher_id <> m.user_id
+ON CONFLICT (staff_id, student_id) DO NOTHING;
+
 -- --------------------------------------------------------------- custom role
 
 INSERT INTO app.roles (id, name, description, icon, color, copied_from, created_by)
