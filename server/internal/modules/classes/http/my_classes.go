@@ -32,8 +32,8 @@ func (h Classes) ListMyClasses(ctx context.Context, _ openapi.ListMyClassesReque
 			TeacherName:      c.TeacherName,
 			TeacherAvatarUrl: c.TeacherAvatarURL,
 			ScheduleLabel:    c.ScheduleLabel,
-			Schedule:         labelledSchedule(c.ScheduleLabel),
-			Room:             c.Room,
+			Schedule:         scheduleOf(c.ScheduleLabel, c.Timetable.Slots),
+			Room:             c.DerivedRoom(),
 			JoinedAt:         c.JoinedAt,
 		})
 	}

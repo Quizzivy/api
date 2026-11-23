@@ -15,6 +15,7 @@ type Service struct {
 	Stats       stats.Source
 	ClassScores stats.ClassSource
 	Avatars     ports.Avatars
+	Schedules   ports.ScheduleSource
 	Now         func() time.Time
 }
 

@@ -10,6 +10,7 @@ import (
 	classeshttp "quizzivy/internal/modules/classes/http"
 	classesrepo "quizzivy/internal/modules/classes/repositories"
 	identityapp "quizzivy/internal/modules/identity/application"
+	timetableapp "quizzivy/internal/modules/timetable/application"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/stats"
 )
@@ -22,6 +23,12 @@ func attachClassPorts(app *classesapp.Application, identity *identityapp.Applica
 	app.WithZones(adapters.ProfileZone{Query: identity.Queries.EffectiveZone}).
 		WithAvatars(adapters.TeacherPhotos{Query: identity.Queries.AvatarURL}).
 		WithClassScores(scores)
+}
+
+// attachClassSchedules derives every class surface's schedule slots and room,
+// and the join preview's, from the timetable's active series (T-R8.7).
+func attachClassSchedules(app *classesapp.Application, timetable *timetableapp.Application) {
+	app.WithSchedules(adapters.ClassSchedules{Query: timetable.Queries.ActiveSeries})
 }
 
 func classesTransport(app *classesapp.Application) classeshttp.Classes {
