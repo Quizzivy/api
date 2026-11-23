@@ -25,6 +25,7 @@ import (
 	timetablerepo "quizzivy/internal/modules/timetable/repositories"
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/actor"
 )
 
 // The classes module derives every class surface's schedule and room from
@@ -265,6 +266,42 @@ func TestAClassWithNoSeriesHasItsLabelAloneAndItsOwnRoom(t *testing.T) {
 		if len(got.Timetable.Slots) != 0 || deref(got.DerivedRoom()) != want {
 			t.Errorf("class %s: slots %+v and room %s, want no slots and the room %s", id, got.Timetable.Slots, deref(got.DerivedRoom()), want)
 		}
+	}
+}
+
+// An archived class has no session from its archiving on (T-R8.6's rule in
+// the timetable's loaders), so it has no schedule going forward: the label
+// and its own room alone, while it is archived. Restoring it brings the
+// series' slots back, as it brings the sessions back.
+func TestAnArchivedClassHasNoScheduleGoingForwardUntilItIsRestored(t *testing.T) {
+	w := newScheduleWorld(t)
+	ctx := context.Background()
+	teacher := w.user(t, "teacher")
+	classID := w.class(t, teacher, "Lớp lưu trữ "+uuid.NewString(), text("Thứ 2 · 18:00"), nil)
+	w.series(t, classID, teacher, 1, "18:00", 90, text("B2"), 30, nil)
+	who := actor.Actor{ID: teacher, Scope: access.Scope{UserID: teacher}}
+
+	archived, err := w.classes.Commands.Archive.Handle(ctx, classescmd.Archive{ClassID: classID, Archived: true, Actor: who})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archived.Timetable.Slots) != 0 || archived.DerivedRoom() != nil {
+		t.Errorf("the archive answers slots %+v and room %s, want none: the class meets no more", archived.Timetable.Slots, deref(archived.DerivedRoom()))
+	}
+	got, err := w.classes.Queries.Get.Handle(ctx, classesquery.Get{ClassID: classID, Scope: who.Scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Timetable.Slots) != 0 || got.DerivedRoom() != nil || deref(got.ScheduleLabel) != "Thứ 2 · 18:00" {
+		t.Errorf("the archived class reads slots %+v, room %s and label %s, want no slots, no room and its label", got.Timetable.Slots, deref(got.DerivedRoom()), deref(got.ScheduleLabel))
+	}
+
+	restored, err := w.classes.Commands.Archive.Handle(ctx, classescmd.Archive{ClassID: classID, Archived: false, Actor: who})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Timetable.Slots) != 1 || deref(restored.DerivedRoom()) != "B2" {
+		t.Errorf("the restored class reads slots %+v and room %s, want its Monday slot and B2 back", restored.Timetable.Slots, deref(restored.DerivedRoom()))
 	}
 }
 

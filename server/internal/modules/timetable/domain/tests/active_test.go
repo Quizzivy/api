@@ -30,6 +30,18 @@ func TestASeriesIsActiveThroughItsLastDayInItsOwnZone(t *testing.T) {
 	}
 }
 
+func TestASeriesOfAnArchivedClassIsNotActive(t *testing.T) {
+	now := time.Date(2026, 11, 23, 3, 0, 0, 0, time.UTC)
+	archived := now.Add(-time.Hour)
+	s := domain.Series{TimeZone: domain.DefaultZone, StartsOn: now.AddDate(0, -1, 0), ClassArchivedAt: &archived}
+	if s.ActiveOn(now) {
+		t.Error("an open-ended series of a class archived an hour ago is active, want none: an archived class has no session from its archiving on")
+	}
+	if s.ClassArchivedAt = nil; !s.ActiveOn(now) {
+		t.Error("the same series of the restored class is not active, want it back")
+	}
+}
+
 func TestASeriesThatHasNotBegunIsActive(t *testing.T) {
 	starts := time.Date(2027, 1, 4, 0, 0, 0, 0, time.UTC)
 	ends := starts.AddDate(0, 3, 0)
