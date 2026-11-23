@@ -322,6 +322,13 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
+	// The F2 messaging operations answer 501 until their tasks build them. A
+	// pending case only needs a request the contract accepts, so as points the
+	// kind the world does not hold yet (messaging-colleague) at a user id it
+	// does hold. Each task replaces its cases.
+	recipientsPending = "T-F2.3 and T-F2.4: the recipients finder"
+	colleaguesPending = "T-F2.4: colleague threads"
+
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
@@ -672,6 +679,11 @@ func isolationCases() map[string]isoCase {
 		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
 		"postClassAnnouncement":          {fresh: freshAttachment, excuse: posted, body: messagePost},
 		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
+		"listMessageRecipients":          {pending: recipientsPending, query: map[string]string{"audience": "students"}},
+		"listColleagueThreads":           {pending: colleaguesPending},
+		"getColleagueThread":             {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}},
+		"postColleagueMessage":           {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}, body: messagePost},
+		"markColleagueThreadRead":        {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}, body: messageRead},
 		"listStudentThreads":             {student: true},
 		"getStudentDirectThread":         {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
 		"postStudentDirectMessage":       {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},

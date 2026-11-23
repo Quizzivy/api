@@ -170,6 +170,42 @@ func TestARefusedDeletionNamesTheMessagesAUserHolds(t *testing.T) {
 	}
 }
 
+// TestARefusedDeletionNamesTheColleagueThreadAUserHolds keeps T-F2.2's keys to
+// app.users mapped: deleteUser reaches only a disabled student account, so the
+// staff member here held a colleague thread and was then given the student
+// role. On either side of the pair, the smaller id or the larger, the deletion
+// answers referencedBy messages, a 409, never a 500, and the account stays.
+// The thread has no message, so only the conversation's key refuses it.
+func TestARefusedDeletionNamesTheColleagueThreadAUserHolds(t *testing.T) {
+	w := newRosterWorld(t)
+	ctx := context.Background()
+	admin := domain.WriteRequest{ActorID: w.admin, All: true, Grants: access.NewSet(access.All()...)}
+	for _, side := range []string{"low", "high"} {
+		user := w.user(t, "teacher", "Giáo viên đổi vai "+side, nil)
+		// uuidv7 orders by creation: w.a is older than user, a later colleague
+		// newer.
+		colleague := w.a
+		if side == "low" {
+			colleague = w.user(t, "teacher", "Đồng nghiệp mới", nil)
+		}
+		w.exec(t, `INSERT INTO app.conversations (kind, colleague_low_id, colleague_high_id, last_message_at)
+			VALUES ('colleague', LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), now())`, user, colleague)
+		if got := w.id(t, `SELECT CASE WHEN colleague_low_id = $1 THEN 'low' ELSE 'high' END FROM app.conversations
+			WHERE kind = 'colleague' AND $1 IN (colleague_low_id, colleague_high_id)`, user); got != side {
+			t.Fatalf("the user sits on the %s side, want %s", got, side)
+		}
+		w.exec(t, `UPDATE app.users SET role_id = (SELECT id FROM app.roles WHERE builtin_key = 'student'), disabled_at = now() WHERE id = $1`, user)
+		_, err := w.app.Commands.DeleteStudent.Handle(ctx, command.DeleteStudent{Request: admin, ID: user})
+		var refused *domain.ReferencedError
+		if !errors.Is(err, domain.ErrReferenced) || !errors.As(err, &refused) || refused.By != domain.ReferencedByMessages {
+			t.Errorf("deleting a user on the %s side of a colleague thread answered %v, want messages", side, err)
+		}
+		if w.id(t, `SELECT count(*)::text FROM app.users WHERE id = $1`, user) != "1" {
+			t.Errorf("the user on the %s side was deleted", side)
+		}
+	}
+}
+
 // TestARefusedDeletionNamesTheAttendanceAndTimetableAUserHolds keeps T-R8.2's
 // keys to app.users mapped: a student with a mark, and a user who took one,
 // answer referencedBy attendance; a user who made a term, a weekly series or

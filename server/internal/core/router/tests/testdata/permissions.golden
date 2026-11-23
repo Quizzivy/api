@@ -83,6 +83,9 @@ GET /teacher/imports/{id}/sources/{sourceId}/download content.tests.write
 GET /teacher/media workspace.teacher
 GET /teacher/messages/attachments/{id} workspace.teacher
 GET /teacher/messages/classes/{classId} workspace.teacher
+GET /teacher/messages/colleagues workspace.teacher
+GET /teacher/messages/colleagues/{colleagueId} workspace.teacher
+GET /teacher/messages/recipients workspace.teacher
 GET /teacher/messages/students/{studentId} workspace.teacher
 GET /teacher/messages/threads workspace.teacher
 GET /teacher/question-groups workspace.teacher
@@ -194,6 +197,8 @@ POST /teacher/media/{id}/replace content.media.write
 POST /teacher/messages/attachments workspace.teacher
 POST /teacher/messages/classes/{classId} teaching.classes.write
 POST /teacher/messages/classes/{classId}/read workspace.teacher
+POST /teacher/messages/colleagues/{colleagueId} workspace.teacher
+POST /teacher/messages/colleagues/{colleagueId}/read workspace.teacher
 POST /teacher/messages/students/{studentId} workspace.teacher
 POST /teacher/messages/students/{studentId}/read workspace.teacher
 POST /teacher/question-groups content.questions.write | content.tests.write
