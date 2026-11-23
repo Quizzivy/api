@@ -113,6 +113,7 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *db
 	contentTransfer(dbx, identityApp, notificationsApp.Commands.Notify)
 	identityApp.SetPrincipals(principals)
 	identityApp.SetSignInPolicy(organizationApp.Queries.SignInPolicy)
+	organizationApp.WithZones(adapters.ProfileZone{Query: identityApp.Queries.EffectiveZone})
 	attachClassPorts(classesApp, identityApp, stats)
 	if err := attachIdentityPorts(ctx, cfg, logger, dbx, identityApp, principals.Queries.RoleChoices, images); err != nil {
 		return Assembly{}, err

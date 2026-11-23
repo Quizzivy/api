@@ -15,7 +15,7 @@ import (
 )
 
 func organization(ctx context.Context, cfg config.Config, logger *slog.Logger, dbx db.Context, images *imagesafe.Processor) (*organizationapp.Application, error) {
-	app := organizationapp.New(organizationrepo.NewPostgres(dbx), logger, cfg.GoogleEnabled())
+	app := organizationapp.New(organizationrepo.NewPostgres(dbx), logger, cfg.GoogleEnabled()).WithTerms(organizationrepo.NewTerms(dbx))
 	if !cfg.MediaEnabled() {
 		logger.Info("organization logos disabled (no bucket configured)")
 		return app, nil
