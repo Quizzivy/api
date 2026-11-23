@@ -68,8 +68,8 @@ type RubricCriterionInput struct {
 // duplicate copies them: reading the source authorized them, so they bind as
 // any live asset does. ExpectedUpdatedAt, on an update, is the question's
 // updatedAt the editor last read: when the question has changed since, the
-// update is ErrStaleWrite and nothing is written. Without it the update is
-// not checked, as v0.13 clients send it (optional until R8).
+// update is ErrStaleWrite and nothing is written. updateQuestion always sets
+// it, since the contract requires it there from R8; a create leaves it nil.
 type WriteRequest struct {
 	ID                string
 	Input             Input

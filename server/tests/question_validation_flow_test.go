@@ -44,6 +44,6 @@ func TestQuestionValidationGuardsHTTPAndPublication(t *testing.T) {
 	if err := w.pool.QueryRow(context.Background(), `SELECT count(*) FROM app.test_versions WHERE test_id = $1`, id(test)).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("invalid publication left a snapshot: %d, %v", count, err)
 	}
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(question), payload)
+	teacher.editQuestion(http.StatusOK, id(question), payload)
 	teacher.must(http.StatusCreated, http.MethodPost, "/teacher/tests/"+id(test)+"/publish", nil)
 }

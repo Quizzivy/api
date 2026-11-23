@@ -410,7 +410,9 @@ func isolationCases() map[string]isoCase {
 		"tagQuestions": {excuse: map[string]string{"*": "tags only the questions the caller reaches"}, body: fixed(map[string]any{"questionIds": []any{""}, "tags": []any{"đã kiểm tra"}})},
 		"getQuestion":  {},
 		"updateQuestion": {body: func(_ *iso, own *party, slot string) any {
-			return withProseMedia(choiceInput(own), own, slot)
+			body := withProseMedia(choiceInput(own), own, slot)
+			body["expectedUpdatedAt"] = own.c.questionRevision(own.id("question"))
+			return body
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},

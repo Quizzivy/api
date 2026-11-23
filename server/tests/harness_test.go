@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -253,6 +254,28 @@ func (c *client) must(status int, method, path string, payload any) map[string]a
 		c.w.t.Fatalf("%s %s: status %d, want %d: %v", method, path, got, status, body)
 	}
 	return body
+}
+
+// editQuestion saves body over the question as the editor does: it reads the
+// question and sends the updatedAt it read as expectedUpdatedAt, which
+// updateQuestion requires since R8 (T-R8.1). The caller's body is not changed.
+func (c *client) editQuestion(status int, questionID string, body map[string]any) map[string]any {
+	c.w.t.Helper()
+	sent := maps.Clone(body)
+	sent["expectedUpdatedAt"] = c.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+questionID, nil)["updatedAt"]
+	return c.must(status, http.MethodPatch, "/teacher/questions/"+questionID, sent)
+}
+
+// questionRevision is the expectedUpdatedAt updateQuestion requires: the
+// question's updatedAt when c reaches it, otherwise a fixed instant, so a
+// request for a missing or unreachable question is still well formed and
+// answers as such.
+func (c *client) questionRevision(questionID string) any {
+	c.w.t.Helper()
+	if got := c.send(http.MethodGet, "/teacher/questions/"+questionID, nil); success(got) {
+		return got.json["updatedAt"]
+	}
+	return "2026-01-01T00:00:00Z"
 }
 
 func id(body map[string]any) string {

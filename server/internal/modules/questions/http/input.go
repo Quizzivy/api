@@ -87,3 +87,36 @@ func apiID(id *string) *openapi.Uuid {
 	}
 	return httpapi.Ptr(httpapi.ParseUUID(*id))
 }
+
+// UpdateInput is updateQuestion's body as the QuestionInput it extends. The
+// contract makes expectedUpdatedAt required there since R8, so
+// httpx.ValidateRequests answers 400 VALIDATION_FAILED to a body without it
+// and the handler needs no check of its own; the result always carries it.
+func UpdateInput(body openapi.UpdateQuestionJSONRequestBody) openapi.QuestionInput {
+	expected := body.ExpectedUpdatedAt
+	return openapi.QuestionInput{
+		Audio:              body.Audio,
+		Blanks:             body.Blanks,
+		EssayMaxWords:      body.EssayMaxWords,
+		ExpectedUpdatedAt:  &expected,
+		Explanation:        body.Explanation,
+		ExplanationContent: body.ExplanationContent,
+		Level:              body.Level,
+		MatchAllowReuse:    body.MatchAllowReuse,
+		MatchItems:         body.MatchItems,
+		MaxWords:           body.MaxWords,
+		MediaAlt:           body.MediaAlt,
+		MediaAssetId:       body.MediaAssetId,
+		Options:            body.Options,
+		Points:             body.Points,
+		Prompt:             body.Prompt,
+		PromptContent:      body.PromptContent,
+		Rubric:             body.Rubric,
+		SampleAnswer:       body.SampleAnswer,
+		SelectCount:        body.SelectCount,
+		Skill:              body.Skill,
+		Tags:               body.Tags,
+		Transcript:         body.Transcript,
+		Type:               body.Type,
+	}
+}
