@@ -142,6 +142,11 @@ var optionalName = regexp.MustCompile("^`([a-zA-Z]+)` (?:for|when) ")
 // attempt.flagged's on its repeats under a flexible assignment (F1).
 var kindRemark = regexp.MustCompile(` \([^|]*\)$`)
 
+// paramName is one listed param. The list ends at the first item that is not
+// one, a remark in prose such as message.received's on the threads it comes
+// from and the className it never carries (F2).
+var paramName = regexp.MustCompile("^`([a-zA-Z]+)`$")
+
 func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 	kinds := schema(t, "NotificationKind")
 	required, optional := map[string][]string{}, map[string][]string{}
@@ -151,7 +156,14 @@ func TestTheContractsKindTableIsWhatEachKindEncodes(t *testing.T) {
 			continue
 		}
 		cells := strings.SplitN(kindRemark.ReplaceAllString(row[2], ""), ", and ", 2)
-		names := strings.Split(strings.ReplaceAll(cells[0], "`", ""), ", ")
+		var names []string
+		for _, item := range strings.Split(cells[0], ", ") {
+			name := paramName.FindStringSubmatch(item)
+			if name == nil {
+				break
+			}
+			names = append(names, name[1])
+		}
 		slices.Sort(names)
 		required[row[1]] = names
 		if len(cells) == 2 {

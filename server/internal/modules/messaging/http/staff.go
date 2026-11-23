@@ -137,6 +137,9 @@ func threadOf(t domain.StaffThread) openapi.StaffThread {
 	out := openapi.StaffThread{
 		Thread: ref, Title: t.Title, AvatarUrl: t.AvatarURL, ClassNames: t.ClassNames, StudentCount: t.StudentCount,
 		Former: t.Former, Candidate: t.Candidate, Disabled: t.Disabled, Unread: t.Unread,
+		// Required by the F2 contract; every row is empty until T-F2.3 reads
+		// the student's other current classes.
+		OtherClassNames: []string{},
 	}
 	if t.LastMessageAt != nil {
 		out.LastMessageAt = new(t.LastMessageAt.UTC())
@@ -216,7 +219,9 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 	return openapi.GetStaffDirectThread200JSONResponse{
 		Student: openapi.StaffDirectThreadPeer{
 			Id: httpapi.ParseUUID(peer.ID), Name: peer.Name, AvatarUrl: peer.AvatarURL, Classes: classes,
-			Former: peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
+			// Required by the F2 contract; empty until T-F2.3 fills it.
+			OtherClassNames: []string{},
+			Former:          peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
 		},
 		Messages:      messagesOf(thread.Page),
 		ContextEvents: contextEventsOf(thread.Events),
