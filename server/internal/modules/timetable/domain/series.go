@@ -116,8 +116,8 @@ func (c Clock) On(day time.Time, loc *time.Location) time.Time {
 
 // Series is a class's weekly session: one weekday, start time, length and
 // room, from StartsOn to EndsOn (nil until the teacher stops it), both
-// inclusive and read in TimeZone. ClassName is the class's name as read with
-// it.
+// inclusive and read in TimeZone. ClassName is the class's name and
+// ClassArchivedAt when it was archived (nil while it is not), as read with it.
 type Series struct {
 	ID              string
 	ClassID         string
@@ -129,6 +129,7 @@ type Series struct {
 	StartsOn        time.Time
 	EndsOn          *time.Time
 	TimeZone        string
+	ClassArchivedAt *time.Time
 }
 
 // Location is the zone the series' dates and times are read in.

@@ -83,7 +83,7 @@ func (p *Postgres) Find(ctx context.Context, scope access.Scope, id domain.Sessi
 		if err != nil {
 			return domain.Found{}, fmt.Errorf("timetable: read session %s: %w", id, err)
 		}
-		return domain.Found{ID: id, Row: &r}, nil
+		return existing(domain.Found{ID: id, Row: &r})
 	}
 	s, err := scanSeries(p.QueryRow(ctx, `SELECT `+seriesColumns+`
 		  FROM app.class_session_series s JOIN app.classes c ON c.id = s.class_id
@@ -105,7 +105,7 @@ func occurrenceOf(id domain.SessionID, s domain.Series, r *domain.Row) (domain.F
 	if r == nil && !s.Meets(id.Date) {
 		return domain.Found{}, domain.ErrNotFound
 	}
-	return domain.Found{ID: id, Series: &s, Row: r}, nil
+	return existing(domain.Found{ID: id, Series: &s, Row: r})
 }
 
 func lockSession(ctx context.Context, tx pgx.Tx, scope access.Scope, id domain.SessionID) (domain.Found, error) {
@@ -140,7 +140,16 @@ func lockSession(ctx context.Context, tx pgx.Tx, scope access.Scope, id domain.S
 	if err != nil {
 		return domain.Found{}, fmt.Errorf("timetable: lock session %s: %w", id, err)
 	}
-	return domain.Found{ID: id, Row: &r}, nil
+	return existing(domain.Found{ID: id, Row: &r})
+}
+
+// existing is f, or ErrNotFound when f is a session its class's archiving
+// removed (domain.Found.Exists).
+func existing(f domain.Found) (domain.Found, error) {
+	if !f.Exists() {
+		return domain.Found{}, domain.ErrNotFound
+	}
+	return f, nil
 }
 
 // Create stores the series or the one-off build makes under the class's lock.

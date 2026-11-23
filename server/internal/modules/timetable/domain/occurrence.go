@@ -10,7 +10,7 @@ import (
 // one occurrence of a series named by SeriesID and SeriesDate, the date it was
 // scheduled for, however StartsAt has moved it. An occurrence's Room is the
 // date's own, nil when the series' room applies. ClassName is the class's name
-// as read with it.
+// and ClassArchivedAt when it was archived, as read with it.
 type Row struct {
 	ID              string
 	ClassID         string
@@ -23,6 +23,28 @@ type Row struct {
 	Note            *string
 	CancelledAt     *time.Time
 	HasAttendance   bool
+	ClassArchivedAt *time.Time
+}
+
+// Archived reports whether a session of a class archived at archivedAt (nil:
+// not archived) that starts at startsAt is gone: an archived class has no
+// session from the moment it was archived on. The ones before stay, with
+// their attendance, and restoring the class brings the later ones back.
+func Archived(startsAt time.Time, archivedAt *time.Time) bool {
+	return archivedAt != nil && !startsAt.Before(*archivedAt)
+}
+
+// Exists reports whether the session f names exists: it does not start at or
+// after its class was archived (Archived).
+func (f Found) Exists() bool {
+	archived := (*time.Time)(nil)
+	switch {
+	case f.Series != nil:
+		archived = f.Series.ClassArchivedAt
+	case f.Row != nil:
+		archived = f.Row.ClassArchivedAt
+	}
+	return !Archived(f.Fields().StartsAt, archived)
 }
 
 // Session is one session as the contract reads it (ClassSession): a one-off,

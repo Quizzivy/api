@@ -1,7 +1,9 @@
 // Package application is the timetable's use cases (T-R8.4): adding a session
 // to a class once or every week, changing or cancelling one date, removing a
 // one-off, changing a weekly session from a date on and stopping it, and the
-// reads that compute the sessions of a range and the calendar (T-R8.5).
+// reads that compute the sessions of a range and the calendar (T-R8.5); and
+// its attendance (T-R8.6): a session's register, saving it, and the sessions
+// that take one.
 package application
 
 import (
@@ -29,6 +31,8 @@ type Commands struct {
 	DeleteSession cqrs.CommandHandler[command.DeleteSession, cqrs.Nothing]
 	UpdateSeries  cqrs.CommandHandler[command.UpdateSeries, domain.SeriesEdit]
 	EndSeries     cqrs.CommandHandler[command.EndSeries, *domain.Series]
+
+	SaveAttendance cqrs.CommandHandler[command.SaveAttendance, domain.Register]
 }
 
 // Queries are the module's reads.
@@ -36,6 +40,10 @@ type Queries struct {
 	Occurrences cqrs.QueryHandler[query.Occurrences, []domain.Session]
 	GetSession  cqrs.QueryHandler[query.GetSession, domain.Session]
 	Calendar    cqrs.QueryHandler[query.Calendar, query.CalendarView]
+
+	AttendanceSessions cqrs.QueryHandler[query.AttendanceSessions, domain.SessionPage]
+	SessionAttendance  cqrs.QueryHandler[query.SessionAttendance, domain.Register]
+
 	// ActiveSeries is the classes module's ScheduleSource (adapters.ClassSchedules).
 	ActiveSeries cqrs.QueryHandler[query.ActiveSeries, []domain.Series]
 }
@@ -51,11 +59,16 @@ func New(repo domain.Repository) *Application {
 			DeleteSession: command.DeleteSessionHandler{Service: service},
 			UpdateSeries:  command.UpdateSeriesHandler{Service: service},
 			EndSeries:     command.EndSeriesHandler{Service: service},
+
+			SaveAttendance: command.SaveAttendanceHandler{Service: service},
 		},
 		Queries: Queries{
 			Occurrences: query.OccurrencesHandler{Service: service},
 			GetSession:  query.GetSessionHandler{Service: service},
 			Calendar:    query.CalendarHandler{Service: service},
+
+			AttendanceSessions: query.AttendanceSessionsHandler{Service: service},
+			SessionAttendance:  query.SessionAttendanceHandler{Service: service},
 
 			ActiveSeries: query.ActiveSeriesHandler{Service: service},
 		},
@@ -82,6 +95,12 @@ func (a *Application) WithCalendar(terms ports.TermsAhead, assignments ports.Ass
 // names, through zones.
 func (a *Application) WithZones(zones ports.Zones) *Application {
 	a.service.Zones = zones
+	return a
+}
+
+// WithAvatars signs the profile photos a register shows, through avatars.
+func (a *Application) WithAvatars(avatars ports.Avatars) *Application {
+	a.service.Avatars = avatars
 	return a
 }
 
