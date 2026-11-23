@@ -19,6 +19,18 @@ BEGIN
     RAISE EXCEPTION 'seed: bank choice question(s) with fewer than two options: %', bad;
   END IF;
 
+  -- Ties: every member is tied to their class's teacher, as the binary writes it with the
+  -- enrolment (shared/ties). Since 00179 no trigger writes it, so a seed that adds a member
+  -- writes the tie too, or the teacher cannot write to the student first.
+  SELECT string_agg(m.class_id::text || '/' || m.user_id::text, ', ') INTO bad
+    FROM app.class_members m
+    JOIN app.classes c ON c.id = m.class_id
+   WHERE c.teacher_id <> m.user_id
+     AND NOT EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = c.teacher_id AND t.student_id = m.user_id);
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: member(s) not tied to their class''s teacher: %', bad;
+  END IF;
+
   SELECT string_agg(q.id::text, ', ') INTO bad
     FROM app.questions q
    WHERE q.type IN ('single_choice', 'multiple_choice')

@@ -64,3 +64,14 @@ VALUES (
   '01935000-0000-7000-8000-0000000000a1'
 )
 ON CONFLICT (class_id, user_id) DO NOTHING;
+
+-- The tie the binary writes with the enrolment (shared/ties, T-R7.9): the
+-- class's teacher has taught the student, so may write to them first.
+INSERT INTO app.messaging_ties (staff_id, student_id, since)
+SELECT c.teacher_id, m.user_id, m.joined_at
+  FROM app.class_members m
+  JOIN app.classes c ON c.id = m.class_id
+ WHERE m.class_id = '01935000-0000-7000-8000-0000000000c1'
+   AND m.user_id = '01935000-0000-7000-8000-0000000000a2'
+   AND c.teacher_id <> m.user_id
+ON CONFLICT (staff_id, student_id) DO NOTHING;

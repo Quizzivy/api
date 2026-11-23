@@ -885,3 +885,127 @@ func TestTheTimetableFilesApplyOverPopulatedTablesAndRollBack(t *testing.T) {
 		}
 	}
 }
+
+// The tie triggers' contract step (00179, R8), and the version before it.
+const (
+	beforeTieDrop int64 = 178
+	tieDrop       int64 = 179
+)
+
+// TestTheTieTriggerDropKeepsTheTiesAndRollsBack runs 00179 over a stored tie:
+// up drops 00167's two fill triggers and their functions and keeps the table
+// and its rows, so a member written straight to the table is tied by no one.
+// Down brings both back as 00167 made them, with 00169's bodies: deferred to
+// the commit, search_path pinned, no EXECUTE for PUBLIC, tying a new member
+// and a new teacher's members and leaving an anonymised member out. Then up
+// runs a second time.
+func TestTheTieTriggerDropKeepsTheTiesAndRollsBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, beforeTieDrop); err != nil {
+		t.Fatal(err)
+	}
+	var teacher, student string
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		teacher, student = f.adminID, f.studentID
+		mustExec(t, tx, `INSERT INTO app.messaging_ties (staff_id, student_id) VALUES ($1, $2)`, teacher, student)
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	const triggers = `SELECT count(*) FROM pg_trigger t
+		  JOIN pg_proc p ON p.oid = t.tgfoid
+		 WHERE t.tgname = p.proname AND t.tgname IN ('class_members_fill_messaging_ties', 'classes_fill_messaging_ties')
+		   AND t.tgrelid = ('app.' || split_part(t.tgname, '_fill_', 1))::regclass
+		   AND t.tgdeferrable AND t.tginitdeferred
+		   AND p.pronamespace = 'app'::regnamespace AND NOT p.prosecdef
+		   AND p.proconfig = ARRAY['search_path=pg_catalog, pg_temp']
+		   AND NOT has_function_privilege('public', p.oid, 'EXECUTE')`
+	const functions = `SELECT count(*) FROM pg_proc WHERE pronamespace = 'app'::regnamespace
+		   AND proname IN ('class_members_fill_messaging_ties', 'classes_fill_messaging_ties')`
+	count := func(query string) (n int) {
+		t.Helper()
+		if err := conn.QueryRow(query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// tiedBy writes a member, an anonymised member and a change of teacher
+	// straight to the tables, fires every deferred trigger, and reports which
+	// of the three pairs are tied. It rolls back.
+	tiedBy := func() (member, anonymised, heir bool) {
+		t.Helper()
+		withTx(t, conn, func(tx *sql.Tx, f fixture) {
+			var gone, next string
+			if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+				VALUES ('gone-' || uuidv7() || '@example.com', 'Học viên', (SELECT id FROM app.roles WHERE builtin_key = 'student')) RETURNING id`).Scan(&gone); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, tx, `UPDATE app.users SET email = 'anonymous-' || id::text || '@anonymous.invalid', disabled_at = now() WHERE id = $1`, gone)
+			mustExec(t, tx, `INSERT INTO app.class_members (class_id, user_id, joined_via, added_by) VALUES ($1, $2, 'admin', $4), ($1, $3, 'admin', $4)`,
+				f.classID, f.studentID, gone, f.adminID)
+			mustExec(t, tx, `SET CONSTRAINTS ALL IMMEDIATE`)
+			if err := tx.QueryRow(`INSERT INTO app.users (email, full_name, role_id)
+				VALUES ('heir-' || uuidv7() || '@example.com', 'Giáo viên mới', (SELECT id FROM app.roles WHERE builtin_key = 'teacher')) RETURNING id`).Scan(&next); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, tx, `UPDATE app.classes SET teacher_id = $2 WHERE id = $1`, f.classID, next)
+			mustExec(t, tx, `SET CONSTRAINTS ALL IMMEDIATE`)
+			tied := func(staff, student string) (ok bool) {
+				t.Helper()
+				if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2)`, staff, student).Scan(&ok); err != nil {
+					t.Fatal(err)
+				}
+				return ok
+			}
+			member, anonymised, heir = tied(f.adminID, f.studentID), tied(f.adminID, gone) || tied(next, gone), tied(next, f.studentID)
+		})
+		return member, anonymised, heir
+	}
+	if n := count(triggers); n != 2 {
+		t.Fatalf("before 00179 %d of the two fill triggers are as 00167 made them", n)
+	}
+
+	if err := goose.UpTo(conn, dir, tieDrop); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if n, f := count(`SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%fill_messaging_ties'`), count(functions); n != 0 || f != 0 {
+		t.Errorf("after up %d fill triggers and %d functions are left, want none", n, f)
+	}
+	var kept int
+	if err := conn.QueryRow(`SELECT count(*) FROM app.messaging_ties WHERE staff_id = $1 AND student_id = $2`, teacher, student).Scan(&kept); err != nil || kept != 1 {
+		t.Errorf("after up the stored tie is there %d times (%v), want once", kept, err)
+	}
+	if member, anonymised, heir := tiedBy(); member || anonymised || heir {
+		t.Errorf("after up a write straight to the tables ties the member %v, the anonymised member %v, the new teacher %v; want none", member, anonymised, heir)
+	}
+
+	if err := goose.DownTo(conn, dir, beforeTieDrop); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if n := count(triggers); n != 2 {
+		t.Errorf("after down %d of the two fill triggers are as 00167 made them, want both", n)
+	}
+	if member, anonymised, heir := tiedBy(); !member || anonymised || !heir {
+		t.Errorf("after down the triggers tie the member %v, the anonymised member %v, the new teacher %v; want the member and the new teacher only", member, anonymised, heir)
+	}
+
+	if err := goose.UpTo(conn, dir, tieDrop); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	if n := count(functions); n != 0 {
+		t.Errorf("after the second up %d fill functions are left, want none", n)
+	}
+}

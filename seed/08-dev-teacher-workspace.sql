@@ -121,6 +121,16 @@ SELECT pg_temp.sid(3, m.class_n), m.user_id, 'admin', now() - interval '30 days'
   ) AS m
 ON CONFLICT (class_id, user_id) DO NOTHING;
 
+-- The tie the binary writes with each enrolment (shared/ties, T-R7.9): the
+-- class's teacher has taught the student, so may write to them first.
+INSERT INTO app.messaging_ties (staff_id, student_id, since)
+SELECT c.teacher_id, m.user_id, m.joined_at
+  FROM app.class_members m
+  JOIN app.classes c ON c.id = m.class_id
+ WHERE m.class_id IN (pg_temp.sid(3, 1), pg_temp.sid(3, 2), pg_temp.sid(3, 3), pg_temp.sid(3, 4))
+   AND c.teacher_id <> m.user_id
+ON CONFLICT (staff_id, student_id) DO NOTHING;
+
 -- --------------------------------------------------------------------- media
 -- Metadata only. The checksum is the SHA-256 of the storage key, not of any
 -- bytes, because no object exists. The podcast is 4:58 where the deck says
