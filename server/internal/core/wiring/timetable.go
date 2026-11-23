@@ -1,0 +1,22 @@
+package wiring
+
+import (
+	"quizzivy/internal/core/adapters"
+	identityapp "quizzivy/internal/modules/identity/application"
+	organizationapp "quizzivy/internal/modules/organization/application"
+	timetableapp "quizzivy/internal/modules/timetable/application"
+	timetablehttp "quizzivy/internal/modules/timetable/http"
+	timetablerepo "quizzivy/internal/modules/timetable/repositories"
+	"quizzivy/internal/platform/db"
+)
+
+// timetable keeps the classes' weekly series and sessions (T-R8.4), reading
+// each caller's zone through identity and running a new series to the end of
+// its term through the organization's terms. Class scope is its repository's,
+// checked under the class row's lock in the write it guards.
+func timetable(dbx db.Context, identity *identityapp.Application, organization *organizationapp.Application) (*timetableapp.Application, timetablehttp.Timetable) {
+	app := timetableapp.New(timetablerepo.NewPostgres(dbx)).
+		WithZones(adapters.ProfileZone{Query: identity.Queries.EffectiveZone}).
+		WithTerms(adapters.Terms{Current: organization.Queries.CurrentTerm, EndingFrom: organization.Queries.TermsEndingFrom})
+	return app, timetablehttp.NewTimetable(app)
+}

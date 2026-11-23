@@ -14,10 +14,9 @@ import (
 
 var computedActions = []string{"ai.credit_request.approved", "ai.credit_request.declined"}
 
-// pendingActions are catalogued for R8 before their writers exist: the
-// sessions and weekly series (T-R8.4) and attendance (T-R8.6). Each task takes
-// its actions off as it writes them.
-var pendingActions = []string{"attendance.saved", "session.cancelled", "session.created", "session.deleted", "session.updated", "session_series.ended", "session_series.updated"}
+// pendingActions are catalogued for R8 before their writers exist:
+// attendance (T-R8.6). Each task takes its actions off as it writes them.
+var pendingActions = []string{"attendance.saved"}
 
 func catalogued() map[string]domain.Action {
 	out := map[string]domain.Action{}
