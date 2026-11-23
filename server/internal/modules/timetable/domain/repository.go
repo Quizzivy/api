@@ -51,6 +51,8 @@ type SeriesEdit struct {
 // ErrNotFound as a missing one does, and writes its audit row in that
 // transaction.
 type Repository interface {
+	Attendance
+
 	// Series returns, in one query, the series of w's classes that may meet
 	// in w (a day either side, for any zone) and every series a row Rows
 	// returns names.
