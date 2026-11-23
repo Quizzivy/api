@@ -24,6 +24,7 @@ import (
 	questionshttp "quizzivy/internal/modules/questions/http"
 	sharinghttp "quizzivy/internal/modules/sharing/http"
 	testshttp "quizzivy/internal/modules/tests/http"
+	timetablehttp "quizzivy/internal/modules/timetable/http"
 	"quizzivy/internal/platform/email"
 	"quizzivy/internal/platform/httpx"
 )
@@ -50,6 +51,7 @@ type Server struct {
 	sharinghttp.Sharing
 	messaginghttp.Staff
 	messaginghttp.Student
+	timetablehttp.Timetable
 	EmailEvents
 	R8Pending
 	Deps Deps
