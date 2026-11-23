@@ -12,13 +12,14 @@ import (
 )
 
 // Service carries the store, the terms (nil: no term holds any date), the
-// profile zones (nil: every account is read in domain.DefaultZone) and the
-// clock.
+// profile zones (nil: every account is read in domain.DefaultZone), the
+// photo signer (nil: no student has a photo) and the clock.
 type Service struct {
-	Repo  domain.Repository
-	Terms ports.Terms
-	Zones ports.Zones
-	Now   func() time.Time
+	Repo    domain.Repository
+	Terms   ports.Terms
+	Zones   ports.Zones
+	Avatars ports.Avatars
+	Now     func() time.Time
 }
 
 // ZoneOf is the zone userID's dates and times are read in, as a name a series
