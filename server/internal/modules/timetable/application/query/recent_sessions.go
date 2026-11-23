@@ -34,12 +34,8 @@ type AttendanceSessionsHandler struct {
 func (h AttendanceSessionsHandler) Handle(ctx context.Context, q AttendanceSessions) (domain.SessionPage, error) {
 	w := domain.Window{Scope: q.Scope}
 	if q.ClassID != nil {
-		reached, err := h.Repo.ClassReached(ctx, q.Scope, *q.ClassID)
-		if err != nil {
+		if err := h.Repo.Reaches(ctx, q.Scope, *q.ClassID); err != nil {
 			return domain.SessionPage{}, err
-		}
-		if !reached {
-			return domain.SessionPage{}, domain.ErrNotFound
 		}
 		w.ClassIDs = []string{*q.ClassID}
 	}

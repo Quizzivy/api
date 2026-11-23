@@ -330,8 +330,6 @@ type Attendance interface {
 	// one, and writes marks with one attendance.saved row in the same
 	// statement, or nothing when nothing changes.
 	SaveMarks(ctx context.Context, scope access.Scope, id SessionID, check func(Found) error, marks []MarkInput, by Writer) error
-	// ClassReached reports whether scope reaches class id.
-	ClassReached(ctx context.Context, scope access.Scope, id string) (bool, error)
 	// Earliest is the earliest of the first day of any series of w's classes
 	// and the UTC day any of their stored rows starts on, or nil when the
 	// classes have no session at all; w's From and To are not read. A day

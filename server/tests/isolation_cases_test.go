@@ -326,8 +326,7 @@ const (
 	// pending case only needs a request the contract accepts, so as points the
 	// kinds it names at ids the world holds; a session id is opaque text, so
 	// any uuid is a well-formed one. Each task replaces its cases.
-	calendarPending = "T-R8.5: the calendar"
-	weekPending     = "T-R8.8: the student's week"
+	weekPending = "T-R8.8: the student's week"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
@@ -660,7 +659,7 @@ func isolationCases() map[string]isoCase {
 		}},
 		"updateSessionSeries":    {body: fixed(map[string]any{"fromDate": scheduleDay(7), "durationMinutes": 120})},
 		"endSessionSeries":       {body: fixed(map[string]any{"lastDate": scheduleDay(70)})},
-		"getCalendar":            {pending: calendarPending, query: map[string]string{"from": "2026-09-21", "to": "2026-09-27"}},
+		"getCalendar":            {query: map[string]string{"from": scheduleDay(0), "to": scheduleDay(14)}},
 		"listAttendanceSessions": {},
 		"getSessionAttendance": {each: []isoCase{
 			{},

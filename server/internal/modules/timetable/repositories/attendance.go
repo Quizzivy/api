@@ -205,15 +205,6 @@ func writeMarks(ctx context.Context, tx pgx.Tx, f domain.Found, marks []domain.M
 	return nil
 }
 
-// ClassReached reports whether scope reaches class id.
-func (p *Postgres) ClassReached(ctx context.Context, scope access.Scope, id string) (bool, error) {
-	ok, err := db.Exists(ctx, p, `SELECT 1 FROM app.classes c WHERE c.id = $3::uuid AND `+reached, scope.All, opt.String(scope.UserID), id)
-	if err != nil {
-		return false, fmt.Errorf("timetable: reach class %s: %w", id, err)
-	}
-	return ok, nil
-}
-
 // Earliest reads the first day of w's classes' timetable in one query.
 func (p *Postgres) Earliest(ctx context.Context, w domain.Window) (*time.Time, error) {
 	var out *time.Time
