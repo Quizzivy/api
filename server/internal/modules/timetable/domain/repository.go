@@ -63,6 +63,9 @@ type Repository interface {
 	// that date and has no row for, a row id that is not a one-off, and an id
 	// outside scope are ErrNotFound.
 	Find(ctx context.Context, scope access.Scope, id SessionID) (Found, error)
+	// Reaches answers ErrNotFound unless scope reaches class classID, archived
+	// or not, in one query.
+	Reaches(ctx context.Context, scope access.Scope, classID string) error
 
 	// Create locks classID, refusing ErrClassArchived, and stores the series
 	// build makes of the class's own room (nil for none), or, when build
