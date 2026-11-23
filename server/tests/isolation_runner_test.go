@@ -331,6 +331,9 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 		}
 		foreign := caller(x.a)
 		theirID, missingID := foreign.id(key), uuid.NewString()
+		if _, scheduled, occurrence := strings.Cut(theirID, "."); occurrence {
+			missingID += "." + scheduled
+		}
 		method, path, body := x.request(op, c, own, slot, theirID)
 		theirs := own.c.send(method, path, body)
 		if c.fresh != nil {

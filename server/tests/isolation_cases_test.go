@@ -201,6 +201,22 @@ func freshSet(_ *iso, own *party) *party {
 	})))
 }
 
+func scheduleDay(days int) string {
+	zone, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		zone = time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return time.Now().In(zone).AddDate(0, 0, days).Format("2006-01-02")
+}
+
+func oneOffSession() map[string]any {
+	return map[string]any{"date": scheduleDay(3), "startTime": "08:30", "durationMinutes": 60, "repeatWeekly": false}
+}
+
+func freshOneOff(_ *iso, own *party) *party {
+	return own.with("session", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", oneOffSession())))
+}
+
 func shareBody(kind string) func(*iso, *party, string) any {
 	return func(*iso, *party, string) any {
 		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
@@ -287,10 +303,8 @@ const (
 
 	// The schedule operations answer 501 until their tasks build them. A
 	// pending case only needs a request the contract accepts, so as points the
-	// kinds the world does not hold yet (session, session-series) at ids it
-	// does hold; a session id is opaque text, so any uuid is a well-formed
-	// one. Each task replaces its cases.
-	sessionsPending   = "T-R8.4: sessions and weekly series"
+	// kinds it names at ids the world holds; a session id is opaque text, so
+	// any uuid is a well-formed one. Each task replaces its cases.
 	calendarPending   = "T-R8.5: the calendar"
 	attendancePending = "T-R8.6: attendance"
 	weekPending       = "T-R8.8: the student's week"
@@ -615,12 +629,17 @@ func isolationCases() map[string]isoCase {
 		"getMySummary":               {},
 		"getNotificationPreferences": {},
 
-		"createClassSession": {pending: sessionsPending, body: fixed(map[string]any{"date": "2026-09-22", "startTime": "18:00", "durationMinutes": 90, "repeatWeekly": false})},
-		"updateClassSession": {pending: sessionsPending, as: map[string]string{"path sessionId": "question"}, body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
-		"deleteClassSession": {pending: sessionsPending, as: map[string]string{"path sessionId": "question"}},
-		"updateSessionSeries": {pending: sessionsPending, as: map[string]string{"path seriesId": "question"},
-			body: fixed(map[string]any{"fromDate": "2026-09-22", "durationMinutes": 90})},
-		"endSessionSeries":       {pending: sessionsPending, as: map[string]string{"path seriesId": "question"}, body: fixed(map[string]any{"lastDate": "2026-12-31"})},
+		"createClassSession": {body: fixed(oneOffSession())},
+		"updateClassSession": {each: []isoCase{
+			{body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
+			{as: map[string]string{"path sessionId": "occurrence"}, body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
+		}},
+		"deleteClassSession": {each: []isoCase{
+			{fresh: freshOneOff},
+			{as: map[string]string{"path sessionId": "occurrence"}},
+		}},
+		"updateSessionSeries":    {body: fixed(map[string]any{"fromDate": scheduleDay(7), "durationMinutes": 120})},
+		"endSessionSeries":       {body: fixed(map[string]any{"lastDate": scheduleDay(70)})},
 		"getCalendar":            {pending: calendarPending, query: map[string]string{"from": "2026-09-21", "to": "2026-09-27"}},
 		"listAttendanceSessions": {pending: attendancePending},
 		"getSessionAttendance":   {pending: attendancePending, as: map[string]string{"path sessionId": "question"}},
