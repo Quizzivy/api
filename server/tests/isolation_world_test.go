@@ -316,8 +316,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	user := created["user"].(map[string]any)
 	p.ids["student"] = user["id"].(string)
-	// The teacher created the student and teaches them, so the student is a
-	// messaging peer of the teacher's.
+	// Any enabled student is a messaging peer of every staff member (F2); the
+	// teacher's own student is the one the suite names, and the slot is
+	// exempt from substitution (isolationCases, anyStudent).
 	p.ids["messaging-peer"] = p.ids["student"]
 
 	assignment := c.assign(versionID, p.ids["class"])

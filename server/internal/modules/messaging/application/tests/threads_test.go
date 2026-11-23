@@ -343,7 +343,7 @@ func TestUnreadCountsOthersMessagesPastThePointer(t *testing.T) {
 	wantErr(t, "a pointer to another thread's message", w.read(uyen, ref, elsewhere.ID), domain.ErrNotInThread)
 	wantErr(t, "a pointer to no message", w.read(uyen, ref, uuid.NewString()), domain.ErrNotInThread)
 	wantErr(t, "a pointer in a thread before its first post", w.read(uyen, domain.ThreadRef{Kind: domain.KindDirect, StudentID: w.user("Học viên mới", "student", teacher)}, mine.ID), domain.ErrNotInThread)
-	wantErr(t, "a pointer in another teacher's thread", w.read(by(w.user("Thầy khác", "teacher")), ref, two), domain.ErrNotFound)
+	wantErr(t, "another teacher's pointer naming this thread's message", w.read(by(w.user("Thầy khác", "teacher")), ref, two), domain.ErrNotInThread)
 	announced := w.mustAnnounce(uyen, class, "Chào lớp")
 	wantErr(t, "a class message named in a direct thread", w.read(uyen, ref, announced.ID), domain.ErrNotInThread)
 	wantErr(t, "a direct message named in the channel", w.read(uyen, domain.ThreadRef{Kind: domain.KindClass, ClassID: class}, two), domain.ErrNotInThread)

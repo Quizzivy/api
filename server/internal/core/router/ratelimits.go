@@ -83,7 +83,7 @@ var aiConsoleWrites = []string{
 // credential are here, so are the uploads that store a file per call, and so
 // are the share dialog's directory of colleagues and its grants, and so are a
 // staff member's messages, whose direct messages and announcements spend one
-// budget.
+// budget, and the New message picker, which lists every student.
 func PrincipalRateLimits() *ratelimit.Registry {
 	reg := ratelimit.NewRegistry()
 	const capacity = 10_000
@@ -128,6 +128,7 @@ func PrincipalRateLimits() *ratelimit.Registry {
 		WithKey("perActor", ratelimit.PrincipalKey, capacity, ratelimit.PerMinute(30), ratelimit.PerDay(500)))
 	perActor("POST /app/messages/teachers/{teacherId}", ratelimit.PerMinute(10), ratelimit.PerDay(200))
 	perActor("POST /teacher/messages/attachments", ratelimit.PerHour(20))
+	perActor("GET /teacher/messages/recipients", ratelimit.PerMinute(60))
 	for _, pattern := range aiSuggestions {
 		perActor(pattern, ratelimit.PerMinute(10), ratelimit.PerHour(100))
 	}

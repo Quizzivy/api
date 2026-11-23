@@ -118,6 +118,13 @@ func (w *world) disable(user string) {
 	w.exec(`UPDATE app.users SET disabled_at = now() WHERE id = $1::uuid`, user)
 }
 
+// anonymise does to user what D16's anonymisation does to the account row:
+// disabled, its email the anonymous one.
+func (w *world) anonymise(user string) {
+	w.t.Helper()
+	w.exec(`UPDATE app.users SET disabled_at = coalesce(disabled_at, now()), email = 'anonymous-' || id::text || '@anonymous.invalid' WHERE id = $1::uuid`, user)
+}
+
 func (w *world) archive(class string) {
 	w.t.Helper()
 	w.exec(`UPDATE app.classes SET archived_at = now() WHERE id = $1::uuid`, class)
@@ -131,6 +138,14 @@ func byAdmin(id string) actor.Actor {
 	a := by(id)
 	a.Scope.All = true
 	return a
+}
+
+// byAdminIf is id's actor, with scope.all when id is admin's.
+func byAdminIf(id, admin string) actor.Actor {
+	if id == admin {
+		return byAdmin(id)
+	}
+	return by(id)
 }
 
 func text(s string) *string { return &s }

@@ -49,6 +49,7 @@ type Queries struct {
 	StaffThreads      cqrs.QueryHandler[query.StaffThreads, []domain.StaffThread]
 	StaffDirectThread cqrs.QueryHandler[query.StaffDirectThread, query.DirectThread]
 	StaffClassThread  cqrs.QueryHandler[query.StaffClassThread, query.ClassThread]
+	StudentRecipients cqrs.QueryHandler[query.StudentRecipients, domain.Recipients]
 
 	StudentThreads      cqrs.QueryHandler[query.StudentThreads, []domain.StudentThread]
 	StudentDirectThread cqrs.QueryHandler[query.StudentDirectThread, query.StudentDirect]
@@ -79,6 +80,7 @@ func New(repo domain.Repository) *Application {
 			StaffThreads:      query.StaffThreadsHandler{Service: service},
 			StaffDirectThread: query.StaffDirectThreadHandler{Service: service},
 			StaffClassThread:  query.StaffClassThreadHandler{Service: service},
+			StudentRecipients: query.StudentRecipientsHandler{Service: service},
 
 			StudentThreads:      query.StudentThreadsHandler{Service: service},
 			StudentDirectThread: query.StudentDirectThreadHandler{Service: service},

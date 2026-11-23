@@ -136,10 +136,7 @@ func threadOf(t domain.StaffThread) openapi.StaffThread {
 	}
 	out := openapi.StaffThread{
 		Thread: ref, Title: t.Title, AvatarUrl: t.AvatarURL, ClassNames: t.ClassNames, StudentCount: t.StudentCount,
-		Former: t.Former, Candidate: t.Candidate, Disabled: t.Disabled, Unread: t.Unread,
-		// Required by the F2 contract; every row is empty until T-F2.3 reads
-		// the student's other current classes.
-		OtherClassNames: []string{},
+		OtherClassNames: t.OtherClassNames, Former: t.Former, Candidate: t.Candidate, Disabled: t.Disabled, Unread: t.Unread,
 	}
 	if t.LastMessageAt != nil {
 		out.LastMessageAt = new(t.LastMessageAt.UTC())
@@ -219,9 +216,7 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 	return openapi.GetStaffDirectThread200JSONResponse{
 		Student: openapi.StaffDirectThreadPeer{
 			Id: httpapi.ParseUUID(peer.ID), Name: peer.Name, AvatarUrl: peer.AvatarURL, Classes: classes,
-			// Required by the F2 contract; empty until T-F2.3 fills it.
-			OtherClassNames: []string{},
-			Former:          peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
+			OtherClassNames: peer.OtherClassNames, Former: peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
 		},
 		Messages:      messagesOf(thread.Page),
 		ContextEvents: contextEventsOf(thread.Events),
@@ -370,4 +365,77 @@ func (h Staff) MarkStaffClassThreadRead(ctx context.Context, request openapi.Mar
 		return nil, err
 	}
 	return openapi.MarkStaffClassThreadRead204Response{}, nil
+}
+
+func recipientsBadRequest(ctx context.Context) openapi.BadRequestJSONResponse {
+	return openapi.BadRequestJSONResponse(httpapi.Error(ctx, openapi.VALIDATIONFAILED,
+		httpx.Text(ctx, "Yêu cầu không hợp lệ: chỉ dùng một bộ lọc (classId, mine hoặc inNoClass), chỉ khi tìm học viên, và cursor do danh sách này trả về.",
+			"The request is not valid: use one filter at most (classId, mine or inNoClass), for students only, and a cursor this list gave.")))
+}
+
+func recipientsClassNotFound(ctx context.Context) openapi.NotFoundJSONResponse {
+	return openapi.NotFoundJSONResponse(httpapi.NotFound(ctx,
+		httpx.Text(ctx, "Không tìm thấy lớp này.", "This class was not found.")))
+}
+
+func recipientOf(r domain.Recipient) openapi.MessageRecipient {
+	return openapi.MessageRecipient{
+		Id: httpapi.ParseUUID(r.ID), Name: r.Name, AvatarUrl: r.AvatarURL,
+		ClassNames: r.ClassNames, OtherClassNames: r.OtherClassNames,
+		ThreadExists: r.ThreadExists, CanPost: r.CanPost,
+	}
+}
+
+// ListMessageRecipients implements GET /teacher/messages/recipients, the New
+// message picker. audience=students is served here (T-F2.3); a request for
+// colleagues that passes the contract's checks answers 501 until T-F2.4
+// builds it. Every staff member gets the same rows; the caller's class scope
+// bounds only classId and mine.
+func (h Staff) ListMessageRecipients(ctx context.Context, request openapi.ListMessageRecipientsRequestObject) (openapi.ListMessageRecipientsResponseObject, error) {
+	who, ok := httpapi.ActorFromContext(ctx)
+	if h.app == nil || !ok {
+		return nil, httpx.ErrNotImplemented
+	}
+	p := request.Params
+	f := domain.RecipientFilter{
+		Audience: domain.Audience(p.Audience), ActorID: who.ID, All: who.Scope.All,
+		Mine: p.Mine != nil && *p.Mine, InNoClass: p.InNoClass != nil && *p.InNoClass,
+	}
+	if p.ClassId != nil {
+		f.ClassID = p.ClassId.String()
+	}
+	if p.Q != nil {
+		f.Query = string(*p.Q)
+	}
+	if p.Limit != nil {
+		f.Limit = *p.Limit
+	}
+	cursor := ""
+	if p.Cursor != nil {
+		cursor = *p.Cursor
+	}
+	if f.Audience != domain.AudienceStudents {
+		if _, err := f.Check(); err != nil {
+			return openapi.ListMessageRecipients400JSONResponse{BadRequestJSONResponse: recipientsBadRequest(ctx)}, nil
+		}
+		// T-F2.4: the colleagues audience.
+		return nil, httpx.ErrNotImplemented
+	}
+	page, err := h.app.Queries.StudentRecipients.Handle(ctx, query.StudentRecipients{Filter: f, Cursor: cursor})
+	switch {
+	case errors.Is(err, domain.ErrInvalid):
+		return openapi.ListMessageRecipients400JSONResponse{BadRequestJSONResponse: recipientsBadRequest(ctx)}, nil
+	case errors.Is(err, domain.ErrNotFound):
+		return openapi.ListMessageRecipients404JSONResponse{NotFoundJSONResponse: recipientsClassNotFound(ctx)}, nil
+	case err != nil:
+		return nil, err
+	}
+	out := openapi.ListMessageRecipients200JSONResponse{Recipients: make([]openapi.MessageRecipient, len(page.Rows))}
+	for i, r := range page.Rows {
+		out.Recipients[i] = recipientOf(r)
+	}
+	if page.Next != "" {
+		out.NextCursor = &page.Next
+	}
+	return out, nil
 }

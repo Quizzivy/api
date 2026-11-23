@@ -322,11 +322,17 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
+	// F2 (T-F2.3): a messaging-peer is any student, so another teacher's
+	// student is one too, and naming them opens the caller's own thread with
+	// them, never the teacher's. directThreadsStayWithTheirParticipants
+	// proves it (D17).
+	anyStudent = "any student may be written to; the thread read is the caller's own"
+
 	// The F2 messaging operations answer 501 until their tasks build them. A
 	// pending case only needs a request the contract accepts, so as points the
 	// kind the world does not hold yet (messaging-colleague) at a user id it
 	// does hold. Each task replaces its cases.
-	recipientsPending = "T-F2.3 and T-F2.4: the recipients finder"
+	recipientsPending = "T-F2.4: the recipients finder's colleagues"
 	colleaguesPending = "T-F2.4: colleague threads"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
@@ -672,14 +678,17 @@ func isolationCases() map[string]isoCase {
 		}},
 		"getStudentWeek": {student: true, query: map[string]string{"start": scheduleDay(3)}},
 
-		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
-		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},
-		"postStaffDirectMessage":         {fresh: freshAttachment, excuse: posted, body: messagePost},
-		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead},
-		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
-		"postClassAnnouncement":          {fresh: freshAttachment, excuse: posted, body: messagePost},
-		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
-		"listMessageRecipients":          {pending: recipientsPending, query: map[string]string{"audience": "students"}},
+		"listStaffThreads":          {query: map[string]string{"tab": "all"}},
+		"getStaffDirectThread":      {omit: []string{"after"}, excuse: paged, exempt: map[string]string{"path studentId": anyStudent}},
+		"postStaffDirectMessage":    {fresh: freshAttachment, excuse: posted, body: messagePost, exempt: map[string]string{"path studentId": anyStudent}},
+		"markStaffDirectThreadRead": {excuse: pointed, body: messageRead, exempt: map[string]string{"path studentId": anyStudent}},
+		"getStaffClassThread":       {omit: []string{"after"}, excuse: paged},
+		"postClassAnnouncement":     {fresh: freshAttachment, excuse: posted, body: messagePost},
+		"markStaffClassThreadRead":  {excuse: pointed, body: messageRead},
+		"listMessageRecipients": {each: []isoCase{
+			{query: map[string]string{"audience": "students"}},
+			{pending: recipientsPending, query: map[string]string{"audience": "colleagues"}, omit: []string{"classId"}},
+		}},
 		"listColleagueThreads":           {pending: colleaguesPending},
 		"getColleagueThread":             {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}},
 		"postColleagueMessage":           {pending: colleaguesPending, as: map[string]string{"path colleagueId": "messaging-peer"}, body: messagePost},
