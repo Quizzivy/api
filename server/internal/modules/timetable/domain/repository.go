@@ -78,14 +78,16 @@ type Repository interface {
 	// attendance ErrHasAttendance.
 	DeleteOneOff(ctx context.Context, scope access.Scope, id SessionID, by Writer) error
 	// EditSeries locks the series' class and the series, and stores the split
-	// plan makes of it, told whether the occurrence dated today (in the
-	// series' zone) has attendance, with one session_series.updated row; a
-	// split with no fields writes nothing.
-	EditSeries(ctx context.Context, scope access.Scope, seriesID string, plan func(s Series, attendedOn func(time.Time) bool) (Split, error), by Writer) (SeriesEdit, error)
+	// plan makes of it and of the series' per-date rows, deleting the rows
+	// from Split.From on that the old series does not keep (Series.Keeps),
+	// with one session_series.updated row; a split with no fields writes
+	// nothing.
+	EditSeries(ctx context.Context, scope access.Scope, seriesID string, plan func(s Series, rows []Row) (Split, error), by Writer) (SeriesEdit, error)
 	// EndSeries locks the series' class and the series and stores the ending
-	// plan makes of it: the last date set and the later per-date rows
-	// deleted, or the series removed, with one session_series.ended row. An
-	// occurrence dated after the last date with attendance is
+	// plan makes of it: the last date set and the later per-date rows it
+	// does not keep deleted, or the series removed, with one
+	// session_series.ended row. An occurrence that starts after the last date
+	// with attendance, or any with attendance when the series is removed, is
 	// ErrHasAttendance, and nothing changes. Removed is nil Series.
 	EndSeries(ctx context.Context, scope access.Scope, seriesID string, plan func(Series) (Ending, error), by Writer) (*Series, error)
 }

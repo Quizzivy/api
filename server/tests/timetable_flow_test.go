@@ -17,7 +17,8 @@ func sessionError(body map[string]any) (code string, details map[string]any) {
 // A teacher keeps a class's timetable over HTTP: a weekly session meeting in
 // the class's room, one date of it given its own room and back, a removal
 // refused for an occurrence and allowed for a one-off, a change from a date
-// on, and an end before its first date that removes it.
+// on, an end refused in the past and past the series' last date, and an end
+// before its first date that removes it.
 func TestATeacherKeepsAClassTimetable(t *testing.T) {
 	w := boot(t)
 	teacher := w.signedIn(w.createStaff("teacher"))
@@ -79,6 +80,12 @@ func TestATeacherKeepsAClassTimetable(t *testing.T) {
 	next, _ := edited["series"].(map[string]any)
 	if next == nil || next["id"] == series["id"] || next["startsOn"] != scheduleDay(14) || next["durationMinutes"] != float64(120) || edited["droppedChanges"] != float64(0) {
 		t.Fatalf("the change from a date on answered %v", edited)
+	}
+	for name, last := range map[string]string{"two days ago": scheduleDay(-2), "after its last date": scheduleDay(20)} {
+		code, details := sessionError(teacher.must(http.StatusBadRequest, http.MethodPost, seriesPath+"/end", map[string]any{"lastDate": last}))
+		if _, named := details["lastDate"]; code != "VALIDATION_FAILED" || !named {
+			t.Errorf("an end %s answered %s %v", name, code, details)
+		}
 	}
 	ended := teacher.must(http.StatusOK, http.MethodPost, seriesPath+"/end", map[string]any{"lastDate": scheduleDay(7)})
 	if ended["endsOn"] != scheduleDay(7) {

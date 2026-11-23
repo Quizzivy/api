@@ -26,7 +26,8 @@ func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-09-07", ptr("2027-01-11"))
 	later := domain.Clock{Hour: 19, Minute: 30}
 	today := date("2026-11-23")
-	split, err := s.SplitAt(domain.SeriesChange{Start: &later}, today, today, true)
+	attended := []domain.Row{occurrenceRow(t, s, "2026-11-23", "2026-11-23 18:00", true)}
+	split, err := s.SplitAt(domain.SeriesChange{Start: &later}, today, today, attended)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,8 @@ func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	if len(split.Fields) != 1 || split.Fields[0] != "startTime" {
 		t.Errorf("the split names %v", split.Fields)
 	}
-	plain, err := s.SplitAt(domain.SeriesChange{Start: &later}, today, today, false)
+	unmarked := []domain.Row{occurrenceRow(t, s, "2026-11-23", "2026-11-23 18:00", false)}
+	plain, err := s.SplitAt(domain.SeriesChange{Start: &later}, today, today, unmarked)
 	if err != nil || !plain.From.Equal(today) || !plain.Old.EndsOn.Equal(date("2026-11-22")) {
 		t.Errorf("without attendance today the split is from %s, the old series ending %v (%v)", plain.From, plain.Old.EndsOn, err)
 	}
@@ -53,12 +55,12 @@ func TestASplitRefusesThePastAndAfterTheEnd(t *testing.T) {
 	longer := 120
 	today := date("2026-11-23")
 	for name, from := range map[string]time.Time{"yesterday": date("2026-11-22"), "after the end": date("2026-11-30")} {
-		_, err := s.SplitAt(domain.SeriesChange{DurationMinutes: &longer}, from, today, false)
+		_, err := s.SplitAt(domain.SeriesChange{DurationMinutes: &longer}, from, today, nil)
 		if got := refusedField(t, err); got != "fromDate" {
 			t.Errorf("%s refused %s", name, got)
 		}
 	}
-	_, err := s.SplitAt(domain.SeriesChange{DurationMinutes: &longer}, today, today, true)
+	_, err := s.SplitAt(domain.SeriesChange{DurationMinutes: &longer}, today, today, []domain.Row{occurrenceRow(t, s, "2026-11-23", "2026-11-23 18:00", true)})
 	if got := refusedField(t, err); got != "fromDate" {
 		t.Errorf("a last day with attendance refused %s", got)
 	}
@@ -69,7 +71,7 @@ func TestASplitRefusesThePastAndAfterTheEnd(t *testing.T) {
 func TestASplitBeforeTheFirstDateChangesTheSeriesInPlace(t *testing.T) {
 	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-12-07", nil)
 	friday := domain.Weekday(5)
-	split, err := s.SplitAt(domain.SeriesChange{Weekday: &friday, Room: domain.TextPatch{Set: true}}, date("2026-11-23"), date("2026-11-23"), false)
+	split, err := s.SplitAt(domain.SeriesChange{Weekday: &friday, Room: domain.TextPatch{Set: true}}, date("2026-11-23"), date("2026-11-23"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,29 +79,94 @@ func TestASplitBeforeTheFirstDateChangesTheSeriesInPlace(t *testing.T) {
 		t.Errorf("the split is %+v", split)
 	}
 	same := s.Weekday
-	unchanged, err := s.SplitAt(domain.SeriesChange{Weekday: &same}, date("2026-11-23"), date("2026-11-23"), false)
+	unchanged, err := s.SplitAt(domain.SeriesChange{Weekday: &same}, date("2026-11-23"), date("2026-11-23"), nil)
 	if err != nil || len(unchanged.Fields) != 0 {
 		t.Errorf("a change to the same weekday names %v (%v)", unchanged.Fields, err)
 	}
 }
 
-// TestEndingBeforeTheStartRemovesTheSeries removes a series whose last date
-// is before its first, ends it on any other, and refuses one more than 731
-// days after its first date.
-func TestEndingBeforeTheStartRemovesTheSeries(t *testing.T) {
-	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-12-07", nil)
-	if end, err := s.EndOn(date("2026-12-06")); err != nil || !end.Remove {
-		t.Errorf("the day before the first date: %+v, %v", end, err)
+func occurrenceRow(t *testing.T, s domain.Series, scheduled, starts string, attended bool) domain.Row {
+	t.Helper()
+	return domain.Row{ID: "row-" + scheduled, ClassID: s.ClassID, SeriesID: &s.ID, SeriesDate: ptr(date(scheduled)),
+		StartsAt: local(t, s.TimeZone, starts), DurationMinutes: s.DurationMinutes, HasAttendance: attended}
+}
+
+// TestASplitStartsAfterEveryDateTheOldSeriesKeeps changes a Monday series
+// from today, 23 November, whose 30 November occurrence was moved to Friday
+// 20 November and has happened. The old series keeps that row, so the change
+// starts on 1 December: the new series never computes the 30th beside it. A
+// row moved to a later day than today is not kept, and moves nothing.
+func TestASplitStartsAfterEveryDateTheOldSeriesKeeps(t *testing.T) {
+	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-09-07", ptr("2027-01-11"))
+	longer := 120
+	today := date("2026-11-23")
+	moved := occurrenceRow(t, s, "2026-11-30", "2026-11-20 18:00", false)
+	later := occurrenceRow(t, s, "2026-12-07", "2026-12-04 18:00", false)
+	if !s.Keeps(moved, today) || s.Keeps(later, today) {
+		t.Fatalf("the old series keeps the row moved earlier: %v, and the one moved later: %v", s.Keeps(moved, today), s.Keeps(later, today))
 	}
-	if end, err := s.EndOn(date("2026-12-07")); err != nil || end.Remove || !end.LastDate.Equal(date("2026-12-07")) {
+	split, err := s.SplitAt(domain.SeriesChange{DurationMinutes: &longer}, today, today, []domain.Row{later, moved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !split.From.Equal(date("2026-12-01")) || !split.Old.EndsOn.Equal(date("2026-11-30")) || !split.Next.StartsOn.Equal(date("2026-12-01")) {
+		t.Errorf("the split is from %s, the old series ending %s", split.From, split.Old.EndsOn)
+	}
+}
+
+// TestEndingBeforeTheStartRemovesTheSeries removes a series that has not
+// begun (its first date is today or later) when its last date is before its
+// first, ends it on any other day from yesterday on, and refuses one more
+// than 731 days after its first date.
+func TestEndingBeforeTheStartRemovesTheSeries(t *testing.T) {
+	today := date("2026-11-23")
+	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-12-07", nil)
+	for _, last := range []string{"2026-12-06", "2026-11-22"} {
+		if end, err := s.EndOn(date(last), today); err != nil || !end.Remove {
+			t.Errorf("%s, before the first date: %+v, %v", last, end, err)
+		}
+	}
+	if end, err := s.EndOn(date("2026-12-07"), today); err != nil || end.Remove || !end.LastDate.Equal(date("2026-12-07")) {
 		t.Errorf("the first date: %+v, %v", end, err)
 	}
-	if end, err := s.EndOn(date("2028-12-07")); err != nil || end.Remove {
+	if end, err := s.EndOn(date("2028-12-07"), today); err != nil || end.Remove {
 		t.Errorf("731 days on: %+v, %v", end, err)
 	}
-	_, err := s.EndOn(date("2028-12-08"))
+	_, err := s.EndOn(date("2028-12-08"), today)
 	if got := refusedField(t, err); got != "lastDate" {
 		t.Errorf("732 days on refused %s", got)
+	}
+	first := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-11-23", nil)
+	if end, err := first.EndOn(date("2026-11-22"), today); err != nil || !end.Remove {
+		t.Errorf("yesterday, on a series whose first date is today: %+v, %v", end, err)
+	}
+	begun := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-11-22", nil)
+	if end, err := begun.EndOn(date("2026-11-22"), today); err != nil || end.Remove {
+		t.Errorf("yesterday, on a series that began yesterday: %+v, %v", end, err)
+	}
+}
+
+// TestAnEndNeverRewritesThePastOrLengthensASeries refuses, naming lastDate, a
+// last date before yesterday in the series' zone, also on a series that has
+// not begun, and one after the series' current last date.
+func TestAnEndNeverRewritesThePastOrLengthensASeries(t *testing.T) {
+	today := date("2026-11-23")
+	for name, c := range map[string]struct {
+		series domain.Series
+		last   string
+	}{
+		"two days ago":                {weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-09-07", nil), "2026-11-21"},
+		"before the start, long ago":  {weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-12-07", nil), "2026-11-01"},
+		"after the current last date": {weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-09-07", ptr("2026-11-30")), "2026-12-07"},
+	} {
+		_, err := c.series.EndOn(date(c.last), today)
+		if got := refusedField(t, err); got != "lastDate" {
+			t.Errorf("%s refused %s", name, got)
+		}
+	}
+	s := weekly("old", "Asia/Ho_Chi_Minh", 1, "18:00", "2026-09-07", ptr("2026-11-30"))
+	if end, err := s.EndOn(date("2026-11-30"), today); err != nil || !end.LastDate.Equal(date("2026-11-30")) {
+		t.Errorf("the current last date: %+v, %v", end, err)
 	}
 }
 

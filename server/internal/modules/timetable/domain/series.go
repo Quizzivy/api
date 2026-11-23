@@ -275,7 +275,7 @@ func (c SeriesChange) Over(s Series) (Series, []string) {
 // first date the change applies to. With InPlace, nothing of Old has come yet
 // (From is on or before its first date), so Next is Old itself, changed; else
 // Old ends the day before From and Next is a new series from From to Old's last
-// date. Either way, Old's per-date rows from From on without attendance are
+// date. Either way, Old's per-date rows that Old does not keep (Keeps) are
 // dropped.
 type Split struct {
 	Old     Series
@@ -285,19 +285,30 @@ type Split struct {
 	Fields  []string
 }
 
+// DayStart is the instant day begins in the series' zone.
+func (s Series) DayStart(day time.Time) time.Time { return Clock{}.On(day, s.Location()) }
+
+// Keeps reports whether s keeps its per-date row r when it stops meeting
+// before from: r has attendance, or it starts before from begins (it was moved
+// earlier, and may have happened). The past is never rewritten.
+func (s Series) Keeps(r Row, from time.Time) bool {
+	return r.HasAttendance || r.StartsAt.Before(s.DayStart(from))
+}
+
 // SplitAt plans change to s from the date from, judged on today in the
-// series' zone: from before today, or after the series' last date, is refused
-// naming fromDate. When from is today and today's occurrence has attendance
-// (attendedToday), the change starts tomorrow. A change that alters nothing
-// has no Fields, and nothing is to be written.
-func (s Series) SplitAt(change SeriesChange, from, today time.Time, attendedToday bool) (Split, error) {
+// series' zone, over rows, the series' per-date rows: from before today is
+// refused naming fromDate. The change starts after the scheduled date of
+// every row from then on that s keeps, so the new series never computes a
+// date the old one still holds: tomorrow when today's occurrence has
+// attendance. A start after the series' last date is refused naming
+// fromDate. A change that alters nothing has no Fields, and nothing is to be
+// written.
+func (s Series) SplitAt(change SeriesChange, from, today time.Time, rows []Row) (Split, error) {
 	from, today = Day(from), Day(today)
 	if from.Before(today) {
 		return Split{}, validation.Refuse("fromDate", "Chỉ đổi được buổi học từ hôm nay trở đi.", "A weekly session can be changed from today on only.")
 	}
-	if from.Equal(today) && attendedToday {
-		from = from.AddDate(0, 0, 1)
-	}
+	from = s.after(from, rows)
 	if s.EndsOn != nil && from.After(*s.EndsOn) {
 		return Split{}, validation.Refuse("fromDate", "Ngày này sau buổi cuối của lịch học.", "This date is after the weekly session's last date.")
 	}
@@ -313,19 +324,40 @@ func (s Series) SplitAt(change SeriesChange, from, today time.Time, attendedToda
 	return out, nil
 }
 
-// Ending is how a series stops at a last date: with Remove, the last date is
-// before its first, nothing of it has happened, and the series goes.
+func (s Series) after(from time.Time, rows []Row) time.Time {
+	for moved := true; moved; {
+		moved = false
+		for _, r := range rows {
+			if r.SeriesDate != nil && !r.SeriesDate.Before(from) && s.Keeps(r, from) {
+				from, moved = r.SeriesDate.AddDate(0, 0, 1), true
+			}
+		}
+	}
+	return from
+}
+
+// Ending is how a series stops at a last date: with Remove, the series has not
+// begun and the last date is before its first, so none of it has happened and
+// the series goes.
 type Ending struct {
 	LastDate time.Time
 	Remove   bool
 }
 
-// EndOn plans ending s on last, refusing naming lastDate one more than
-// MaxSeriesDays after its first date.
-func (s Series) EndOn(last time.Time) (Ending, error) {
-	last = Day(last)
-	if last.After(s.StartsOn.AddDate(0, 0, MaxSeriesDays)) {
+// EndOn plans ending s on last, judged on today in the series' zone. Refused
+// naming lastDate: a date before yesterday, since the past is never rewritten;
+// one after the series' current last date, since an end never lengthens a
+// series (the old half of a split would meet again beside the new one); and
+// one more than MaxSeriesDays after its first date.
+func (s Series) EndOn(last, today time.Time) (Ending, error) {
+	last, today = Day(last), Day(today)
+	switch {
+	case last.Before(today.AddDate(0, 0, -1)):
+		return Ending{}, validation.Refuse("lastDate", "Không thể dừng lịch học trước hôm qua.", "A weekly session cannot stop before yesterday.")
+	case s.EndsOn != nil && last.After(*s.EndsOn):
+		return Ending{}, validation.Refuse("lastDate", "Ngày này sau buổi cuối của lịch học.", "This date is after the weekly session's last date.")
+	case last.After(s.StartsOn.AddDate(0, 0, MaxSeriesDays)):
 		return Ending{}, validation.Refuse("lastDate", "Buổi học lặp lại không kéo dài quá hai năm.", "A weekly session cannot run for more than two years.")
 	}
-	return Ending{LastDate: last, Remove: last.Before(s.StartsOn)}, nil
+	return Ending{LastDate: last, Remove: last.Before(s.StartsOn) && !s.StartsOn.Before(today)}, nil
 }

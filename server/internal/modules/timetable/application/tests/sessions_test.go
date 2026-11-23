@@ -271,10 +271,9 @@ func TestDeleteRemovesOnlyAOneOffWithoutAttendance(t *testing.T) {
 
 // TestASplitWithAttendanceTodayStartsTomorrow changes a Monday series on
 // Monday 23 November, whose occurrence today has attendance. The change
-// starts tomorrow: the old series ends today, the new one runs from tomorrow
-// to the old last date, the per-date change of 30 November is dropped and
-// counted, and the 7 December row, which has attendance, stays with the old
-// series. Today's occurrence keeps its time.
+// starts tomorrow: the old series ends today and keeps today's row, the new
+// one runs from tomorrow to the old last date, and the per-date change of 30
+// November is dropped and counted. Today's occurrence keeps its time.
 func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	w := newWorld(t)
 	class := w.class(w.a, nil)
@@ -284,8 +283,6 @@ func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	today := w.patch(w.a, domain.OccurrenceID(old.ID, day("2026-11-23")).String(), domain.Patch{Note: domain.TextPatch{Set: true, Value: ptr("Kiểm tra")}})
 	w.mark(today.RowID, w.student(), w.a)
 	w.patch(w.a, domain.OccurrenceID(old.ID, day("2026-11-30")).String(), domain.Patch{Note: domain.TextPatch{Set: true, Value: ptr("Phòng 3")}})
-	kept := w.patch(w.a, domain.OccurrenceID(old.ID, day("2026-12-07")).String(), domain.Patch{Date: ptr(day("2026-11-20"))})
-	w.mark(kept.RowID, w.student(), w.a)
 
 	later := domain.Clock{Hour: 19, Minute: 30}
 	edit, err := w.app.Commands.UpdateSeries.Handle(context.Background(), command.UpdateSeries{
@@ -300,7 +297,7 @@ func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	if ends := w.id(`SELECT to_char(ends_on, 'YYYY-MM-DD') FROM app.class_session_series WHERE id = $1::uuid`, old.ID); ends != "2026-11-23" {
 		t.Errorf("the old series ends %s", ends)
 	}
-	if rows := w.rowsOf(old.ID); len(rows) != 2 || rows["2026-11-23"] == "" || rows["2026-12-07"] == "" {
+	if rows := w.rowsOf(old.ID); len(rows) != 1 || rows["2026-11-23"] == "" {
 		t.Errorf("the old series keeps rows %v", rows)
 	}
 	week := w.week(w.a, "2026-11-23")
@@ -315,6 +312,38 @@ func TestASplitWithAttendanceTodayStartsTomorrow(t *testing.T) {
 	last := audit[len(audit)-1]
 	if last.Action != "session_series.updated" || last.EntityID != old.ID || last.Diff["newSeriesId"] != edit.Series.ID || last.Diff["droppedChanges"] != float64(1) || last.Diff["fromDate"] != "2026-11-24" {
 		t.Errorf("the split audited %+v", last)
+	}
+}
+
+// TestASplitStartsAfterAMovedOccurrenceTheOldSeriesKeeps changes a Monday
+// series from today, 23 November, after its 30 November occurrence was moved
+// to Friday 20 November, which has passed. The old series keeps that row, so
+// the change starts on 1 December, nothing is dropped, and the new series
+// computes no 30 November beside the moved one.
+func TestASplitStartsAfterAMovedOccurrenceTheOldSeriesKeeps(t *testing.T) {
+	w := newWorld(t)
+	d := weekly("2026-11-02", "18:00")
+	d.EndsOn = ptr(day("2027-01-11"))
+	old := w.create(w.a, w.class(w.a, nil), d).Series
+	moved := w.patch(w.a, domain.OccurrenceID(old.ID, day("2026-11-30")).String(), domain.Patch{Date: ptr(day("2026-11-20"))})
+	longer := 120
+	edit, err := w.app.Commands.UpdateSeries.Handle(context.Background(), command.UpdateSeries{
+		Actor: by(w.a), SeriesID: old.ID, FromDate: day("2026-11-23"), Change: domain.SeriesChange{DurationMinutes: &longer},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit.Dropped != 0 || !edit.Series.StartsOn.Equal(day("2026-12-01")) {
+		t.Fatalf("the split is %+v", edit)
+	}
+	if rows := w.rowsOf(old.ID); len(rows) != 1 || rows["2026-11-30"] == "" {
+		t.Errorf("the old series keeps rows %v", rows)
+	}
+	if week := w.week(w.a, "2026-11-30"); len(week) != 0 {
+		t.Errorf("the week of 30 November holds %+v", week)
+	}
+	if week := w.week(w.a, "2026-11-16"); len(week) != 2 || week[1].ID != moved.ID || week[1].Date.Format("2006-01-02") != "2026-11-20" {
+		t.Errorf("the week of the move holds %+v", week)
 	}
 }
 
@@ -364,13 +393,13 @@ func TestEndingBeforeTheStartRemovesTheSeries(t *testing.T) {
 func TestEndingKeepsAttendanceAttached(t *testing.T) {
 	w := newWorld(t)
 	s := w.create(w.a, w.class(w.a, nil), weekly("2026-11-02", "18:00")).Series
-	marked := w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-11-16")).String(), domain.Patch{Note: domain.TextPatch{Set: true, Value: ptr("Ôn tập")}})
+	marked := w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-11-23")).String(), domain.Patch{Note: domain.TextPatch{Set: true, Value: ptr("Ôn tập")}})
 	w.mark(marked.RowID, w.student(), w.a)
 	w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-12-07")).String(), domain.Patch{Cancelled: ptr(true)})
 	end := func(last string) (*domain.Series, error) {
 		return w.app.Commands.EndSeries.Handle(context.Background(), command.EndSeries{Actor: by(w.a), SeriesID: s.ID, LastDate: day(last)})
 	}
-	if _, err := end("2026-11-09"); !errors.Is(err, domain.ErrHasAttendance) {
+	if _, err := end("2026-11-22"); !errors.Is(err, domain.ErrHasAttendance) {
 		t.Errorf("ending before the marked date: %v", err)
 	}
 	if rows := w.rowsOf(s.ID); len(rows) != 2 {
@@ -380,11 +409,36 @@ func TestEndingKeepsAttendanceAttached(t *testing.T) {
 	if err != nil || ended == nil || !ended.EndsOn.Equal(day("2026-11-30")) {
 		t.Fatalf("ending after it: %+v, %v", ended, err)
 	}
-	if rows := w.rowsOf(s.ID); len(rows) != 1 || rows["2026-11-16"] == "" {
+	if rows := w.rowsOf(s.ID); len(rows) != 1 || rows["2026-11-23"] == "" {
 		t.Errorf("the ended series keeps rows %v", rows)
 	}
 	if _, err := w.app.Commands.EndSeries.Handle(context.Background(), command.EndSeries{Actor: by(w.b), SeriesID: s.ID, LastDate: day("2026-11-30")}); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("another teacher's series: %v", err)
+	}
+}
+
+// TestAnEndKeepsTheRowsMovedBeforeIt ends a Monday series today, 23
+// November. Its 30 November occurrence was moved to 20 November and has
+// attendance, and its 7 December one was moved to 21 November: both happened
+// before the end and stay with the series, and the attendance does not refuse
+// the end. The cancelled 14 December is dropped.
+func TestAnEndKeepsTheRowsMovedBeforeIt(t *testing.T) {
+	w := newWorld(t)
+	s := w.create(w.a, w.class(w.a, nil), weekly("2026-11-02", "18:00")).Series
+	attended := w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-11-30")).String(), domain.Patch{Date: ptr(day("2026-11-20"))})
+	w.mark(attended.RowID, w.student(), w.a)
+	w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-12-07")).String(), domain.Patch{Date: ptr(day("2026-11-21"))})
+	w.patch(w.a, domain.OccurrenceID(s.ID, day("2026-12-14")).String(), domain.Patch{Cancelled: ptr(true)})
+	ended, err := w.app.Commands.EndSeries.Handle(context.Background(), command.EndSeries{Actor: by(w.a), SeriesID: s.ID, LastDate: day("2026-11-23")})
+	if err != nil || ended == nil {
+		t.Fatalf("ending today: %+v, %v", ended, err)
+	}
+	if rows := w.rowsOf(s.ID); len(rows) != 2 || rows["2026-11-30"] == "" || rows["2026-12-07"] == "" {
+		t.Errorf("the ended series keeps rows %v", rows)
+	}
+	audit := w.audited(w.a)
+	if last := audit[len(audit)-1]; last.Action != "session_series.ended" || last.Diff["droppedChanges"] != float64(1) {
+		t.Errorf("the end audited %+v", last)
 	}
 }
 
