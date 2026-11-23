@@ -844,7 +844,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 64,
-        "description": "A class session, opaque to the client: a one-off session's uuid, or a\nweekly occurrence written `{seriesId}.{yyyymmdd}` with the date it\nwas scheduled for, which stays its id when the session moves. An\noccurrence's id is the same whether or not it has a row. One that is\nmalformed, unknown or outside the caller's reach answers 404, never\n400, so it carries no pattern.\n",
+        "description": "A class session, opaque to the client: a one-off session's uuid, or a\nweekly occurrence written `{seriesId}.{yyyymmdd}` with the date it\nwas scheduled for, which stays its id when the session moves. An\noccurrence's id is the same whether or not it has a row. One that is\nmalformed, unknown or outside the caller's reach answers 404, never\n400, so it carries no pattern. A session of an archived class that\nstarts at or after the class was archived does not exist, for every\nread and write; the class's sessions before it stay, and restoring\nthe class brings the later ones back.\n",
         "examples": [
           "019535d9-3df7-79fb-b466-fa907fa17f9e.20260922"
         ]
@@ -31448,7 +31448,7 @@
           "teacher-schedule"
         ],
         "summary": "Stop repeating a weekly session",
-        "description": "Sets the series' last date (`SeriesEnd`) and removes its single-date\nchanges after it. A `lastDate` before `startsOn` removes the series.\nOne audit row, `session_series.ended`, entity `class_session_series`,\nwhether the series ended or was removed.\n",
+        "description": "Sets the series' last date (`SeriesEnd`) and removes its single-date\nchanges that happen after it, judged by when each one happens, not by\nthe date it was scheduled for. The past is never rewritten: a\n`lastDate` before yesterday in the series' zone, or after the series'\ncurrent last date, answers `400 VALIDATION_FAILED` naming `lastDate`.\nA series that has not started yet (`startsOn` today or later) is\nremoved when `lastDate` is before `startsOn`.\nOne audit row, `session_series.ended`, entity `class_session_series`,\nwhether the series ended or was removed.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -31471,7 +31471,7 @@
             }
           },
           "204": {
-            "description": "The series was removed, since `lastDate` is before it started."
+            "description": "The series was removed, since it has not started and `lastDate` is before its first date."
           },
           "400": {
             "description": "The body fails its schema, or `VALIDATION_FAILED` naming `lastDate` (`SeriesEnd`).",
