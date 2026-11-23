@@ -66,6 +66,11 @@ type Repository interface {
 	// FirstMessageAt is when the first message of staffID's thread with
 	// studentID was written, nil while the thread has none.
 	FirstMessageAt(ctx context.Context, staffID, studentID string) (*time.Time, error)
+	// StudentRecipients returns at most f.Limit+1 students for the New
+	// message picker after the row f.After, by folded name and id: every
+	// account the caller may write to, matched on the name and kept by f's
+	// one filter. A class f's class scope does not reach answers ErrNotFound.
+	StudentRecipients(ctx context.Context, f RecipientFilter) ([]Recipient, error)
 
 	// StudentFacts reads what decides studentID's direct thread with
 	// teacherID.
