@@ -217,6 +217,27 @@ func freshOneOff(_ *iso, own *party) *party {
 	return own.with("session", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", oneOffSession())))
 }
 
+// freshStartedOneOff and freshStartedOccurrence give the caller a session of
+// yesterday, a one-off and the first occurrence of a weekly series, which
+// takes attendance: the world's own sessions are ahead, and a save refuses
+// those before it reads the marks.
+func freshStartedOneOff(_ *iso, own *party) *party {
+	return own.with("session", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", map[string]any{
+		"date": scheduleDay(-1), "startTime": "08:00", "durationMinutes": 60, "repeatWeekly": false,
+	})))
+}
+
+func freshStartedOccurrence(_ *iso, own *party) *party {
+	return own.with("occurrence", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", map[string]any{
+		"date": scheduleDay(-1), "startTime": "08:00", "durationMinutes": 60, "repeatWeekly": true,
+	})))
+}
+
+// oneMark is the minimal register a save takes: one student, present.
+func oneMark() map[string]any {
+	return map[string]any{"marks": []any{map[string]any{"studentId": "", "status": "present"}}}
+}
+
 func shareBody(kind string) func(*iso, *party, string) any {
 	return func(*iso, *party, string) any {
 		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
@@ -305,9 +326,8 @@ const (
 	// pending case only needs a request the contract accepts, so as points the
 	// kinds it names at ids the world holds; a session id is opaque text, so
 	// any uuid is a well-formed one. Each task replaces its cases.
-	calendarPending   = "T-R8.5: the calendar"
-	attendancePending = "T-R8.6: attendance"
-	weekPending       = "T-R8.8: the student's week"
+	calendarPending = "T-R8.5: the calendar"
+	weekPending     = "T-R8.8: the student's week"
 
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
@@ -641,10 +661,15 @@ func isolationCases() map[string]isoCase {
 		"updateSessionSeries":    {body: fixed(map[string]any{"fromDate": scheduleDay(7), "durationMinutes": 120})},
 		"endSessionSeries":       {body: fixed(map[string]any{"lastDate": scheduleDay(70)})},
 		"getCalendar":            {pending: calendarPending, query: map[string]string{"from": "2026-09-21", "to": "2026-09-27"}},
-		"listAttendanceSessions": {pending: attendancePending},
-		"getSessionAttendance":   {pending: attendancePending, as: map[string]string{"path sessionId": "question"}},
-		"saveSessionAttendance": {pending: attendancePending, as: map[string]string{"path sessionId": "question"},
-			body: fixed(map[string]any{"marks": []any{map[string]any{"studentId": "", "status": "present"}}})},
+		"listAttendanceSessions": {},
+		"getSessionAttendance": {each: []isoCase{
+			{},
+			{as: map[string]string{"path sessionId": "occurrence"}},
+		}},
+		"saveSessionAttendance": {each: []isoCase{
+			{fresh: freshStartedOneOff, body: fixed(oneMark())},
+			{fresh: freshStartedOccurrence, as: map[string]string{"path sessionId": "occurrence"}, body: fixed(oneMark())},
+		}},
 		"getStudentWeek": {pending: weekPending, student: true},
 
 		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
