@@ -1,7 +1,7 @@
 // Package application is the timetable's use cases (T-R8.4): adding a session
 // to a class once or every week, changing or cancelling one date, removing a
 // one-off, changing a weekly session from a date on and stopping it, and the
-// reads that compute the sessions of a range.
+// reads that compute the sessions of a range and the calendar (T-R8.5).
 package application
 
 import (
@@ -35,6 +35,7 @@ type Commands struct {
 type Queries struct {
 	Occurrences cqrs.QueryHandler[query.Occurrences, []domain.Session]
 	GetSession  cqrs.QueryHandler[query.GetSession, domain.Session]
+	Calendar    cqrs.QueryHandler[query.Calendar, query.CalendarView]
 }
 
 // New builds the application over repo. Until WithTerms no term holds any
@@ -52,6 +53,7 @@ func New(repo domain.Repository) *Application {
 		Queries: Queries{
 			Occurrences: query.OccurrencesHandler{Service: service},
 			GetSession:  query.GetSessionHandler{Service: service},
+			Calendar:    query.CalendarHandler{Service: service},
 		},
 		service: service,
 	}
@@ -61,6 +63,14 @@ func New(repo domain.Repository) *Application {
 // first date, through terms.
 func (a *Application) WithTerms(terms ports.Terms) *Application {
 	a.service.Terms = terms
+	return a
+}
+
+// WithCalendar lists the terms ahead on the calendar through terms and draws
+// the assignment windows assignments reads beside its sessions. Until then the
+// calendar holds sessions only.
+func (a *Application) WithCalendar(terms ports.TermsAhead, assignments ports.Assignments) *Application {
+	a.Queries.Calendar = query.CalendarHandler{Service: a.service, Terms: terms, Assignments: assignments}
 	return a
 }
 
