@@ -45,9 +45,9 @@ const (
 	dayLayout = "2006-01-02"
 
 	seriesColumns = `s.id::text, s.class_id::text, c.name, s.weekday, to_char(s.start_time, 'HH24:MI'), s.duration_minutes,
-		s.room, s.starts_on, s.ends_on, s.time_zone`
+		s.room, s.starts_on, s.ends_on, s.time_zone, c.archived_at`
 	rowColumns = `r.id::text, r.class_id::text, c.name, r.series_id::text, r.series_date, r.starts_at, r.duration_minutes,
-		r.room, r.note, r.cancelled_at, EXISTS (SELECT 1 FROM app.attendance_marks m WHERE m.session_id = r.id)`
+		r.room, r.note, r.cancelled_at, EXISTS (SELECT 1 FROM app.attendance_marks m WHERE m.session_id = r.id), c.archived_at`
 
 	reached = `($1::boolean OR c.teacher_id = $2::uuid)`
 
@@ -69,7 +69,7 @@ func scanSeries(row pgx.Row) (domain.Series, error) {
 	var s domain.Series
 	var weekday, duration int16
 	var start string
-	if err := row.Scan(&s.ID, &s.ClassID, &s.ClassName, &weekday, &start, &duration, &s.Room, &s.StartsOn, &s.EndsOn, &s.TimeZone); err != nil {
+	if err := row.Scan(&s.ID, &s.ClassID, &s.ClassName, &weekday, &start, &duration, &s.Room, &s.StartsOn, &s.EndsOn, &s.TimeZone, &s.ClassArchivedAt); err != nil {
 		return domain.Series{}, err
 	}
 	clock, err := domain.ParseClock(start)
@@ -91,7 +91,7 @@ func scanRow(row pgx.Row) (domain.Row, error) {
 	var r domain.Row
 	var duration int16
 	if err := row.Scan(&r.ID, &r.ClassID, &r.ClassName, &r.SeriesID, &r.SeriesDate, &r.StartsAt, &duration,
-		&r.Room, &r.Note, &r.CancelledAt, &r.HasAttendance); err != nil {
+		&r.Room, &r.Note, &r.CancelledAt, &r.HasAttendance, &r.ClassArchivedAt); err != nil {
 		return domain.Row{}, err
 	}
 	r.DurationMinutes = int(duration)

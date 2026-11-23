@@ -25,8 +25,10 @@ func (m OccurrenceManager) viewer() *time.Location {
 // to the earlier of to's day and its last date, each start built from the
 // local date, start time and zone; a stored row in place of the occurrence it
 // names by (series_id, series_date), on the date it now falls on, so a moved
-// occurrence appears on its new date only; and the one-offs. The result is
-// sorted by start, then id.
+// occurrence appears on its new date only; and the one-offs. A session that
+// starts at or after its class was archived is left out (Archived), a row
+// still hiding the occurrence it names. The result is sorted by start, then
+// id.
 //
 // rows must hold every row of the series' classes that starts in the range or
 // names an occurrence whose date the range covers in its zone (a day either
@@ -61,7 +63,7 @@ func (m OccurrenceManager) stored(bySeries map[string]*Series, rows []Row, from,
 			}
 			stored[OccurrenceID(s.ID, *r.SeriesDate).String()] = true
 		}
-		if in(r.StartsAt, from, to) {
+		if in(r.StartsAt, from, to) && !Archived(r.StartsAt, r.ClassArchivedAt) {
 			out = append(out, m.fromRow(s, r))
 		}
 	}
@@ -81,7 +83,7 @@ func (m OccurrenceManager) walk(out []Session, s Series, stored map[string]bool,
 		if stored[OccurrenceID(s.ID, day).String()] {
 			continue
 		}
-		if session := m.Occurrence(s, nil, day); in(session.StartsAt, from, to) {
+		if session := m.Occurrence(s, nil, day); in(session.StartsAt, from, to) && !Archived(session.StartsAt, s.ClassArchivedAt) {
 			out = append(out, session)
 		}
 	}
