@@ -44,5 +44,6 @@ func (s EnrolNewMemberHandler) Handle(ctx context.Context, cmd EnrolNewMember) (
 		return result, err
 	}
 	s.Joined(ctx, result)
+	s.Schedule(ctx, &result)
 	return result, nil
 }

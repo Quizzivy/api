@@ -11,13 +11,17 @@ import (
 
 // Class is a class as its teacher reads it. AverageScore is set by the
 // handlers that attach it: it is nil when nothing is graded, and the student's
-// own views never carry a Class.
+// own views never carry a Class. Room is the class's own room, as stored;
+// Timetable, attached by the handlers from the class's active weekly series,
+// gives the slots of its schedule and, with Room, the room it meets in
+// (DerivedRoom).
 type Class struct {
 	ID                  string
 	Name                string
 	Description         *string
 	ScheduleLabel       *string
 	Room                *string
+	Timetable           Timetable
 	StudentCount        int
 	OpenAssignmentCount int
 	SelfJoinEnabled     bool
@@ -26,6 +30,10 @@ type Class struct {
 	JoinCode            *JoinCodeInfo
 	AverageScore        *stats.ClassScore
 }
+
+// DerivedRoom is where the class meets: its own room, else the one room all
+// its active series share, else nil.
+func (c Class) DerivedRoom() *string { return RoomOf(c.Room, c.Timetable) }
 
 // ListedClass is a row of the teacher's class list: the class and, when the
 // list was asked for codes and the caller may read this one, its code. Code is
@@ -53,7 +61,9 @@ type Member struct {
 // and who teaches it, with no code, no count and no roster. TeacherID is the
 // class's teacher, whose direct thread the class card opens (T-R7.10b).
 // TeacherAvatarKey is the stored key of the teacher's photo, which the handler
-// signs into TeacherAvatarURL.
+// signs into TeacherAvatarURL. Room is the class's own room and Timetable the
+// weekly pattern of its active series, slots and shared room only: no dates,
+// notes or cancellations.
 type MyClass struct {
 	ID               string
 	Name             string
@@ -64,8 +74,12 @@ type MyClass struct {
 	TeacherAvatarURL *string
 	ScheduleLabel    *string
 	Room             *string
+	Timetable        Timetable
 	JoinedAt         time.Time
 }
+
+// DerivedRoom is where the class meets, as Class.DerivedRoom.
+func (c MyClass) DerivedRoom() *string { return RoomOf(c.Room, c.Timetable) }
 
 // JoinCodeInfo is the metadata of a class's active join code, without the
 // code; getJoinCode reads the code itself (§13.3).

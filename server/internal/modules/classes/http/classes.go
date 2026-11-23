@@ -276,23 +276,27 @@ func toAPIScore(score *stats.ClassScore) *openapi.AttemptScore {
 	return &openapi.AttemptScore{Earned: score.Earned, Total: score.Total, PendingManual: score.PendingManual}
 }
 
-// labelledSchedule is a class's schedule before T-R8.7 derives slots from its
-// weekly series: no slots, and the class's own free-text label, the fallback
-// the contract names for a class without slots.
-func labelledSchedule(label *string) openapi.ClassSchedule {
-	return openapi.ClassSchedule{Slots: []openapi.ScheduleSlot{}, Label: label}
+// scheduleOf is a class's ClassSchedule (T-R8.7): the slots of its active
+// weekly series and its own free-text label, the fallback the contract names
+// for a class without slots. Nothing else: no date, note or cancellation.
+func scheduleOf(label *string, slots []domain.ScheduleSlot) openapi.ClassSchedule {
+	out := openapi.ClassSchedule{Slots: make([]openapi.ScheduleSlot, len(slots)), Label: label}
+	for i, s := range slots {
+		out.Slots[i] = openapi.ScheduleSlot{Weekday: s.Weekday, StartTime: s.StartTime, DurationMinutes: s.DurationMinutes}
+	}
+	return out
 }
 
-// toAPIAdminClass is the teacher's Class. Until T-R8.7 derives the room from
-// the series, room and ownRoom are both the class's stored room.
+// toAPIAdminClass is the teacher's Class: room is the derived room and
+// ownRoom the class's own, which an edit form prefills from.
 func toAPIAdminClass(c domain.Class) openapi.Class {
 	out := openapi.Class{
 		Id:                  httpapi.ParseUUID(c.ID),
 		Name:                c.Name,
 		Description:         c.Description,
 		ScheduleLabel:       c.ScheduleLabel,
-		Schedule:            labelledSchedule(c.ScheduleLabel),
-		Room:                c.Room,
+		Schedule:            scheduleOf(c.ScheduleLabel, c.Timetable.Slots),
+		Room:                c.DerivedRoom(),
 		OwnRoom:             c.Room,
 		StudentCount:        c.StudentCount,
 		OpenAssignmentCount: c.OpenAssignmentCount,
@@ -318,8 +322,8 @@ func toAPIListItem(c domain.ListedClass) openapi.ClassListItem {
 		Name:                c.Name,
 		Description:         c.Description,
 		ScheduleLabel:       c.ScheduleLabel,
-		Schedule:            labelledSchedule(c.ScheduleLabel),
-		Room:                c.Room,
+		Schedule:            scheduleOf(c.ScheduleLabel, c.Timetable.Slots),
+		Room:                c.DerivedRoom(),
 		OwnRoom:             c.Room,
 		StudentCount:        c.StudentCount,
 		OpenAssignmentCount: c.OpenAssignmentCount,

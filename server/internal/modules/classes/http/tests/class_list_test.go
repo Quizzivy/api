@@ -180,8 +180,8 @@ func TestAStudentsClassCarriesExactlyTheseFieldsAndNeverACountMemberOrAverage(t 
 		if got := keysOf(t, item); !slices.Equal(got, want) {
 			t.Errorf("item %d carries %v, want exactly %v: a student's class holds no count, roster, code or average, and a missing value is null, not absent", i, got, want)
 		}
-		// Until T-R8.7 derives slots from the series, the schedule is the
-		// class's label alone; slots is an empty list, never null.
+		// A class with no active series has a schedule of its label alone;
+		// slots is an empty list, never null.
 		if item.Schedule.Slots == nil || len(item.Schedule.Slots) != 0 || item.Schedule.Label != item.ScheduleLabel {
 			t.Errorf("item %d's schedule is %+v, want no slots and the label %v", i, item.Schedule, item.ScheduleLabel)
 		}
