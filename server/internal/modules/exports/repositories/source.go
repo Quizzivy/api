@@ -181,7 +181,8 @@ var queries = map[string]string{
 		 ORDER BY l.id`,
 	domain.MessagesFile: `
 		SELECT v.id::text AS id, v.kind AS kind, v.class_id::text AS class_id, v.staff_id::text AS staff_id,
-		       v.student_id::text AS student_id, count(m.id)::text AS message_count,
+		       v.student_id::text AS student_id, v.colleague_low_id::text AS colleague_a_id,
+		       v.colleague_high_id::text AS colleague_b_id, count(m.id)::text AS message_count,
 		       ` + at("min(m.created_at)") + ` AS first_message_at, ` + at("max(m.created_at)") + ` AS last_message_at
 		  FROM app.conversations v
 		  LEFT JOIN app.messages m ON m.conversation_id = v.id

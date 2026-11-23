@@ -136,6 +136,40 @@ func TestTheReadmeIsVietnameseThenEnglishAndDescribesEveryColumn(t *testing.T) {
 	}
 }
 
+// TestTheReadmeSaysAColleagueThreadIsCountsAndTwoParticipants fails when
+// README.txt leaves colleague threads (F2) out of messages_summary.csv's
+// description in either language, or stops saying that the file holds no
+// message's text, file name or attachment.
+func TestTheReadmeSaysAColleagueThreadIsCountsAndTwoParticipants(t *testing.T) {
+	readme := domain.Readme(domain.Files(false))
+	vi, en, _ := strings.Cut(readme, "\r\n==========\r\n")
+	section := func(half string) string {
+		_, rest, ok := strings.Cut(half, "\r\n"+domain.MessagesFile+"\r\n")
+		if !ok {
+			t.Fatalf("a half of the README does not describe %s", domain.MessagesFile)
+		}
+		if end := strings.Index(rest, ".csv\r\n"); end >= 0 {
+			rest = rest[:end]
+		}
+		return rest
+	}
+	for _, c := range []struct {
+		language, text string
+		want           []string
+	}{
+		{"vi", section(vi), []string{"giữa hai nhân viên", "colleague là tin nhắn giữa hai nhân viên",
+			"không có nội dung tin nhắn, tên tệp hay tệp đính kèm", "  colleague_a_id: ", "  colleague_b_id: "}},
+		{"en", section(en), []string{"between two staff members", "colleague for messages between two staff members",
+			"no message's text, no file's name and no attachment", "  colleague_a_id: ", "  colleague_b_id: "}},
+	} {
+		for _, want := range c.want {
+			if !strings.Contains(c.text, want) {
+				t.Errorf("the %s description of %s lacks %q", c.language, domain.MessagesFile, want)
+			}
+		}
+	}
+}
+
 func TestTheReadmeUsesWindowsLineEndings(t *testing.T) {
 	readme := domain.Readme(domain.Files(false))
 	if strings.Contains(strings.ReplaceAll(readme, "\r\n", ""), "\n") {
