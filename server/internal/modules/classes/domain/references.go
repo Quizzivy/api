@@ -8,6 +8,7 @@ type Reference string
 // deleteClass names in details.referencedBy.
 const (
 	ReferencedByAssignments Reference = "assignments"
+	ReferencedByAttendance  Reference = "attendance"
 	ReferencedByMembers     Reference = "members"
 	ReferencedByMessages    Reference = "messages"
 	ReferencedByOther       Reference = "other"

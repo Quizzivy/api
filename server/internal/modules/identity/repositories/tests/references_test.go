@@ -22,6 +22,10 @@ func TestAUsersConstraintTheMapDoesNotNameIsOther(t *testing.T) {
 		"conversations_student_id_fkey":        domain.ReferencedByMessages,
 		"conversations_staff_id_fkey":          domain.ReferencedByMessages,
 		"message_attachments_uploaded_by_fkey": domain.ReferencedByMessages,
+		"attendance_marks_student_id_fkey":     domain.ReferencedByAttendance,
+		"attendance_marks_marked_by_fkey":      domain.ReferencedByAttendance,
+		"terms_created_by_fkey":                domain.ReferencedByOwnedContent,
+		"class_sessions_created_by_fkey":       domain.ReferencedByOwnedContent,
 	} {
 		if got := repositories.UserReferencedBy(constraint); got != want {
 			t.Errorf("%q answers %q, want %q", constraint, got, want)

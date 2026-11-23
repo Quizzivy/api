@@ -19,6 +19,7 @@ func TestARefusedClassDeletionNamesWhatHoldsIt(t *testing.T) {
 	ctx := contextAs(t, access.Principal{UserID: uuid.NewString(), Permissions: access.NewSet(access.TeachingClassesWrite)})
 	for want, refusal := range map[openapi.ReferencedBy]error{
 		"assignments": &domain.ReferencedError{By: domain.ReferencedByAssignments},
+		"attendance":  &domain.ReferencedError{By: domain.ReferencedByAttendance},
 		"members":     &domain.ReferencedError{By: domain.ReferencedByMembers},
 		"messages":    &domain.ReferencedError{By: domain.ReferencedByMessages},
 		"other":       domain.ErrReferenced,

@@ -42,7 +42,7 @@ func restrictingKeys(t *testing.T, tables string) map[string]bool {
 }
 
 func TestEveryKeyThatRefusesAClassesDeletionIsNamed(t *testing.T) {
-	for name, deferrable := range restrictingKeys(t, "app.classes,app.class_join_codes") {
+	for name, deferrable := range restrictingKeys(t, "app.classes,app.class_join_codes,app.class_session_series,app.class_sessions") {
 		if repositories.ClassReferencedBy(name) == domain.ReferencedByOther {
 			t.Errorf("%s refuses a class's deletion but the map does not name it", name)
 		}

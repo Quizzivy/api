@@ -43,3 +43,41 @@ func TestDeletingAClassWithAPostedChannelNamesItsMessages(t *testing.T) {
 		t.Errorf("the class and its posts are %s, want 1|1", got)
 	}
 }
+
+// TestDeletingAClassWhoseOnlyReferenceIsAttendanceNamesIt keeps T-R8.2's
+// RESTRICT key from a mark to its session mapped: the class's delete reaches
+// the mark through the cascade to its sessions, and the refusal is a 409
+// naming attendance, never a 500. The class, its sessions and the mark stay.
+// A class with sessions but no attendance deletes, and its sessions with it.
+func TestDeletingAClassWhoseOnlyReferenceIsAttendanceNamesIt(t *testing.T) {
+	w := newClassWorld(t)
+	series := w.id(t, `INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, starts_on, time_zone, created_by)
+		VALUES ($1, 1, '18:00', 90, DATE '2026-09-07', 'Asia/Ho_Chi_Minh', $2) RETURNING id::text`, w.classA, w.a)
+	session := w.id(t, `INSERT INTO app.class_sessions (class_id, series_id, series_date, starts_at, duration_minutes, created_by)
+		VALUES ($1, $2, DATE '2026-09-14', TIMESTAMPTZ '2026-09-14 18:00+07', 90, $3) RETURNING id::text`, w.classA, series, w.a)
+	w.exec(t, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by) VALUES ($1, now(), 90, $2)`, w.classA, w.a)
+	w.exec(t, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at) VALUES ($1, $2, 'late', $3, now())`, session, w.studentA, w.a)
+	// The member is the class's only other row, and members cascade: the mark
+	// is what refuses.
+	w.exec(t, `UPDATE app.classes SET archived_at = now() WHERE id = $1`, w.classA)
+	_, err := w.svc.Commands.Delete.Handle(context.Background(), command.Delete{ClassID: w.classA, Actor: w.who(w.a)})
+	var refused *domain.ReferencedError
+	if !errors.Is(err, domain.ErrReferenced) || !errors.As(err, &refused) || refused.By != domain.ReferencedByAttendance {
+		t.Fatalf("deleting a class whose session has attendance answered %v, want referenced by attendance", err)
+	}
+	if got := w.id(t, `SELECT (SELECT count(*) FROM app.classes WHERE id = $1) || '|' || (SELECT count(*) FROM app.class_sessions WHERE class_id = $1)
+		|| '|' || (SELECT count(*) FROM app.attendance_marks WHERE session_id = $2)`, w.classA, session); got != "1|2|1" {
+		t.Errorf("the class, its sessions and the mark are %s, want 1|2|1", got)
+	}
+
+	w.exec(t, `INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, starts_on, time_zone, created_by)
+		VALUES ($1, 3, '08:00', 60, DATE '2026-09-09', 'Asia/Ho_Chi_Minh', $2)`, w.classB, w.b)
+	w.exec(t, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by) VALUES ($1, now(), 90, $2)`, w.classB, w.b)
+	w.exec(t, `UPDATE app.classes SET archived_at = now() WHERE id = $1`, w.classB)
+	if _, err := w.svc.Commands.Delete.Handle(context.Background(), command.Delete{ClassID: w.classB, Actor: w.who(w.b)}); err != nil {
+		t.Fatalf("deleting a class with sessions but no attendance answered %v", err)
+	}
+	if got := w.id(t, `SELECT (SELECT count(*) FROM app.class_session_series WHERE class_id = $1) || '|' || (SELECT count(*) FROM app.class_sessions WHERE class_id = $1)`, w.classB); got != "0|0" {
+		t.Errorf("the deleted class left series|sessions %s, want 0|0", got)
+	}
+}

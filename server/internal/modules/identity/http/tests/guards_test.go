@@ -58,6 +58,7 @@ func TestARefusedUserDeletionNamesWhatHoldsIt(t *testing.T) {
 	for want, err := range map[openapi.ReferencedBy]error{
 		"owned_content": &domain.ReferencedError{By: domain.ReferencedByOwnedContent},
 		"audit":         &domain.ReferencedError{By: domain.ReferencedByAudit},
+		"attendance":    &domain.ReferencedError{By: domain.ReferencedByAttendance},
 		"messages":      &domain.ReferencedError{By: domain.ReferencedByMessages},
 		"other":         domain.ErrReferenced,
 	} {
