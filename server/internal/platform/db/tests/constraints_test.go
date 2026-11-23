@@ -4,10 +4,13 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
@@ -2161,4 +2164,304 @@ func TestTheSuppressionListHoldsOneTrimmedLowerCasedAddressPerEvent(t *testing.T
 		mustExec(t, tx, insert, f.adminID+"@example.com", "bounced", "msg_"+f.adminID)
 		rejectsWith(t, tx, "email_suppressions_provider_event_id_key", insert, "other-"+f.adminID+"@example.com", "bounced", "msg_"+f.adminID)
 	})
+}
+
+// ---------------------------------------------------------------- timetable (T-R8.2)
+
+// termYear is a year no other test's terms use. Terms are organisation-wide
+// and the exclusion constraint compares every row, including those another
+// package's test holds in a transaction, so each test keeps to a year of its
+// own, far from any real term.
+func termYear(t *testing.T) int {
+	t.Helper()
+	nonce := make([]byte, 2)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	return 3000 + (int(nonce[0])<<8|int(nonce[1]))%6000
+}
+
+func termDate(year int, monthDay string) string {
+	return strconv.Itoa(year) + "-" + monthDay
+}
+
+// newClass inserts another class taught by teacher and returns its id.
+func newClass(t *testing.T, tx *sql.Tx, teacher string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.classes (name, teacher_id) VALUES ('Lớp khác ' || uuidv7(), $1) RETURNING id`, teacher).Scan(&id); err != nil {
+		t.Fatalf("class fixture: %v", err)
+	}
+	return id
+}
+
+// newSeries inserts a weekly Monday series of class, created by author, and
+// returns its id.
+func newSeries(t *testing.T, tx *sql.Tx, class, author string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, starts_on, time_zone, created_by)
+		VALUES ($1, 1, '18:00', 90, DATE '2026-09-07', 'Asia/Ho_Chi_Minh', $2) RETURNING id`, class, author).Scan(&id); err != nil {
+		t.Fatalf("series fixture: %v", err)
+	}
+	return id
+}
+
+// newOccurrence stores the series' occurrence of 2026-09-14 and returns its id.
+func newOccurrence(t *testing.T, tx *sql.Tx, class, series, author string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(`INSERT INTO app.class_sessions (class_id, series_id, series_date, starts_at, duration_minutes, created_by)
+		VALUES ($1, $2, DATE '2026-09-14', TIMESTAMPTZ '2026-09-14 18:00+07', 90, $3) RETURNING id`, class, series, author).Scan(&id); err != nil {
+		t.Fatalf("occurrence fixture: %v", err)
+	}
+	return id
+}
+
+// timetableRefusal is an insert refused by one constraint, given the
+// fixture's admin, student and class, and a series of that class, as $1 to $4.
+type timetableRefusal struct{ constraint, insert string }
+
+func refusesEachTimetableRow(t *testing.T, cases []timetableRefusal) {
+	t.Helper()
+	for _, c := range cases {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			series := newSeries(t, tx, f.classID, f.adminID)
+			rejectsWith(t, tx, c.constraint, c.insert, f.adminID, f.studentID, f.classID, series)
+		})
+	}
+}
+
+// TestTermsNeverOverlap fails when app.terms (00175) takes a term that shares
+// a day with another, its last day included, or one that ends before it
+// starts.
+func TestTermsNeverOverlap(t *testing.T) {
+	conn := migrated(t)
+	insert := `INSERT INTO app.terms (name, starts_on, ends_on, created_by) VALUES ($1, $2::date, $3::date, $4)`
+	for name, second := range map[string][2]string{
+		"inside the first":         {"03-01", "04-30"},
+		"over its start":           {"01-01", "02-10"},
+		"over its end":             {"05-20", "07-31"},
+		"sharing its last day":     {"05-31", "08-15"},
+		"sharing its first day":    {"01-10", "02-01"},
+		"around the whole of it":   {"01-01", "12-31"},
+		"on the same days exactly": {"02-01", "05-31"},
+	} {
+		withTx(t, conn, func(tx *sql.Tx, f fixture) {
+			year := termYear(t)
+			mustExec(t, tx, insert, "Học kỳ 1", termDate(year, "02-01"), termDate(year, "05-31"), f.adminID)
+			rejectsWith(t, tx, "terms_no_overlap", insert, "Học kỳ "+name, termDate(year, second[0]), termDate(year, second[1]), f.adminID)
+		})
+	}
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		year := termYear(t)
+		mustExec(t, tx, insert, "Học kỳ 1", termDate(year, "02-01"), termDate(year, "05-31"), f.adminID)
+		// The day after the last one is free, and a term may be a single day.
+		mustExec(t, tx, insert, "Học kỳ hè", termDate(year, "06-01"), termDate(year, "06-01"), f.adminID)
+		mustExec(t, tx, insert, "Học kỳ 2", termDate(year, "06-02"), termDate(year, "12-31"), f.adminID)
+	})
+	for _, c := range []struct{ constraint, name, startsOn, endsOn string }{
+		{"terms_ends_on_check", "Học kỳ ngược", "06-01", "05-31"},
+		{"terms_name_check", "   ", "06-01", "06-30"},
+		{"terms_name_check", strings.Repeat("ạ", 61), "06-01", "06-30"},
+	} {
+		withTx(t, conn, func(tx *sql.Tx, f fixture) {
+			year := termYear(t)
+			rejectsWith(t, tx, c.constraint, insert, c.name, termDate(year, c.startsOn), termDate(year, c.endsOn), f.adminID)
+		})
+	}
+}
+
+// TestASeriesIsAWeekdayATimeAndAtMostTwoYears fails when
+// app.class_session_series (00176) takes a weekday outside ISO's 1 to 7, a
+// length outside 15 to 480 minutes, an end before its start, or a run of more
+// than two years.
+func TestASeriesIsAWeekdayATimeAndAtMostTwoYears(t *testing.T) {
+	row := func(weekday, duration, startsOn, endsOn, room, zone string) string {
+		return `INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, room, starts_on, ends_on, time_zone, created_by)
+			SELECT $3, ` + weekday + `, '18:00', ` + duration + `, ` + room + `, DATE ` + startsOn + `, ` + endsOn + `, ` + zone + `, $1
+			 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`
+	}
+	const zone = `'Asia/Ho_Chi_Minh'`
+	refusesEachTimetableRow(t, []timetableRefusal{
+		{"class_session_series_weekday_check", row(`8`, `90`, `'2026-09-07'`, `NULL`, `NULL`, zone)},
+		{"class_session_series_weekday_check", row(`0`, `90`, `'2026-09-07'`, `NULL`, `NULL`, zone)},
+		{"class_session_series_duration_minutes_check", row(`1`, `14`, `'2026-09-07'`, `NULL`, `NULL`, zone)},
+		{"class_session_series_duration_minutes_check", row(`1`, `481`, `'2026-09-07'`, `NULL`, `NULL`, zone)},
+		{"class_session_series_ends_on_check", row(`1`, `90`, `'2026-09-07'`, `DATE '2026-09-06'`, `NULL`, zone)},
+		{"class_session_series_two_years", row(`1`, `90`, `'2026-09-07'`, `DATE '2028-09-08'`, `NULL`, zone)},
+		{"class_session_series_room_check", row(`1`, `90`, `'2026-09-07'`, `NULL`, `''`, zone)},
+		{"class_session_series_room_check", row(`1`, `90`, `'2026-09-07'`, `NULL`, `repeat('a', 61)`, zone)},
+		{"class_session_series_time_zone_check", row(`1`, `90`, `'2026-09-07'`, `NULL`, `NULL`, `repeat('a', 65)`)},
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		// The edges: Sunday, a quarter of an hour, eight hours, exactly two
+		// years (731 days, over a leap day), one day, and no end.
+		for _, c := range [][2]string{{"7, 15", "DATE '2028-09-07'"}, {"1, 480", "DATE '2026-09-07'"}, {"3, 90", "NULL"}} {
+			mustExec(t, tx, `INSERT INTO app.class_session_series (class_id, weekday, duration_minutes, start_time, starts_on, ends_on, room, time_zone, created_by)
+				SELECT $1, `+c[0]+`, '07:30', DATE '2026-09-07', `+c[1]+`, repeat('ạ', 60), 'America/Argentina/ComodRivadavia', $2`, f.classID, f.adminID)
+		}
+	})
+}
+
+// TestAnOccurrenceRowBelongsToItsSeriesAndItsClass fails when
+// app.class_sessions (00177) takes an occurrence date without a series, a
+// series without a date, an occurrence of another class's series, or a second
+// row for one occurrence.
+func TestAnOccurrenceRowBelongsToItsSeriesAndItsClass(t *testing.T) {
+	refusesEachTimetableRow(t, []timetableRefusal{
+		{"class_sessions_occurrence_check", `INSERT INTO app.class_sessions (class_id, series_date, starts_at, duration_minutes, created_by)
+			SELECT $3, DATE '2026-09-14', now(), 90, $1 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"class_sessions_occurrence_check", `INSERT INTO app.class_sessions (class_id, series_id, starts_at, duration_minutes, created_by)
+			SELECT $3, $4, now(), 90, $1 WHERE $2::uuid IS NOT NULL`},
+		{"class_sessions_duration_minutes_check", `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by)
+			SELECT $3, now(), 10, $1 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"class_sessions_room_check", `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, room, created_by)
+			SELECT $3, now(), 90, repeat('a', 61), $1 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"class_sessions_note_check", `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, note, created_by)
+			SELECT $3, now(), 90, '', $1 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+		{"class_sessions_note_check", `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, note, created_by)
+			SELECT $3, now(), 90, repeat('a', 201), $1 WHERE $2::uuid IS NOT NULL AND $4::uuid IS NOT NULL`},
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		other := newClass(t, tx, f.adminID)
+		series := newSeries(t, tx, f.classID, f.adminID)
+		rejectsWith(t, tx, "class_sessions_series_id_class_id_fkey", `INSERT INTO app.class_sessions (class_id, series_id, series_date, starts_at, duration_minutes, created_by)
+			VALUES ($1, $2, DATE '2026-09-14', TIMESTAMPTZ '2026-09-14 18:00+07', 90, $3)`, other, series, f.adminID)
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		series := newSeries(t, tx, f.classID, f.adminID)
+		newOccurrence(t, tx, f.classID, series, f.adminID)
+		// A one-off is unchecked by the series key, and two one-offs share
+		// their NULL pair.
+		for range 2 {
+			mustExec(t, tx, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, room, note, created_by)
+				VALUES ($1, now(), 480, repeat('ạ', 60), repeat('ạ', 200), $2)`, f.classID, f.adminID)
+		}
+		rejectsWith(t, tx, "class_sessions_series_id_series_date_key", `INSERT INTO app.class_sessions (class_id, series_id, series_date, starts_at, duration_minutes, created_by)
+			VALUES ($1, $2, DATE '2026-09-14', TIMESTAMPTZ '2026-09-15 18:00+07', 90, $3)`, f.classID, series, f.adminID)
+	})
+}
+
+// TestAMarkIsPresentLateOrAbsent fails when app.attendance_marks (00178)
+// takes a status the rate does not know, excused among them, a note outside 1
+// to 500 characters, or a second mark of one student at one session.
+func TestAMarkIsPresentLateOrAbsent(t *testing.T) {
+	mark := func(status, note string) string {
+		return `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at, note)
+			SELECT s.id, $2, ` + status + `, $1, now(), ` + note + `
+			  FROM app.class_sessions s WHERE s.series_id = $4 AND $3::uuid IS NOT NULL`
+	}
+	for _, c := range []timetableRefusal{
+		{"attendance_marks_status_check", mark(`'excused'`, `NULL`)},
+		{"attendance_marks_status_check", mark(`'Present'`, `NULL`)},
+		{"attendance_marks_note_check", mark(`'absent'`, `''`)},
+		{"attendance_marks_note_check", mark(`'absent'`, `repeat('a', 501)`)},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			series := newSeries(t, tx, f.classID, f.adminID)
+			newOccurrence(t, tx, f.classID, series, f.adminID)
+			rejectsWith(t, tx, c.constraint, c.insert, f.adminID, f.studentID, f.classID, series)
+		})
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		series := newSeries(t, tx, f.classID, f.adminID)
+		session := newOccurrence(t, tx, f.classID, series, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at, note)
+			VALUES ($1, $2, 'late', $3, now(), repeat('ạ', 500))`, session, f.studentID, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at)
+			VALUES ($1, $2, 'present', $2, now())`, session, f.adminID)
+		rejectsWith(t, tx, "attendance_marks_pkey", `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at)
+			VALUES ($1, $2, 'absent', $3, now())`, session, f.studentID, f.adminID)
+	})
+}
+
+// TestAClassWithAttendanceIsKeptAndOneWithOnlySessionsGoes is the decision
+// "sessions cascade with their class, and attendance restricts it": the
+// class's delete reaches the mark through the cascade to its sessions and
+// fails on attendance_marks_session_id_fkey, while a class with series,
+// occurrence rows and one-offs but no mark deletes with all of them. A
+// RESTRICT key refuses as 23001 restrict_violation, where a NO ACTION key
+// would answer 23503; db.ForeignKeyViolation, which the class delete maps
+// through, takes both.
+func TestAClassWithAttendanceIsKeptAndOneWithOnlySessionsGoes(t *testing.T) {
+	for name, session := range map[string]func(t *testing.T, tx *sql.Tx, f fixture) string{
+		"an occurrence": func(t *testing.T, tx *sql.Tx, f fixture) string {
+			return newOccurrence(t, tx, f.classID, newSeries(t, tx, f.classID, f.adminID), f.adminID)
+		},
+		"a one-off": func(t *testing.T, tx *sql.Tx, f fixture) string {
+			var id string
+			if err := tx.QueryRow(`INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by)
+				VALUES ($1, now(), 90, $2) RETURNING id`, f.classID, f.adminID).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			mustExec(t, tx, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at)
+				VALUES ($1, $2, 'absent', $3, now())`, session(t, tx, f), f.studentID, f.adminID)
+			_, err := tx.Exec(`DELETE FROM app.classes WHERE id = $1`, f.classID)
+			var pgErr *pgconn.PgError
+			constraint, refused := db.ForeignKeyViolation(err)
+			if !errors.As(err, &pgErr) || pgErr.Code != "23001" || !refused || constraint != "attendance_marks_session_id_fkey" {
+				t.Errorf("deleting a class with attendance at %s answered %v, want 23001 on attendance_marks_session_id_fkey", name, err)
+			}
+		})
+	}
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		series := newSeries(t, tx, f.classID, f.adminID)
+		newOccurrence(t, tx, f.classID, series, f.adminID)
+		mustExec(t, tx, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, cancelled_at, created_by)
+			VALUES ($1, now(), 90, now(), $2)`, f.classID, f.adminID)
+		mustExec(t, tx, `DELETE FROM app.classes WHERE id = $1`, f.classID)
+		var left string
+		if err := tx.QueryRow(`SELECT (SELECT count(*) FROM app.class_session_series WHERE class_id = $1) || '|' ||
+			(SELECT count(*) FROM app.class_sessions WHERE class_id = $1)`, f.classID).Scan(&left); err != nil || left != "0|0" {
+			t.Errorf("a deleted class left series|sessions %s (%v), want 0|0", left, err)
+		}
+	})
+	withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+		// A series that ends before it starts is deleted (T-R8.4), and its
+		// occurrence rows go with it.
+		series := newSeries(t, tx, f.classID, f.adminID)
+		session := newOccurrence(t, tx, f.classID, series, f.adminID)
+		mustExec(t, tx, `DELETE FROM app.class_session_series WHERE id = $1`, series)
+		var left int
+		if err := tx.QueryRow(`SELECT count(*) FROM app.class_sessions WHERE id = $1`, session).Scan(&left); err != nil || left != 0 {
+			t.Errorf("a deleted series left %d occurrence rows (%v)", left, err)
+		}
+	})
+}
+
+// TestTheTimetableKeepsItsAuthorsAndItsStudents fails when a key from the new
+// tables to app.users is anything but RESTRICT: deleteUser answers 409 for
+// each (T-R2.13's map), and never loses a mark or an authored row.
+func TestTheTimetableKeepsItsAuthorsAndItsStudents(t *testing.T) {
+	for constraint, hold := range map[string]func(t *testing.T, tx *sql.Tx, f fixture, user string){
+		"terms_created_by_fkey": func(t *testing.T, tx *sql.Tx, _ fixture, user string) {
+			year := termYear(t)
+			mustExec(t, tx, `INSERT INTO app.terms (name, starts_on, ends_on, created_by) VALUES ('Học kỳ', $1::date, $2::date, $3)`,
+				termDate(year, "01-01"), termDate(year, "05-31"), user)
+		},
+		"class_session_series_created_by_fkey": func(t *testing.T, tx *sql.Tx, f fixture, user string) {
+			newSeries(t, tx, f.classID, user)
+		},
+		"class_sessions_created_by_fkey": func(t *testing.T, tx *sql.Tx, f fixture, user string) {
+			mustExec(t, tx, `INSERT INTO app.class_sessions (class_id, starts_at, duration_minutes, created_by) VALUES ($1, now(), 90, $2)`, f.classID, user)
+		},
+		"attendance_marks_student_id_fkey": func(t *testing.T, tx *sql.Tx, f fixture, user string) {
+			session := newOccurrence(t, tx, f.classID, newSeries(t, tx, f.classID, f.adminID), f.adminID)
+			mustExec(t, tx, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at) VALUES ($1, $2, 'present', $3, now())`, session, user, f.adminID)
+		},
+		"attendance_marks_marked_by_fkey": func(t *testing.T, tx *sql.Tx, f fixture, user string) {
+			session := newOccurrence(t, tx, f.classID, newSeries(t, tx, f.classID, f.adminID), f.adminID)
+			mustExec(t, tx, `INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at) VALUES ($1, $2, 'present', $3, now())`, session, f.adminID, user)
+		},
+	} {
+		withTx(t, migrated(t), func(tx *sql.Tx, f fixture) {
+			hold(t, tx, f, f.studentID)
+			rejectsWith(t, tx, constraint, `DELETE FROM app.users WHERE id = $1`, f.studentID)
+		})
+	}
 }

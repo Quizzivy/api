@@ -796,3 +796,92 @@ func TestTheDecisionEmailGrantsComeAndGoWithTheirMigration(t *testing.T) {
 		t.Fatalf("second up: %v", err)
 	}
 }
+
+// The timetable files (00175 to 00178, T-R8.2), and the version before them.
+const (
+	beforeTimetable int64 = 174
+	timetable       int64 = 178
+)
+
+// TestTheTimetableFilesApplyOverPopulatedTablesAndRollBack runs 00175 to
+// 00178 over a class and accounts that already exist, as production's do,
+// stores a term, a series, an occurrence and a mark, then walks the four files
+// down and up again: Down drops the tables, rows included, and keeps the class
+// and the accounts, and a second Up brings back four empty tables.
+func TestTheTimetableFilesApplyOverPopulatedTablesAndRollBack(t *testing.T) {
+	if os.Getenv("TEST_DESTRUCTIVE") != "1" {
+		t.Skip("TEST_DESTRUCTIVE=1 required for an isolated migration database")
+	}
+	conn, err := sql.Open("pgx", scratchDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetLogger(goose.NopLogger())
+	dir := db.MigrationsDir(t)
+	if err := goose.UpTo(conn, dir, beforeTimetable); err != nil {
+		t.Fatal(err)
+	}
+	var existing fixture
+	withTx(t, conn, func(tx *sql.Tx, f fixture) {
+		existing = f
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	tables := []string{"terms", "class_session_series", "class_sessions", "attendance_marks"}
+	present := func() (n int) {
+		t.Helper()
+		if err := conn.QueryRow(`SELECT count(*) FROM information_schema.tables
+			WHERE table_schema = 'app' AND table_name = ANY($1)`, tables).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := present(); n != 0 {
+		t.Fatalf("%d timetable tables exist before 00175", n)
+	}
+	if err := goose.UpTo(conn, dir, timetable); err != nil {
+		t.Fatalf("up over populated tables: %v", err)
+	}
+	if n := present(); n != len(tables) {
+		t.Fatalf("after up: %d tables, want %d", n, len(tables))
+	}
+	if _, err := conn.Exec(`WITH term AS (
+		  INSERT INTO app.terms (name, starts_on, ends_on, created_by) VALUES ('Học kỳ 1', DATE '2026-09-01', DATE '2027-01-15', $1)
+		), series AS (
+		  INSERT INTO app.class_session_series (class_id, weekday, start_time, duration_minutes, starts_on, ends_on, time_zone, created_by)
+		  VALUES ($3, 1, '18:00', 90, DATE '2026-09-07', DATE '2027-01-11', 'Asia/Ho_Chi_Minh', $1) RETURNING id
+		), session AS (
+		  INSERT INTO app.class_sessions (class_id, series_id, series_date, starts_at, duration_minutes, created_by)
+		  SELECT $3, id, DATE '2026-09-14', TIMESTAMPTZ '2026-09-14 18:00+07', 90, $1 FROM series RETURNING id
+		)
+		INSERT INTO app.attendance_marks (session_id, student_id, status, marked_by, marked_at)
+		SELECT id, $2, 'present', $1, now() FROM session`, existing.adminID, existing.studentID, existing.classID); err != nil {
+		t.Fatalf("after up the timetable takes no rows: %v", err)
+	}
+	if err := goose.DownTo(conn, dir, beforeTimetable); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if n := present(); n != 0 {
+		t.Fatalf("after down: %d timetable tables left", n)
+	}
+	var kept int
+	if err := conn.QueryRow(`SELECT (SELECT count(*) FROM app.classes WHERE id = $1) + (SELECT count(*) FROM app.users WHERE id IN ($2, $3))`,
+		existing.classID, existing.adminID, existing.studentID).Scan(&kept); err != nil || kept != 3 {
+		t.Errorf("after down %d of the class and its two accounts are left (%v), want all 3", kept, err)
+	}
+	if err := goose.UpTo(conn, dir, timetable); err != nil {
+		t.Fatalf("second up: %v", err)
+	}
+	for _, table := range tables {
+		var rows int
+		if err := conn.QueryRow(`SELECT count(*) FROM app.` + table).Scan(&rows); err != nil || rows != 0 {
+			t.Errorf("after the second up app.%s holds %d rows (%v), want an empty table", table, rows, err)
+		}
+	}
+}
