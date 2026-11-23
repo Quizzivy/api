@@ -35,6 +35,17 @@ func recipientKey(alias string) string {
 	return `(` + folded(nameOf(alias)) + `, ` + alias + `.id)`
 }
 
+// afterRow is the keyset condition that the row u comes after the cursor's
+// row, the account in placeholder $n, read again only while it is one of
+// the audience's own rows (eligible, the SQL over k): a cursor naming any
+// other account, forged or one that has left the audience since, makes the
+// subquery empty and so ends the list, and never places an account the
+// picker does not list in the order of names.
+func afterRow(n int, eligible func(alias string) string) string {
+	return fmt.Sprintf(`($%[1]d::uuid IS NULL OR %[2]s > (SELECT %[3]s, k.id FROM app.users k WHERE k.id = $%[1]d::uuid AND %[4]s))`,
+		n, recipientKey("u"), folded(nameOf("k")), eligible("k"))
+}
+
 func studentRecipientsSQL() string {
 	return `
 	SELECT u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + currentClassNames + `, ` + otherClassNames + `,
@@ -46,7 +57,7 @@ func studentRecipientsSQL() string {
 	   AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM app.class_members cm WHERE cm.class_id = $4::uuid AND cm.user_id = u.id))
 	   AND (NOT $5::boolean OR ` + inScopeNow + `)
 	   AND (NOT $6::boolean OR NOT ` + inAnyNow + `)
-	   AND ($7::uuid IS NULL OR ` + recipientKey("u") + ` > (SELECT ` + folded(nameOf("k")) + `, k.id FROM app.users k WHERE k.id = $7::uuid))
+	   AND ` + afterRow(7, func(k string) string { return visibility.CanMessage(k, 1) }) + `
 	 ORDER BY ` + folded(nameOf("u")) + `, u.id
 	 LIMIT $8`
 }
@@ -55,8 +66,8 @@ func studentRecipientsSQL() string {
 // the row f.After, by folded name and id: every account the caller may write
 // to (visibility.CanMessage), matched on the name accent-insensitively and
 // kept by f's one filter. A class f's scope does not reach answers
-// ErrNotFound, as a missing one does. A cursor whose account is gone ends
-// the list.
+// ErrNotFound, as a missing one does. A cursor whose account is gone, or is
+// no student the caller may write to, ends the list.
 func (p *Postgres) StudentRecipients(ctx context.Context, f domain.RecipientFilter) ([]domain.Recipient, error) {
 	if f.ClassID != "" {
 		reached, err := db.Exists(ctx, p, `SELECT 1 FROM app.classes c WHERE c.id = $1::uuid AND ($2::boolean OR c.teacher_id = $3::uuid)`,

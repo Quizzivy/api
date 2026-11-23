@@ -13,14 +13,16 @@ func StudentLike(alias string) string {
 	return alias + `.role_id IN (SELECT r.id FROM app.student_like_roles r)`
 }
 
-// MessagingPeerIDs is the one definition of the accounts a staff member may
-// name as the student of a direct thread (F2, T-F2.3), as a subquery of user
-// ids for the staff member's id in placeholder $n: those they hold a direct
-// conversation with, and every account they may write to (CanMessage). Never
-// the staff member, never an anonymised account. scope.all plays no part,
-// and a peer opens only the caller's own thread with the student (D17,
-// DG-08). A NULL staff member has none. It is the messaging module's
-// domain.Eligibility.Peer.
+// MessagingPeerIDs is domain.Eligibility.Peer written in SQL, as a subquery
+// of user ids for the staff member's id in placeholder $n: those they hold a
+// direct conversation with, and every account they may write to
+// (CanMessage); never the staff member, never an anonymised account, none
+// for a NULL staff member. No query reads it: since F2 (T-F2.3) the messaging
+// module decides a peer from DirectFacts alone, and this subquery only backs
+// the parity test that holds the SQL rule (CanMessage, which the Students
+// page and the class roster read) to the manager's
+// (TestTheEligibilityTableOnTheDatabase). Use CanMessage for whom a staff
+// member may write to.
 func MessagingPeerIDs(n int) string {
 	return fmt.Sprintf(`(SELECT w.id FROM app.users w
 	  WHERE $%[1]d::uuid IS NOT NULL AND w.id <> $%[1]d::uuid AND %[2]s

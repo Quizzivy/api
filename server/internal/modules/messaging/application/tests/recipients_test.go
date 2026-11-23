@@ -183,3 +183,31 @@ func TestThePickerPagesByFoldedNameThenID(t *testing.T) {
 		}
 	}
 }
+
+// TestACursorNamingAnAccountTheAudienceDoesNotListEndsThePicker: the next
+// page reads the cursor's row again only while it is one of the audience's
+// own rows, so a cursor naming any other account, forged or one that has
+// left the audience since, ends the list, and never places the account
+// among the names: a staff account or a disabled student for students.
+func TestACursorNamingAnAccountTheAudienceDoesNotListEndsThePicker(t *testing.T) {
+	w := newWorld(t)
+	me := w.user("Ông Chủ", "teacher")
+	w.user("Bùi Học viên", "student")
+	w.user("Cao Học viên", "student")
+	staff := w.user("A Giáo viên đứng đầu", "teacher")
+	disabled := w.user("A Học viên đã khoá", "student")
+	w.disable(disabled)
+
+	for name, row := range map[string]string{
+		"a staff account":    staff,
+		"a disabled student": disabled,
+	} {
+		page, err := w.recipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(row))
+		if err != nil || len(page.Rows) != 0 || page.Next != "" {
+			t.Errorf("%s: %v (next %q), %v, want the list ended", name, ids(page.Rows), page.Next, err)
+		}
+	}
+	if page, err := w.recipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(w.user("A Học viên đứng đầu", "student"))); err != nil || len(page.Rows) != 2 {
+		t.Errorf("a student's own cursor: %v, %v, want the two students after it", ids(page.Rows), err)
+	}
+}
