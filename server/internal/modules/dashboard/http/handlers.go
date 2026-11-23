@@ -54,12 +54,16 @@ func (h Dashboard) GetDashboard(ctx context.Context, request openapi.GetDashboar
 		id := httpapi.ParseUUID(*summary.TakingNow.AssignmentID)
 		takingAssignment = &id
 	}
+	today, err := toAPIToday(summary.Today)
+	if err != nil {
+		return nil, err
+	}
 	return openapi.GetDashboard200JSONResponse{
 		NewestFlaggedAttempt: flagged,
 		ClosingSoon:          &summary.ClosingSoon, WaitingStudents: &summary.WaitingStudents,
 		OldestWaitingAt: summary.OldestWaitingAt, NextClosing: next,
 		TakingNow:   openapi.DashboardTakingNow{Students: summary.TakingNow.Students, Assignments: summary.TakingNow.Assignments, AssignmentId: takingAssignment},
-		Submissions: submissions, Today: toAPIToday(summary.Today), RecentActivity: toAPIActivity(summary.RecentActivity),
+		Submissions: submissions, Today: today, RecentActivity: toAPIActivity(summary.RecentActivity),
 		AwaitingGrading: summary.AwaitingGrading,
 		FlaggedAttempts: summary.FlaggedAttempts,
 	}, nil

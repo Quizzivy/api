@@ -168,13 +168,15 @@ func JoinCodeError(ctx context.Context, outcome domain.PreviewOutcome) openapi.E
 	}
 }
 
-// ToAPIClass renders the §7 Class shape.
+// ToAPIClass renders the §7 Class shape a student joins. ownRoom is a teacher
+// response's only, so it is left out.
 func ToAPIClass(c domain.EnrolledClass) openapi.Class {
 	return openapi.Class{
 		Id:              httpapi.ParseUUID(c.ID),
 		Name:            c.Name,
 		Description:     c.Description,
 		ScheduleLabel:   c.ScheduleLabel,
+		Schedule:        labelledSchedule(c.ScheduleLabel),
 		Room:            c.Room,
 		StudentCount:    c.StudentCount,
 		SelfJoinEnabled: c.SelfJoinEnabled,
