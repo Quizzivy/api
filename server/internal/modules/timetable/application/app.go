@@ -36,6 +36,8 @@ type Queries struct {
 	Occurrences cqrs.QueryHandler[query.Occurrences, []domain.Session]
 	GetSession  cqrs.QueryHandler[query.GetSession, domain.Session]
 	Calendar    cqrs.QueryHandler[query.Calendar, query.CalendarView]
+	// ActiveSeries is the classes module's ScheduleSource (adapters.ClassSchedules).
+	ActiveSeries cqrs.QueryHandler[query.ActiveSeries, []domain.Series]
 }
 
 // New builds the application over repo. Until WithTerms no term holds any
@@ -54,6 +56,8 @@ func New(repo domain.Repository) *Application {
 			Occurrences: query.OccurrencesHandler{Service: service},
 			GetSession:  query.GetSessionHandler{Service: service},
 			Calendar:    query.CalendarHandler{Service: service},
+
+			ActiveSeries: query.ActiveSeriesHandler{Service: service},
 		},
 		service: service,
 	}

@@ -147,6 +147,13 @@ func (s Series) Meets(day time.Time) bool {
 	return s.EndsOn == nil || !day.After(*s.EndsOn)
 }
 
+// ActiveOn reports whether the series still meets on or after the calendar
+// day it is at now in its own zone: it has no last date, or its last date is
+// that day or later. A series that has not begun yet is active.
+func (s Series) ActiveOn(now time.Time) bool {
+	return s.EndsOn == nil || !s.EndsOn.Before(Today(now, s.Location()))
+}
+
 // TextPatch is an edit of an optional text: Set is false when the request left
 // the field out, and a nil Value clears it.
 type TextPatch struct {
