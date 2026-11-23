@@ -60,6 +60,12 @@ type Repository interface {
 	// Rows returns, in one query, the rows of w's classes that start in w or
 	// name an occurrence dated within a day of it, each with HasAttendance.
 	Rows(ctx context.Context, w Window) ([]Row, error)
+	// ActiveSeries returns, in one query, the series of classes classIDs whose
+	// last date is no earlier than the day before now's UTC day, or that have
+	// none: every series active in its own zone (Series.ActiveOn), and those
+	// that ended yesterday in a zone ahead of UTC. It applies no scope: the
+	// caller names classes it has reached already (a class's schedule line).
+	ActiveSeries(ctx context.Context, classIDs []string, now time.Time) ([]Series, error)
 	// Find resolves id under scope: a one-off's row, or a series and its row
 	// for the date when it has one. An occurrence the series does not meet on
 	// that date and has no row for, a row id that is not a one-off, a session

@@ -45,6 +45,9 @@ type Queries struct {
 	SessionAttendance  cqrs.QueryHandler[query.SessionAttendance, domain.Register]
 
 	StudentWeek cqrs.QueryHandler[query.StudentWeek, domain.Week]
+
+	// ActiveSeries is the classes module's ScheduleSource (adapters.ClassSchedules).
+	ActiveSeries cqrs.QueryHandler[query.ActiveSeries, []domain.Series]
 }
 
 // New builds the application over repo. Until WithTerms no term holds any
@@ -70,6 +73,8 @@ func New(repo domain.Repository) *Application {
 			SessionAttendance:  query.SessionAttendanceHandler{Service: service},
 
 			StudentWeek: query.StudentWeekHandler{Service: service},
+
+			ActiveSeries: query.ActiveSeriesHandler{Service: service},
 		},
 		service: service,
 	}
