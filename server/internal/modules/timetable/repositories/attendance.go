@@ -13,9 +13,14 @@ import (
 	"quizzivy/internal/shared/opt"
 )
 
-// activeMember is a live account's membership of a class, as the class
-// members list reads it: a disabled account is no member of a register.
-const activeMember = `SELECT 1 FROM app.class_members cm JOIN app.users cu ON cu.id = cm.user_id AND cu.disabled_at IS NULL`
+// studentLike is an account whose role is a student's (app.student_like_roles),
+// as identity reads a student's classes: a member promoted to staff is no
+// student of a register.
+const studentLike = `role_id IN (SELECT k.id FROM app.student_like_roles k)`
+
+// activeMember is a live student's membership of a class: a disabled account,
+// or one whose role is no student's, is no member of a register.
+const activeMember = `SELECT 1 FROM app.class_members cm JOIN app.users cu ON cu.id = cm.user_id AND cu.disabled_at IS NULL AND cu.` + studentLike
 
 func rowIDOf(f domain.Found) *string {
 	if f.Row == nil {
@@ -38,15 +43,16 @@ func windowBounds(w domain.RateWindow) (*time.Time, *time.Time) {
 	return &w.From, &w.To
 }
 
-// Roster reads the register of f in one query: the class's active members and
-// the students marked on its row, each with their mark and their tally over
-// the class's non-cancelled sessions that start in w.
+// Roster reads the register of f in one query: the class's active student
+// members and the students marked on its row, each with their mark and their
+// tally over the class's non-cancelled sessions that start in w (and before
+// the class was archived, if it was).
 func (p *Postgres) Roster(ctx context.Context, f domain.Found, w domain.RateWindow) ([]domain.RosterStudent, error) {
 	from, to := windowBounds(w)
 	out, err := db.QueryMany(ctx, p, `
 		WITH roster AS (
 		  SELECT m.user_id AS id FROM app.class_members m
-		    JOIN app.users u ON u.id = m.user_id AND u.disabled_at IS NULL
+		    JOIN app.users u ON u.id = m.user_id AND u.disabled_at IS NULL AND u.`+studentLike+`
 		   WHERE m.class_id = $1::uuid
 		  UNION
 		  SELECT a.student_id FROM app.attendance_marks a WHERE a.session_id = $2::uuid
@@ -56,7 +62,10 @@ func (p *Postgres) Roster(ctx context.Context, f domain.Found, w domain.RateWind
 		         count(*) AS counted
 		    FROM app.attendance_marks a
 		    JOIN app.class_sessions s ON s.id = a.session_id
+		    JOIN app.classes k ON k.id = s.class_id
 		   WHERE s.class_id = $1::uuid AND s.cancelled_at IS NULL
+		     -- A session from the class's archiving on does not exist.
+		     AND (k.archived_at IS NULL OR s.starts_at < k.archived_at)
 		     AND ($3::timestamptz IS NULL OR s.starts_at >= $3)
 		     AND ($4::timestamptz IS NULL OR s.starts_at < $4)
 		     AND a.student_id IN (SELECT id FROM roster)
@@ -66,7 +75,7 @@ func (p *Postgres) Roster(ctx context.Context, f domain.Found, w domain.RateWind
 		       coalesce(t.attended, 0)::int, coalesce(t.counted, 0)::int
 		  FROM roster x
 		  JOIN app.users u ON u.id = x.id
-		  LEFT JOIN app.class_members cm ON cm.class_id = $1::uuid AND cm.user_id = x.id AND u.disabled_at IS NULL
+		  LEFT JOIN app.class_members cm ON cm.class_id = $1::uuid AND cm.user_id = x.id AND u.disabled_at IS NULL AND u.`+studentLike+`
 		  LEFT JOIN app.attendance_marks mk ON mk.session_id = $2::uuid AND mk.student_id = x.id
 		  LEFT JOIN tallies t ON t.student_id = x.id
 		 -- The class members list's order, u.id breaking joined_at ties; a
@@ -246,7 +255,7 @@ func (p *Postgres) Facts(ctx context.Context, sessions []domain.Session) (map[st
 	}
 	found, err := db.QueryMany(ctx, p, `
 		SELECT 'class', m.class_id::text, count(*)::int, 0, 0, 0
-		  FROM app.class_members m JOIN app.users u ON u.id = m.user_id AND u.disabled_at IS NULL
+		  FROM app.class_members m JOIN app.users u ON u.id = m.user_id AND u.disabled_at IS NULL AND u.`+studentLike+`
 		 WHERE m.class_id = ANY($1::uuid[])
 		 GROUP BY m.class_id
 		UNION ALL

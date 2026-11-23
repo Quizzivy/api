@@ -215,3 +215,55 @@ func TestARegisterCountsItsRosterByMark(t *testing.T) {
 		t.Errorf("a term's window %+v", w)
 	}
 }
+
+// TestABlankNoteBesideANullStatusIsNoNote reads a note that is blank once
+// trimmed as no note, beside a null status as beside a status.
+func TestABlankNoteBesideANullStatusIsNoNote(t *testing.T) {
+	got, err := domain.CleanMarks([]domain.MarkInput{mark("a", nil, ptr("   "), true), mark("b", ptr(domain.Present), ptr(" "), true)})
+	if err != nil {
+		t.Fatalf("a blank note beside a null status: %v", err)
+	}
+	if got[0].Note.Value != nil || got[1].Note.Value != nil || !got[0].Note.Set {
+		t.Errorf("cleaned %+v", got)
+	}
+}
+
+// TestASessionFromTheClassArchivingOnDoesNotExist archives a Monday series'
+// class at noon on 20 November: the 16th stays, the 23rd and a one-off on the
+// 21st are left out, and the row that moved the 30th to the 19th stays while
+// hiding nothing it should not. A session found by id answers the same.
+func TestASessionFromTheClassArchivingOnDoesNotExist(t *testing.T) {
+	archived := local(t, "Asia/Ho_Chi_Minh", "2026-11-20 12:00")
+	s := weekly("s", "Asia/Ho_Chi_Minh", 1, "08:00", "2026-11-02", nil)
+	s.ClassArchivedAt = &archived
+	moved := domain.Row{ID: "moved", ClassID: s.ClassID, SeriesID: &s.ID, SeriesDate: ptr(date("2026-11-30")),
+		StartsAt: local(t, "Asia/Ho_Chi_Minh", "2026-11-19 08:00"), DurationMinutes: 90, ClassArchivedAt: &archived}
+	late := domain.Row{ID: "late", ClassID: s.ClassID, SeriesID: &s.ID, SeriesDate: ptr(date("2026-11-09")),
+		StartsAt: local(t, "Asia/Ho_Chi_Minh", "2026-11-25 08:00"), DurationMinutes: 90, ClassArchivedAt: &archived}
+	oneOff := domain.Row{ID: "one", ClassID: s.ClassID, StartsAt: local(t, "Asia/Ho_Chi_Minh", "2026-11-21 08:00"), DurationMinutes: 60, ClassArchivedAt: &archived}
+	from := local(t, "Asia/Ho_Chi_Minh", "2026-11-01 00:00")
+	got := domain.OccurrenceManager{}.Expand([]domain.Series{s}, []domain.Row{moved, late, oneOff}, from, from.AddDate(0, 1, 0))
+	if want := []string{"s.20261102", "s.20261116", "s.20261130"}; !slices.Equal(ids(got), want) {
+		t.Errorf("after archiving the month holds %v, want %v", ids(got), want)
+	}
+	if !got[2].StartsAt.Equal(moved.StartsAt) {
+		t.Errorf("the moved occurrence starts %s", got[2].StartsAt)
+	}
+	for name, c := range map[string]struct {
+		f    domain.Found
+		want bool
+	}{
+		"the 16th":                {domain.Found{ID: domain.OccurrenceID("s", date("2026-11-16")), Series: &s}, true},
+		"the 23rd":                {domain.Found{ID: domain.OccurrenceID("s", date("2026-11-23")), Series: &s}, false},
+		"the 9th, moved after":    {domain.Found{ID: domain.OccurrenceID("s", date("2026-11-09")), Series: &s, Row: &late}, false},
+		"the one-off of the 21st": {domain.Found{ID: domain.OneOffID("one"), Row: &oneOff}, false},
+	} {
+		if got := c.f.Exists(); got != c.want {
+			t.Errorf("%s exists %v, want %v", name, got, c.want)
+		}
+	}
+	s.ClassArchivedAt = nil
+	if restored := (domain.Found{ID: domain.OccurrenceID("s", date("2026-11-23")), Series: &s}); !restored.Exists() {
+		t.Error("the 23rd of a restored class does not exist")
+	}
+}

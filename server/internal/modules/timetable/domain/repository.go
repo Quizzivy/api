@@ -62,8 +62,10 @@ type Repository interface {
 	Rows(ctx context.Context, w Window) ([]Row, error)
 	// Find resolves id under scope: a one-off's row, or a series and its row
 	// for the date when it has one. An occurrence the series does not meet on
-	// that date and has no row for, a row id that is not a one-off, and an id
-	// outside scope are ErrNotFound.
+	// that date and has no row for, a row id that is not a one-off, a session
+	// that starts at or after its class was archived (Found.Exists), and an
+	// id outside scope are ErrNotFound. Series and Rows carry the class's
+	// archived_at, so Expand leaves those sessions out too.
 	Find(ctx context.Context, scope access.Scope, id SessionID) (Found, error)
 	// Reaches answers ErrNotFound unless scope reaches class classID, archived
 	// or not, in one query.

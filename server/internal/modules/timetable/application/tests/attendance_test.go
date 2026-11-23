@@ -558,3 +558,92 @@ func TestTheRosterIsTheActiveMembersAndTheMarked(t *testing.T) {
 		t.Errorf("a future session's register is %+v", r)
 	}
 }
+
+// TestAnArchivedClassHasNoSessionFromItsArchivingOn archives a class at noon
+// on 20 November. The register list and its badge keep the Mondays before
+// (the 16th still marked) and drop this morning's, marked absent, and a
+// one-off of the 21st; the rate leaves this morning's mark out; saving or reading either answers not found, as does the
+// calendar and the range read; restoring the class brings them back.
+func TestAnArchivedClassHasNoSessionFromItsArchivingOn(t *testing.T) {
+	w := newWorld(t)
+	class := w.class(w.a, nil)
+	student := w.student()
+	w.member(class, student, at("2026-09-01 08:00"))
+	series := w.create(w.a, class, weekly("2026-11-02", "08:00")).Series
+	oneOff := w.create(w.a, class, once("2026-11-21", "08:00")).ID.String()
+	w.save(w.a, occurrence(series, "2026-11-16"), set(student, domain.Present))
+	w.save(w.a, occurrence(series, "2026-11-23"), set(student, domain.Absent))
+	list := func() domain.SessionPage {
+		w.t.Helper()
+		page, err := w.app.Queries.AttendanceSessions.Handle(context.Background(), query.AttendanceSessions{Scope: by(w.a).Scope, ClassID: &class})
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		return page
+	}
+	if before := list(); len(before.Items) != 5 || before.NotMarked != 3 {
+		t.Fatalf("before archiving the list holds %v, notMarked %d", listedIDs(before), before.NotMarked)
+	}
+
+	w.exec(`UPDATE app.classes SET archived_at = $2 WHERE id = $1::uuid`, class, at("2026-11-20 12:00"))
+	after := list()
+	if want := []string{occurrence(series, "2026-11-16"), occurrence(series, "2026-11-09"), occurrence(series, "2026-11-02")}; !slices.Equal(listedIDs(after), want) || after.NotMarked != 2 {
+		t.Errorf("after archiving the list holds %v, notMarked %d, want %v and 2", listedIDs(after), after.NotMarked, want)
+	}
+	for _, gone := range []string{occurrence(series, "2026-11-23"), oneOff} {
+		if _, err := w.trySave(by(w.a), gone, set(student, domain.Present)); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("saving %s after archiving: %v, want not found", gone, err)
+		}
+		if _, err := w.app.Queries.SessionAttendance.Handle(context.Background(), query.SessionAttendance{Scope: by(w.a).Scope, ViewerID: w.a, SessionID: gone}); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("reading %s after archiving: %v, want not found", gone, err)
+		}
+	}
+	if kept := w.register(by(w.a), occurrence(series, "2026-11-16")); rates(kept)[student] != 100 || !kept.Session.HasAttendance {
+		t.Errorf("the 16th's register after archiving reads %v", rates(kept))
+	}
+	view, err := w.app.Queries.Calendar.Handle(context.Background(), query.Calendar{Scope: by(w.a).Scope, ViewerID: w.a, ClassID: class, From: at("2026-11-16 00:00"), To: at("2026-12-01 00:00")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calendar []string
+	for _, s := range view.Sessions {
+		calendar = append(calendar, s.ID.String())
+	}
+	if want := []string{occurrence(series, "2026-11-16")}; !slices.Equal(calendar, want) {
+		t.Errorf("the calendar after archiving holds %v, want %v", calendar, want)
+	}
+	if week := w.week(w.a, "2026-11-23"); len(week) != 0 {
+		t.Errorf("the week after archiving holds %+v", week)
+	}
+
+	w.exec(`UPDATE app.classes SET archived_at = NULL WHERE id = $1::uuid`, class)
+	if restored := list(); len(restored.Items) != 5 || restored.NotMarked != 3 {
+		t.Errorf("after restoring the list holds %v, notMarked %d", listedIDs(restored), restored.NotMarked)
+	}
+	w.save(w.a, oneOff, set(student, domain.Late))
+}
+
+// TestAMemberPromotedToStaffLeavesTheRegister promotes a member to teacher:
+// they leave the roster and the list's student count, and a save naming them
+// is refused; a student marked before keeps the mark.
+func TestAMemberPromotedToStaffLeavesTheRegister(t *testing.T) {
+	w := newWorld(t)
+	class := w.class(w.a, nil)
+	student, promoted := w.student(), w.student()
+	w.member(class, student, at("2026-09-01 08:00"))
+	w.member(class, promoted, at("2026-09-02 08:00"))
+	session := w.create(w.a, class, once("2026-11-23", "08:00")).ID.String()
+	w.exec(`UPDATE app.users SET role_id = (SELECT id FROM app.roles WHERE builtin_key = 'teacher') WHERE id = $1::uuid`, promoted)
+	got := w.register(by(w.a), session)
+	if len(got.Students) != 1 || got.Students[0].StudentID != student {
+		t.Errorf("the roster is %+v, want the student only", got.Students)
+	}
+	var refused *domain.RefusedMarks
+	if _, err := w.trySave(by(w.a), session, set(promoted, domain.Present)); !errors.As(err, &refused) || !slices.Equal(refused.StudentIDs, []string{promoted}) {
+		t.Errorf("marking the promoted member: %v, want refused", err)
+	}
+	page, err := w.app.Queries.AttendanceSessions.Handle(context.Background(), query.AttendanceSessions{Scope: by(w.a).Scope, ClassID: &class})
+	if err != nil || len(page.Items) != 1 || page.Items[0].StudentCount != 1 {
+		t.Errorf("the list reads %+v (%v), want one session of one student", page.Items, err)
+	}
+}

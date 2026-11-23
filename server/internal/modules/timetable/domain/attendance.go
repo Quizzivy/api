@@ -56,8 +56,8 @@ const (
 	RefusedNoteWithoutStatus
 	// RefusedNoteTooLong: a note is over MaxMarkNote characters once composed.
 	RefusedNoteTooLong
-	// RefusedOffRoster: a student is neither an active member of the class
-	// nor already marked on the session, which is also how a student who
+	// RefusedOffRoster: a student is neither an active student member of the
+	// class nor already marked on the session, which is also how a student who
 	// does not exist, or whom the caller may not know, answers.
 	RefusedOffRoster
 )
@@ -82,9 +82,10 @@ type MarkInput struct {
 }
 
 // CleanMarks is marks with every note trimmed and composed to NFC, a blank one
-// clearing the note as null does. It refuses, in this order and each naming
-// the students concerned: a student named twice, a note beside a null status,
-// and a note over MaxMarkNote characters.
+// clearing the note as null does, beside a status or not. It refuses, in this
+// order and each naming the students concerned: a student named twice, a note
+// that is not blank beside a null status, and a note over MaxMarkNote
+// characters.
 func CleanMarks(marks []MarkInput) ([]MarkInput, error) {
 	seen := make(map[string]int, len(marks))
 	var twice, noted, long []string
@@ -93,14 +94,15 @@ func CleanMarks(marks []MarkInput) ([]MarkInput, error) {
 		if seen[m.StudentID]++; seen[m.StudentID] == 2 {
 			twice = append(twice, m.StudentID)
 		}
-		if m.Status == nil && m.Note.Set && m.Note.Value != nil {
-			noted = append(noted, m.StudentID)
-		}
 		if m.Note.Set && m.Note.Value != nil {
 			m.Note.Value = markNote(*m.Note.Value)
-			if m.Note.Value != nil && utf8.RuneCountInString(*m.Note.Value) > MaxMarkNote {
-				long = append(long, m.StudentID)
-			}
+		}
+		switch {
+		case m.Note.Value == nil:
+		case m.Status == nil:
+			noted = append(noted, m.StudentID)
+		case utf8.RuneCountInString(*m.Note.Value) > MaxMarkNote:
+			long = append(long, m.StudentID)
 		}
 		out[i] = m
 	}
