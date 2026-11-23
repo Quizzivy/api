@@ -111,6 +111,11 @@
       "en": "Voided an attempt"
     },
     {
+      "key": "attendance.saved",
+      "vi": "Đã lưu điểm danh buổi học",
+      "en": "Saved the attendance of a class session"
+    },
+    {
       "key": "audit.exported",
       "vi": "Đã xuất nhật ký hoạt động",
       "en": "Exported the audit log"
@@ -386,6 +391,21 @@
       "en": "Updated a role"
     },
     {
+      "key": "session.cancelled",
+      "vi": "Đã huỷ buổi học",
+      "en": "Cancelled a class session"
+    },
+    {
+      "key": "session.created",
+      "vi": "Đã thêm buổi học",
+      "en": "Added a class session"
+    },
+    {
+      "key": "session.deleted",
+      "vi": "Đã xoá buổi học",
+      "en": "Deleted a class session"
+    },
+    {
       "key": "session.revoked",
       "vi": "Đã thu hồi một phiên đăng nhập",
       "en": "Revoked a sign-in session"
@@ -394,6 +414,21 @@
       "key": "session.revoked_others",
       "vi": "Đã thu hồi các phiên đăng nhập khác",
       "en": "Revoked the other sign-in sessions"
+    },
+    {
+      "key": "session.updated",
+      "vi": "Đã cập nhật buổi học",
+      "en": "Updated a class session"
+    },
+    {
+      "key": "session_series.ended",
+      "vi": "Đã dừng lặp lại buổi học hằng tuần",
+      "en": "Stopped a weekly class session"
+    },
+    {
+      "key": "session_series.updated",
+      "vi": "Đã thay đổi buổi học hằng tuần",
+      "en": "Changed a weekly class session"
     },
     {
       "key": "share.changed",
@@ -439,6 +474,21 @@
       "key": "student.updated",
       "vi": "Đã cập nhật tài khoản học viên",
       "en": "Updated a student account"
+    },
+    {
+      "key": "term.created",
+      "vi": "Đã thêm học kỳ",
+      "en": "Added a term"
+    },
+    {
+      "key": "term.deleted",
+      "vi": "Đã xoá học kỳ",
+      "en": "Deleted a term"
+    },
+    {
+      "key": "term.updated",
+      "vi": "Đã cập nhật học kỳ",
+      "en": "Updated a term"
     },
     {
       "key": "test.created",
