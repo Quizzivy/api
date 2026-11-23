@@ -77,6 +77,12 @@ type isoCase struct {
 	as      map[string]string
 	excuse  map[string]string
 	blind   map[string]string
+	// exempt names the slots whose kind no longer follows another owner's
+	// scope, each with its reason: another owner's id there answers as the
+	// caller's own does by design, so it is not compared with a missing one.
+	// A missing id still must be refused and the caller's own answer
+	// otherwise, and an explicit case proves what the slot opens.
+	exempt  map[string]string
 	pending string
 	each    []isoCase
 }
@@ -329,6 +335,10 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 			own = c.fresh(x, own)
 			x.made = append(x.made, own.all()...)
 		}
+		if reason := c.exempt[slot]; reason != "" {
+			x.exempted(op, c, own, slot, key, where, s.Kind)
+			continue
+		}
 		foreign := caller(x.a)
 		theirID, missingID := foreign.id(key), uuid.NewString()
 		if _, scheduled, occurrence := strings.Cut(theirID, "."); occurrence {
@@ -372,5 +382,28 @@ func (x *iso) substitute(op scopedOp, c isoCase) {
 		case blind != "" && answer(mine) != answer(missing):
 			x.t.Errorf("%s: blind (%s), yet the caller's own %s now answers %s where a missing one answers %s: remove the blind entry", where, blind, s.Kind, answer(mine), answer(missing))
 		}
+	}
+}
+
+// exempted checks an exempt slot (isoCase.exempt): a missing id is refused,
+// and the caller's own answers otherwise, so the slot is resolved at all.
+func (x *iso) exempted(op scopedOp, c isoCase, own *party, slot, key, where, kind string) {
+	x.t.Helper()
+	method, path, body := x.request(op, c, own, slot, uuid.NewString())
+	missing := own.c.send(method, path, body)
+	if success(missing) {
+		x.t.Errorf("%s: a missing %s answered %s: an exempt slot still refuses an id that names nothing", where, kind, answer(missing))
+	}
+	if c.fresh != nil {
+		caller := x.b
+		if c.student {
+			caller = x.b.student
+		}
+		own = c.fresh(x, caller)
+		x.made = append(x.made, own.all()...)
+	}
+	method, path, body = x.request(op, c, own, slot, own.id(key))
+	if mine := own.c.send(method, path, body); answer(mine) == answer(missing) {
+		x.t.Errorf("%s: the caller's own %s answers as a missing one does (%s): the case proves nothing", where, kind, answer(mine))
 	}
 }

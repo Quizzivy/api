@@ -51,7 +51,8 @@ type Member struct {
 	JoinedAt     time.Time
 	JoinCodeHint *string
 	// CanMessage is whether the reader may write to the member in a direct
-	// thread: the messaging module's eligibility for a post (T-R7.10a).
+	// thread: the messaging module's eligibility for a post (T-R7.10a), true
+	// for any enabled student since F2.
 	CanMessage bool
 	// The same figures G-07 shows, so the roster reads "Bài đã nộp" and "Điểm TB" (G-06).
 	Stats stats.Student

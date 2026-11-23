@@ -322,6 +322,12 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
+	// F2 (T-F2.3): a messaging-peer is any student, so another teacher's
+	// student is one too, and naming them opens the caller's own thread with
+	// them, never the teacher's. directThreadsStayWithTheirParticipants
+	// proves it (D17).
+	anyStudent = "any student may be written to; the thread read is the caller's own"
+
 	// The F2 messaging operations answer 501 until their tasks build them. A
 	// pending case only needs a request the contract accepts, so as points the
 	// kind the world does not hold yet (messaging-colleague) at a user id it
@@ -673,9 +679,9 @@ func isolationCases() map[string]isoCase {
 		"getStudentWeek": {student: true, query: map[string]string{"start": scheduleDay(3)}},
 
 		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
-		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},
-		"postStaffDirectMessage":         {fresh: freshAttachment, excuse: posted, body: messagePost},
-		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead},
+		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged, exempt: map[string]string{"path studentId": anyStudent}},
+		"postStaffDirectMessage":         {fresh: freshAttachment, excuse: posted, body: messagePost, exempt: map[string]string{"path studentId": anyStudent}},
+		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead, exempt: map[string]string{"path studentId": anyStudent}},
 		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
 		"postClassAnnouncement":          {fresh: freshAttachment, excuse: posted, body: messagePost},
 		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},

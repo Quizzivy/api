@@ -1,6 +1,7 @@
 // Package ties records who has taught whom in app.messaging_ties (T-R7.9), so
-// a staff member may write first to a student who has left their class
-// (O-R7.8). Every write that puts a student in a class, or gives a class
+// a thread tells a former student or a former teacher apart from one the
+// other side never taught. Since F2 a tie no longer decides whom staff may
+// write to: any staff member may write to any enabled student. Every write that puts a student in a class, or gives a class
 // another teacher, calls it in the same transaction. Leaving a class removes
 // nothing, and a pair already known keeps the time it was first known. An
 // anonymised student is never tied: D16's anonymisation deletes the account's

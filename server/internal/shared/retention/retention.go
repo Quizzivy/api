@@ -65,6 +65,11 @@ const AnonymousEmail = `'anonymous-' || u.id::text || '@anonymous.invalid'`
 // account has not been anonymised.
 const NotAnonymous = `u.email <> ` + AnonymousEmail
 
+// NotAnonymousOf is NotAnonymous over the users row named by alias.
+func NotAnonymousOf(alias string) string {
+	return fmt.Sprintf(`%[1]s.email <> 'anonymous-' || %[1]s.id::text || '@anonymous.invalid'`, alias)
+}
+
 // OwnsContent is the boolean SQL expression over app.users u that the account
 // teaches a class or owns a test, question, group, question set, media asset
 // or assignment, which keeps it from being anonymised.

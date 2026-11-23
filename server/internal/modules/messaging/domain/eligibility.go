@@ -9,17 +9,14 @@ type DirectFacts struct {
 	Self bool
 	// Conversation is a direct thread between the two that exists.
 	Conversation bool
-	// Tied is a row in app.messaging_ties: the student is, or has been, in a
-	// class of the staff member's (T-R7.9).
-	Tied bool
-	// Created is the staff member having created the account
-	// (users.created_by).
-	Created bool
 	// Enabled is the account not being disabled.
 	Enabled bool
 	// Student is the account passing R2's strict student predicate
 	// (app.student_like_roles).
 	Student bool
+	// Anonymised is the account having been anonymised (D16): its threads are
+	// gone with it, and it is no one's to write to.
+	Anonymised bool
 }
 
 // ChannelFacts is what the database holds about a class's channel and the
@@ -39,20 +36,22 @@ type ChannelFacts struct {
 // repository read.
 type Eligibility struct{}
 
-// Peer reports whether the account is a messaging peer of the staff member:
-// a thread exists between them, the staff member taught the student, or the
-// staff member created the account and it is a student. The student predicate
-// binds only the last: a thread or a tie stays readable after its student is
-// given a staff role, but an account the caller created and that is not a
-// student, a colleague's, resolves as no peer at all (404, as a missing id).
-// scope.all does not widen it, so a student the caller never taught stays out
-// of reach, an admin's included.
+// Peer reports whether the account is a messaging peer of the staff member
+// (F2): a thread exists between them, or the account is an enabled student,
+// in one of the staff member's classes, in another teacher's or in none.
+// Never the staff member themselves, never an anonymised account. The
+// student predicate binds only the open half: a thread stays readable after
+// its student is disabled or given a staff role, while a staff account, or a
+// disabled student, with no thread resolves as no peer at all (404, as a
+// missing id). scope.all plays no part: every staff member who opens the
+// workspace gets the same rule, and a peer opens only the caller's own thread
+// with the student, never another staff member's (D17).
 func (Eligibility) Peer(f DirectFacts) bool {
-	return f.Exists && !f.Self && (f.Conversation || f.Tied || (f.Created && f.Student))
+	return f.Exists && !f.Self && !f.Anonymised && (f.Conversation || (f.Enabled && f.Student))
 }
 
-// ReadDirect lets the staff member read their thread with a peer, which a
-// thread outlives the tie it started from: ErrNotFound for anyone else.
+// ReadDirect lets the staff member read their thread with a peer:
+// ErrNotFound for anyone else.
 func (e Eligibility) ReadDirect(f DirectFacts) error {
 	if !e.Peer(f) {
 		return ErrNotFound
@@ -61,10 +60,9 @@ func (e Eligibility) ReadDirect(f DirectFacts) error {
 }
 
 // PostDirect lets the staff member post to a peer who is enabled and still a
-// student. A thread that exists stays open after the student leaves the
-// class: the tie decides who may start a thread, not who may continue one.
-// ErrNotFound for an account that is no peer; ErrNotAllowed for a peer whose
-// account is disabled or no longer a student, whose thread stays readable.
+// student, whatever classes they are in. ErrNotFound for an account that is
+// no peer; ErrNotAllowed for a peer whose account is disabled or no longer a
+// student, whose thread stays readable.
 func (e Eligibility) PostDirect(f DirectFacts) error {
 	if err := e.ReadDirect(f); err != nil {
 		return err

@@ -266,8 +266,8 @@ func (s *Postgres) Members(ctx context.Context, scope access.Scope, classID stri
 }
 
 // memberColumns reads a member, and whether the caller, whose id is in
-// placeholder $3, may write to them (visibility.CanMessage, which scope.all
-// does not widen).
+// placeholder $3, may write to them (visibility.CanMessage: any enabled
+// student, whoever's class scope reaches them, F2).
 var memberColumns = `
 		SELECT u.id::text, u.full_name, u.email, m.joined_via::text, m.joined_at, jc.code_hint, ` + visibility.CanMessage("u", 3)
 

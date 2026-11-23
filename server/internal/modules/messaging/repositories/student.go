@@ -31,8 +31,8 @@ const (
 )
 
 // studentFactsSQL reads the facts of the student in $1 and the teacher in $2.
-// A tie is no fact here: it decides whom staff may write to first, and a
-// student writes first only to a teacher of a class they are in now.
+// A tie is no fact here: it tells a former teacher apart, and a student
+// writes first only to a teacher of a class they are in now.
 func studentFactsSQL() string {
 	return `
 	SELECT t.disabled_at IS NULL, NOT ` + visibility.StudentLike("t") + `,

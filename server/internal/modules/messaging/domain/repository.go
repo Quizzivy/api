@@ -9,8 +9,9 @@ import (
 
 // Repository keeps conversations, messages and read pointers in
 // app.conversations, app.messages and app.conversation_reads, and reads the
-// classes, accounts and ties (app.messaging_ties) that decide who reads and
-// who posts. It writes no audit row (D17).
+// classes and accounts that decide who reads and who posts, and the ties
+// (app.messaging_ties) that tell a former student or teacher. It writes no
+// audit row (D17).
 type Repository interface {
 	// DirectFacts reads what decides staffID's direct thread with studentID.
 	DirectFacts(ctx context.Context, staffID, studentID string) (DirectFacts, error)
