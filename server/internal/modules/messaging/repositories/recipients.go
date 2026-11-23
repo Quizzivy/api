@@ -46,6 +46,10 @@ func afterRow(n int, eligible func(alias string) string) string {
 		n, recipientKey("u"), folded(nameOf("k")), eligible("k"))
 }
 
+func namedLike(param int) string {
+	return fmt.Sprintf(`($%[1]d::text = '' OR %[2]s OR %[3]s)`, param, contains(`u.full_name`, param), contains(`coalesce(u.display_name, '')`, param))
+}
+
 func studentRecipientsSQL() string {
 	return `
 	SELECT u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + currentClassNames + `, ` + otherClassNames + `,
@@ -53,13 +57,27 @@ func studentRecipientsSQL() string {
 	       ` + visibility.CanMessage("u", 1) + `
 	  FROM app.users u
 	 WHERE ` + visibility.CanMessage("u", 1) + `
-	   AND ($2::text = '' OR ` + contains(`u.full_name`, 2) + ` OR ` + contains(`coalesce(u.display_name, '')`, 2) + `)
+	   AND ` + namedLike(2) + `
 	   AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM app.class_members cm WHERE cm.class_id = $4::uuid AND cm.user_id = u.id))
 	   AND (NOT $5::boolean OR ` + inScopeNow + `)
 	   AND (NOT $6::boolean OR NOT ` + inAnyNow + `)
 	   AND ` + afterRow(7, func(k string) string { return visibility.CanMessage(k, 1) }) + `
 	 ORDER BY ` + folded(nameOf("u")) + `, u.id
 	 LIMIT $8`
+}
+
+func colleagueRecipientsSQL() string {
+	return `
+	SELECT u.id::text, ` + nameOf("u") + `, u.avatar_key, '{}'::text[], '{}'::text[], r.name, r.builtin_key,
+	       EXISTS (SELECT 1 FROM app.conversations v WHERE ` + pairOf("$1::uuid", "u.id") + `),
+	       ` + canColleague("u") + `
+	  FROM app.users u
+	  JOIN app.roles r ON r.id = u.role_id
+	 WHERE ` + canColleague("u") + `
+	   AND ` + namedLike(2) + `
+	   AND ` + afterRow(3, canColleague) + `
+	 ORDER BY ` + folded(nameOf("u")) + `, u.id
+	 LIMIT $4`
 }
 
 // StudentRecipients returns at most f.Limit+1 students for the picker after
@@ -84,16 +102,41 @@ func (p *Postgres) StudentRecipients(ctx context.Context, f domain.RecipientFilt
 		func(rows pgx.Rows) (domain.Recipient, error) {
 			var r domain.Recipient
 			err := rows.Scan(&r.ID, &r.Name, &r.AvatarKey, &r.ClassNames, &r.OtherClassNames, &r.ThreadExists, &r.CanPost)
-			if r.ClassNames == nil {
-				r.ClassNames = []string{}
-			}
-			if r.OtherClassNames == nil {
-				r.OtherClassNames = []string{}
-			}
-			return r, err
+			return withNames(r), err
 		})
 	if err != nil {
 		return nil, fmt.Errorf("messaging: recipients: %w", err)
 	}
 	return rows, nil
+}
+
+// ColleagueRecipients returns at most f.Limit+1 colleagues for the picker
+// after the row f.After, by folded name and id (domain.Repository): every
+// enabled account that opens the teacher workspace and is not a student,
+// anonymised or the caller, matched on the name accent-insensitively, with
+// the role's stored name and built-in key and whether the caller's thread
+// with them exists. A cursor whose account is gone, or is no colleague the
+// caller may write to, ends the list.
+func (p *Postgres) ColleagueRecipients(ctx context.Context, f domain.RecipientFilter) ([]domain.Recipient, error) {
+	rows, err := db.QueryMany(ctx, p, colleagueRecipientsSQL(),
+		[]any{opt.String(f.ActorID), db.EscapeLike(f.Query), opt.String(f.After), f.Limit + 1},
+		func(rows pgx.Rows) (domain.Recipient, error) {
+			var r domain.Recipient
+			err := rows.Scan(&r.ID, &r.Name, &r.AvatarKey, &r.ClassNames, &r.OtherClassNames, &r.RoleName, &r.RoleBuiltinKey, &r.ThreadExists, &r.CanPost)
+			return withNames(r), err
+		})
+	if err != nil {
+		return nil, fmt.Errorf("messaging: colleague recipients: %w", err)
+	}
+	return rows, nil
+}
+
+func withNames(r domain.Recipient) domain.Recipient {
+	if r.ClassNames == nil {
+		r.ClassNames = []string{}
+	}
+	if r.OtherClassNames == nil {
+		r.OtherClassNames = []string{}
+	}
+	return r
 }

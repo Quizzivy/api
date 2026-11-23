@@ -104,7 +104,8 @@ func (MessagingAudio) Audio(r io.ReaderAt, size int64) (string, error) {
 // MessagingBell is the notifications module's Notify and MarkKeyRead behind
 // the messaging module's Bell port. A notice becomes message.from_teacher in
 // a student's bell, with the class's name for an announcement, and
-// message.received in a staff member's, renewed under the thread's key
+// message.received in a staff member's, leading to the student's thread or,
+// for a colleague thread, the colleague's (F2), renewed under the thread's key
 // (notificationsdomain.MessageKey) with a count of one, so the item counts the
 // messages since it was last read and lists first. The reader's
 // message.received switch governs both kinds.
@@ -123,7 +124,7 @@ func (a MessagingBell) Ring(ctx context.Context, n messagingdomain.Notice) error
 	} else {
 		cmd.Kind = notificationsdomain.MessageReceived
 		cmd.Params = notificationsdomain.MessageNotice{SenderName: n.SenderName, Count: 1, Excerpt: n.Excerpt}
-		cmd.Target = &notificationsdomain.Target{Route: notificationsdomain.RouteMessages, StudentID: n.StudentID}
+		cmd.Target = &notificationsdomain.Target{Route: notificationsdomain.RouteMessages, StudentID: n.StudentID, ColleagueID: n.ColleagueID}
 	}
 	_, err := a.Notify.Handle(ctx, cmd)
 	return err

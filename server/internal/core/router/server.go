@@ -53,7 +53,6 @@ type Server struct {
 	messaginghttp.Student
 	timetablehttp.Timetable
 	EmailEvents
-	F2Pending
 	Deps Deps
 	// Logger is nil in tests; read it through logOf.
 	Logger *slog.Logger

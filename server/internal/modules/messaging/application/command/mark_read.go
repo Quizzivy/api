@@ -34,6 +34,13 @@ func (s MarkReadHandler) Handle(ctx context.Context, cmd MarkRead) (cqrs.Nothing
 		return cqrs.Nothing{}, s.MoveRead(ctx, mark.ReaderID, func() (domain.ReadState, error) {
 			return s.Repo.MarkDirectRead(ctx, cmd.Actor.ID, cmd.Thread.StudentID, mark)
 		})
+	case domain.KindColleague:
+		if _, err := s.Colleague(ctx, cmd.Actor.ID, cmd.Thread.ColleagueID); err != nil {
+			return cqrs.Nothing{}, err
+		}
+		return cqrs.Nothing{}, s.MoveRead(ctx, mark.ReaderID, func() (domain.ReadState, error) {
+			return s.Repo.MarkColleagueRead(ctx, cmd.Actor.ID, cmd.Thread.ColleagueID, mark)
+		})
 	case domain.KindClass:
 		if _, err := s.Repo.Channel(ctx, cmd.Actor.Scope, cmd.Thread.ClassID); err != nil {
 			return cqrs.Nothing{}, err

@@ -8,9 +8,10 @@ import (
 )
 
 // StaffUnread counts the messages past Scope.UserID's read pointers, not
-// counting their own, over their direct threads and the channels of the
-// classes Scope reaches that are not archived: TeacherSummary.unreadMessages,
-// which the nav reads in the caller's own scope.
+// counting their own, over their direct threads, their colleague threads and
+// the channels of the classes Scope reaches that are not archived:
+// TeacherSummary.unreadMessages, which the nav reads in the caller's own
+// scope.
 type StaffUnread struct {
 	Scope access.Scope
 }

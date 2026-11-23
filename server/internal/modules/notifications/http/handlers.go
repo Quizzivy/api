@@ -101,6 +101,7 @@ func toAPINotification(n domain.Notification) (openapi.Notification, error) {
 			AttemptId:    optionalID(n.Target.AttemptID),
 			TestId:       optionalID(n.Target.TestID),
 			StudentId:    optionalID(n.Target.StudentID),
+			ColleagueId:  optionalID(n.Target.ColleagueID),
 			TeacherId:    optionalID(n.Target.TeacherID),
 			ClassId:      optionalID(n.Target.ClassID),
 		}

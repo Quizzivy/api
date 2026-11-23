@@ -148,14 +148,17 @@ func TestAMessageTargetNamesItsThread(t *testing.T) {
 		target domain.Target
 		valid  bool
 	}{
-		"a teacher's thread with a student":  {domain.Target{Route: domain.RouteMessages, StudentID: someAttempt}, true},
-		"a teacher's thread with no student": {domain.Target{Route: domain.RouteMessages}, false},
-		"a student's thread with a teacher":  {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment}, true},
-		"a student's class channel":          {domain.Target{Route: domain.RouteStudentMessages, ClassID: someAssignment}, true},
-		"a student's thread with neither":    {domain.Target{Route: domain.RouteStudentMessages}, false},
-		"a student's thread with both":       {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment, ClassID: someAttempt}, false},
-		"a class id that is not a uuid":      {domain.Target{Route: domain.RouteStudentMessages, ClassID: "lop-1"}, false},
-		"a student id that is not a uuid":    {domain.Target{Route: domain.RouteMessages, StudentID: "hv-1"}, false},
+		"a teacher's thread with a student":       {domain.Target{Route: domain.RouteMessages, StudentID: someAttempt}, true},
+		"a teacher's thread with no student":      {domain.Target{Route: domain.RouteMessages}, false},
+		"a teacher's thread with a colleague":     {domain.Target{Route: domain.RouteMessages, ColleagueID: someAttempt}, true},
+		"a thread with a student and a colleague": {domain.Target{Route: domain.RouteMessages, StudentID: someAttempt, ColleagueID: someAssignment}, false},
+		"a colleague id that is not a uuid":       {domain.Target{Route: domain.RouteMessages, ColleagueID: "gv-1"}, false},
+		"a student's thread with a teacher":       {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment}, true},
+		"a student's class channel":               {domain.Target{Route: domain.RouteStudentMessages, ClassID: someAssignment}, true},
+		"a student's thread with neither":         {domain.Target{Route: domain.RouteStudentMessages}, false},
+		"a student's thread with both":            {domain.Target{Route: domain.RouteStudentMessages, TeacherID: someAssignment, ClassID: someAttempt}, false},
+		"a class id that is not a uuid":           {domain.Target{Route: domain.RouteStudentMessages, ClassID: "lop-1"}, false},
+		"a student id that is not a uuid":         {domain.Target{Route: domain.RouteMessages, StudentID: "hv-1"}, false},
 	} {
 		if err := c.target.Validate(); (err == nil) != c.valid {
 			t.Errorf("%s: err = %v, want valid %v", label, err, c.valid)

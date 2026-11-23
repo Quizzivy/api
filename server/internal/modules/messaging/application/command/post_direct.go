@@ -1,6 +1,7 @@
 // Package command is the messaging context's writes: a staff member's direct
-// message, a class announcement, a student's message to a teacher, and the
-// read pointers. None writes an audit row (D17).
+// message, a class announcement, a message to a colleague, a student's
+// message to a teacher, and the read pointers. None writes an audit row
+// (D17).
 package command
 
 import (
@@ -29,15 +30,26 @@ type PostDirectHandler struct {
 }
 
 func (s PostDirectHandler) Handle(ctx context.Context, cmd PostDirect) (domain.Posted, error) {
-	content, err := domain.NewContent(cmd.Body, cmd.AttachmentID)
+	return post(ctx, s.Service, cmd.Actor.ID, cmd.ClientID, cmd.Body, cmd.AttachmentID, func(p domain.Post) (domain.Posted, error) {
+		return s.Repo.PostDirect(ctx, cmd.Actor.ID, cmd.StudentID, p)
+	})
+}
+
+// post is a staff member's message to a pair's thread: it makes the content
+// (domain.NewContent's refusals), writes it through write, tells the
+// thread's readers once it has committed, and signs the message for its
+// sender.
+func post(ctx context.Context, s *support.Service, senderID, clientID string, body, attachmentID *string,
+	write func(domain.Post) (domain.Posted, error)) (domain.Posted, error) {
+	content, err := domain.NewContent(body, attachmentID)
 	if err != nil {
 		return domain.Posted{}, err
 	}
-	posted, err := s.Repo.PostDirect(ctx, cmd.Actor.ID, cmd.StudentID, domain.Post{SenderID: cmd.Actor.ID, ClientID: cmd.ClientID, Content: content})
+	posted, err := write(domain.Post{SenderID: senderID, ClientID: clientID, Content: content})
 	if err != nil {
 		return domain.Posted{}, err
 	}
 	s.Ring(ctx, posted)
-	s.SignMessage(ctx, cmd.Actor.ID, &posted.Message, map[string]*string{})
+	s.SignMessage(ctx, senderID, &posted.Message, map[string]*string{})
 	return posted, nil
 }

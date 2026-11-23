@@ -188,26 +188,47 @@ func TestThePickerPagesByFoldedNameThenID(t *testing.T) {
 // page reads the cursor's row again only while it is one of the audience's
 // own rows, so a cursor naming any other account, forged or one that has
 // left the audience since, ends the list, and never places the account
-// among the names: a staff account or a disabled student for students.
+// among the names: a staff account or a disabled student for students, a
+// student or an account of the Admin console alone for colleagues.
 func TestACursorNamingAnAccountTheAudienceDoesNotListEndsThePicker(t *testing.T) {
 	w := newWorld(t)
 	me := w.user("Ông Chủ", "teacher")
 	w.user("Bùi Học viên", "student")
 	w.user("Cao Học viên", "student")
+	w.user("Bùi Giáo viên", "teacher")
+	w.user("Cao Giáo viên", "teacher")
 	staff := w.user("A Giáo viên đứng đầu", "teacher")
+	student := w.user("A Học viên đứng đầu", "student")
 	disabled := w.user("A Học viên đã khoá", "student")
 	w.disable(disabled)
+	console := w.holding("A Kiểm toán", w.role("Kiểm toán", "system.audit.read"))
 
-	for name, row := range map[string]string{
-		"a staff account":    staff,
-		"a disabled student": disabled,
+	for name, c := range map[string]struct {
+		audience domain.Audience
+		row      string
+	}{
+		"a staff account, for students":       {domain.AudienceStudents, staff},
+		"a disabled student, for students":    {domain.AudienceStudents, disabled},
+		"a student, for colleagues":           {domain.AudienceColleagues, student},
+		"the Admin console alone, colleagues": {domain.AudienceColleagues, console},
+		"the caller, for colleagues":          {domain.AudienceColleagues, me},
 	} {
-		page, err := w.recipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(row))
+		f := domain.RecipientFilter{Query: w.marker}
+		var page domain.Recipients
+		var err error
+		if c.audience == domain.AudienceStudents {
+			page, err = w.recipients(by(me), f, domain.RecipientCursor(c.row))
+		} else {
+			page, err = w.colleagueRecipients(by(me), f, domain.RecipientCursor(c.row))
+		}
 		if err != nil || len(page.Rows) != 0 || page.Next != "" {
 			t.Errorf("%s: %v (next %q), %v, want the list ended", name, ids(page.Rows), page.Next, err)
 		}
 	}
-	if page, err := w.recipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(w.user("A Học viên đứng đầu", "student"))); err != nil || len(page.Rows) != 2 {
+	if page, err := w.recipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(student)); err != nil || len(page.Rows) != 2 {
 		t.Errorf("a student's own cursor: %v, %v, want the two students after it", ids(page.Rows), err)
+	}
+	if page, err := w.colleagueRecipients(by(me), domain.RecipientFilter{Query: w.marker}, domain.RecipientCursor(staff)); err != nil || len(page.Rows) != 2 {
+		t.Errorf("a colleague's own cursor: %v, %v, want the two colleagues after it", ids(page.Rows), err)
 	}
 }

@@ -30,7 +30,7 @@ func (x *iso) view(op scopedOp, c isoCase, viewer *party, bare bool) string {
 var signature = regexp.MustCompile(`[?&]X-Amz-[^"]*`)
 
 func walkedView(op scopedOp) bool {
-	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" || op.id == "getStudentWeek" || op.id == "listStaffThreads" || op.id == "listStudentThreads" ||
+	return op.method == http.MethodGet && (op.listing != "" || op.id == "getDashboard" || op.id == "getTeacherSummary" || op.id == "getStudentWeek" || op.id == "listStaffThreads" || op.id == "listColleagueThreads" || op.id == "listStudentThreads" ||
 		strings.HasPrefix(op.id, "listMy") || strings.HasPrefix(op.path, "/me/"))
 }
 
@@ -235,6 +235,7 @@ func TestAnotherTeachersIdsAnswerAsMissingOnes(t *testing.T) {
 	x.adminListsOwnRows()
 	x.adminsOwnAssignmentNamesEveryTarget()
 	x.directThreadsStayWithTheirParticipants()
+	x.colleagueThreadsStayWithTheirParticipants()
 	x.studentThreadsStayWithTheirParticipants()
 	x.studentWeeksStayWithTheirStudents(shared)
 }

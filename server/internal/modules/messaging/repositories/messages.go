@@ -215,30 +215,45 @@ func serialise(ctx context.Context, tx pgx.Tx, thread string) error {
 // PostDirect writes post to staffID's thread with studentID in one
 // transaction (domain.Repository).
 func (p *Postgres) PostDirect(ctx context.Context, staffID, studentID string, post domain.Post) (domain.Posted, error) {
+	rules := domain.Eligibility{}
 	return p.post(ctx, "messaging: post direct", post, func(ctx context.Context, tx pgx.Tx) (target, error) {
-		facts, err := directFacts(ctx, tx, staffID, studentID)
-		if err != nil {
-			return target{}, err
-		}
-		rules := domain.Eligibility{}
-		if err := rules.ReadDirect(facts); err != nil {
-			return target{}, err
-		}
-		return target{
-			find: func(ctx context.Context, tx pgx.Tx) (string, error) {
+		return pairTarget(ctx, tx, rules.ReadDirect, rules.PostDirect,
+			func(ctx context.Context, q db.Querier) (domain.DirectFacts, error) {
+				return directFacts(ctx, q, staffID, studentID)
+			},
+			func(ctx context.Context, tx pgx.Tx) (string, error) {
 				return directConversation(ctx, tx, staffID, studentID)
 			},
-			allow: func() error { return rules.PostDirect(facts) },
-			open: func(ctx context.Context, tx pgx.Tx) error {
-				if _, err := tx.Exec(ctx, `
-					INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at) VALUES ('direct', $1::uuid, $2::uuid, now())
-					ON CONFLICT (staff_id, student_id) WHERE kind = 'direct' DO NOTHING`, staffID, studentID); err != nil {
-					return fmt.Errorf("messaging: open direct thread: %w", err)
-				}
-				return nil
-			},
-		}, nil
+			`INSERT INTO app.conversations (kind, staff_id, student_id, last_message_at) VALUES ('direct', $1::uuid, $2::uuid, now())
+			 ON CONFLICT (staff_id, student_id) WHERE kind = 'direct' DO NOTHING`, staffID, studentID)
 	})
+}
+
+// pairTarget is the target of a post to a two-person thread: the facts its
+// transaction reads, judged by read (a thread the sender cannot read answers
+// there) and then by allow for the new message; find reads the thread, and
+// the first post makes it with open, an INSERT … ON CONFLICT DO NOTHING
+// over args.
+func pairTarget[F any](ctx context.Context, tx pgx.Tx, read, allow func(F) error,
+	facts func(context.Context, db.Querier) (F, error), find func(context.Context, pgx.Tx) (string, error),
+	open string, args ...any) (target, error) {
+	f, err := facts(ctx, tx)
+	if err != nil {
+		return target{}, err
+	}
+	if err := read(f); err != nil {
+		return target{}, err
+	}
+	return target{
+		find:  find,
+		allow: func() error { return allow(f) },
+		open: func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, open, args...); err != nil {
+				return fmt.Errorf("messaging: open thread: %w", err)
+			}
+			return nil
+		},
+	}, nil
 }
 
 // PostChannel writes post to the channel of classID, which it holds FOR

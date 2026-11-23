@@ -31,18 +31,19 @@ func (p *Postgres) InsertAttachment(ctx context.Context, a domain.NewAttachment)
 }
 
 // StoredAttachment reads file id and the thread of the message that holds
-// it, or domain.ErrAttachmentNotFound (domain.Repository).
+// it, of any kind with the columns that name its participants, or
+// domain.ErrAttachmentNotFound (domain.Repository).
 func (p *Postgres) StoredAttachment(ctx context.Context, id string) (domain.StoredAttachment, error) {
 	var a domain.StoredAttachment
-	var kind, staff, student, class *string
+	var kind, staff, student, low, high, class *string
 	err := p.QueryRow(ctx, `
 		SELECT a.id::text, a.original_filename, a.bytes, a.mime_type, a.storage_key, a.uploaded_by::text,
-		       v.kind, v.staff_id::text, v.student_id::text, v.class_id::text
+		       v.kind, v.staff_id::text, v.student_id::text, v.colleague_low_id::text, v.colleague_high_id::text, v.class_id::text
 		  FROM app.message_attachments a
 		  LEFT JOIN app.messages m ON m.attachment_id = a.id
 		  LEFT JOIN app.conversations v ON v.id = m.conversation_id
 		 WHERE a.id = $1::uuid`, id).
-		Scan(&a.ID, &a.Filename, &a.Bytes, &a.MimeType, &a.StorageKey, &a.UploadedBy, &kind, &staff, &student, &class)
+		Scan(&a.ID, &a.Filename, &a.Bytes, &a.MimeType, &a.StorageKey, &a.UploadedBy, &kind, &staff, &student, &low, &high, &class)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.StoredAttachment{}, domain.ErrAttachmentNotFound
 	}
@@ -50,7 +51,10 @@ func (p *Postgres) StoredAttachment(ctx context.Context, id string) (domain.Stor
 		return domain.StoredAttachment{}, fmt.Errorf("messaging: read attachment: %w", err)
 	}
 	if kind != nil {
-		a.Thread = &domain.AttachmentThread{Kind: domain.Kind(*kind), StaffID: deref(staff), StudentID: deref(student), ClassID: deref(class)}
+		a.Thread = &domain.AttachmentThread{
+			Kind: domain.Kind(*kind), StaffID: deref(staff), StudentID: deref(student),
+			ColleagueLowID: deref(low), ColleagueHighID: deref(high), ClassID: deref(class),
+		}
 	}
 	return a, nil
 }

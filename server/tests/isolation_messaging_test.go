@@ -211,3 +211,90 @@ func (x *iso) studentThreadsStayWithTheirParticipants() {
 		x.t.Errorf("the channel holds the student's refused post: %v", read)
 	}
 }
+
+// colleagueThreadsStayWithTheirParticipants is the colleague case of the
+// isolation suite (F2, T-F2.4, D17): teachers A and B share a thread with a
+// file. Teacher C naming A reads C's own empty thread, never A↔B; C's list
+// shows none of it; a pointer naming A↔B's message answers as a missing
+// message does; the file answers C as a missing file does. The Admin, whose
+// scope.all opens no thread, is C's like: naming A reads the Admin's own
+// thread, and once the Admin writes, A reads the Admin's message in the
+// Admin's thread alone and B never sees it. A student session is refused
+// the colleague operations by audience.
+func (x *iso) colleagueThreadsStayWithTheirParticipants() {
+	x.t.Helper()
+	post := func(body string, file ...string) *payload {
+		p := map[string]any{"clientId": uuid.NewString(), "body": body}
+		if len(file) > 0 {
+			p["attachmentId"] = file[0]
+		}
+		return new(jsonPayload(x.t, p))
+	}
+	pointer := func(message string) *payload {
+		return new(jsonPayload(x.t, map[string]any{"lastReadMessageId": message}))
+	}
+	file := uploadAttachment(x.t, x.a.c, "rieng-a-b.pdf")
+	sent := x.a.c.send(http.MethodPost, "/teacher/messages/colleagues/"+x.b.userID, post("Tin riêng của A cho B", file))
+	if sent.status != http.StatusCreated {
+		x.t.Fatalf("A writing to B: %s", answer(sent))
+	}
+	theirs := id(sent.json)
+	if got := x.b.c.send(http.MethodGet, "/teacher/messages/colleagues/"+x.a.userID, nil); got.status != http.StatusOK || !strings.Contains(string(got.body), theirs) {
+		x.t.Errorf("B reading their thread with A: %s, want A's message", answer(got))
+	}
+	if got := x.b.c.send(http.MethodGet, "/teacher/messages/attachments/"+file, nil); got.status != http.StatusOK {
+		x.t.Errorf("B downloading A's file: %s, want 200", answer(got))
+	}
+
+	c := x.w.signedIn(x.w.createStaff("teacher"))
+	for who, viewer := range map[string]*client{"C": c, "the Admin": x.admin} {
+		read := viewer.send(http.MethodGet, "/teacher/messages/colleagues/"+x.a.userID, nil)
+		if messages, _ := read.json["messages"].([]any); read.status != http.StatusOK || len(messages) != 0 || read.json["latestId"] != nil ||
+			strings.Contains(string(read.body), "Tin riêng") {
+			x.t.Errorf("%s naming A: %s, want 200 and their own empty thread", who, answer(read))
+		}
+		for _, path := range []string{"/teacher/messages/colleagues", "/teacher/messages/colleagues?q=a", "/teacher/messages/threads?tab=all"} {
+			if listed := viewer.send(http.MethodGet, path, nil); listed.status != http.StatusOK || strings.Contains(string(listed.body), theirs) ||
+				strings.Contains(string(listed.body), "Tin riêng của A") {
+				x.t.Errorf("%s's %s shows A↔B: %s", who, path, answer(listed))
+			}
+		}
+		for _, colleague := range []string{x.a.userID, x.b.userID} {
+			path := "/teacher/messages/colleagues/" + colleague + "/read"
+			foreign, absent := viewer.send(http.MethodPost, path, pointer(theirs)), viewer.send(http.MethodPost, path, pointer(uuid.NewString()))
+			if foreign.status != http.StatusUnprocessableEntity || answer(foreign) != answer(absent) {
+				x.t.Errorf("%s naming A↔B's message as their pointer with %s: %s, where a missing message answers %s", who, colleague, answer(foreign), answer(absent))
+			}
+		}
+		got, absent := viewer.send(http.MethodGet, "/teacher/messages/attachments/"+file, nil), viewer.send(http.MethodGet, "/teacher/messages/attachments/"+uuid.NewString(), nil)
+		if got.status != http.StatusNotFound || answer(got) != answer(absent) {
+			x.t.Errorf("%s downloading A↔B's file: %s, want 404 as for a missing file (%s)", who, answer(got), answer(absent))
+		}
+	}
+	if written := x.admin.send(http.MethodPost, "/teacher/messages/colleagues/"+x.a.userID, post("Tin của quản trị cho A")); written.status != http.StatusCreated {
+		x.t.Fatalf("the Admin writing to A: %s", answer(written))
+	}
+	if read := x.admin.send(http.MethodGet, "/teacher/messages/colleagues/"+x.a.userID, nil); strings.Contains(string(read.body), "Tin riêng") || len(read.json["messages"].([]any)) != 1 {
+		x.t.Errorf("the Admin's thread with A after writing: %s, want the Admin's message alone", answer(read))
+	}
+	if got := x.b.c.send(http.MethodGet, "/teacher/messages/colleagues/"+x.a.userID, nil); strings.Contains(string(got.body), "Tin của quản trị") {
+		x.t.Errorf("B sees the Admin's thread with A: %s", got.body)
+	}
+	for _, r := range []struct{ method, path string }{
+		{http.MethodGet, "/teacher/messages/colleagues"},
+		{http.MethodGet, "/teacher/messages/colleagues/" + x.a.userID},
+		{http.MethodPost, "/teacher/messages/colleagues/" + x.a.userID},
+		{http.MethodPost, "/teacher/messages/colleagues/" + x.a.userID + "/read"},
+	} {
+		var body *payload
+		if r.method == http.MethodPost {
+			body = post("Em chào cô")
+			if strings.HasSuffix(r.path, "/read") {
+				body = pointer(theirs)
+			}
+		}
+		if got := x.b.student.c.send(r.method, r.path, body); got.status != http.StatusForbidden {
+			x.t.Errorf("a student session at %s %s: %s, want 403 by audience", r.method, r.path, answer(got))
+		}
+	}
+}

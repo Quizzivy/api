@@ -26,18 +26,44 @@ type StudentRecipientsHandler struct {
 // cursor the picker did not give, and domain.ErrNotFound for a class outside
 // the caller's class scope.
 func (s StudentRecipientsHandler) Handle(ctx context.Context, q StudentRecipients) (domain.Recipients, error) {
-	f := q.Filter
-	f.Audience = domain.AudienceStudents
+	return recipients(ctx, s.Service, domain.AudienceStudents, q.Filter, q.Cursor, s.Repo.StudentRecipients)
+}
+
+// ColleagueRecipients is one page of the New message picker's colleagues
+// (listMessageRecipients, audience colleagues, T-F2.4): every enabled account
+// that opens the teacher workspace and is not a student, never the caller.
+// Every staff member gets the same rows; scope.all plays no part.
+type ColleagueRecipients struct {
+	Filter domain.RecipientFilter
+	Cursor string
+}
+
+type ColleagueRecipientsHandler struct {
+	*support.Service
+}
+
+// Handle answers domain.ErrInvalid for a students' filter or a cursor the
+// picker did not give.
+func (s ColleagueRecipientsHandler) Handle(ctx context.Context, q ColleagueRecipients) (domain.Recipients, error) {
+	return recipients(ctx, s.Service, domain.AudienceColleagues, q.Filter, q.Cursor, s.Repo.ColleagueRecipients)
+}
+
+// recipients checks f for audience, reads the row its cursor names, then one
+// page of read past it, and makes the next page's cursor from the last row
+// while more remain.
+func recipients(ctx context.Context, s *support.Service, audience domain.Audience, f domain.RecipientFilter, cursor string,
+	read func(context.Context, domain.RecipientFilter) ([]domain.Recipient, error)) (domain.Recipients, error) {
+	f.Audience = audience
 	f, err := f.Check()
 	if err != nil {
 		return domain.Recipients{}, err
 	}
-	if q.Cursor != "" {
-		if f.After, err = domain.ParseRecipientCursor(q.Cursor); err != nil {
+	if cursor != "" {
+		if f.After, err = domain.ParseRecipientCursor(cursor); err != nil {
 			return domain.Recipients{}, err
 		}
 	}
-	rows, err := s.Repo.StudentRecipients(ctx, f)
+	rows, err := read(ctx, f)
 	if err != nil {
 		return domain.Recipients{}, err
 	}
