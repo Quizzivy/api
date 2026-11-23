@@ -139,11 +139,26 @@ func (h Classes) PreviewJoinCode(ctx context.Context, request openapi.PreviewJoi
 	if result.Outcome != domain.PreviewOK {
 		return openapi.PreviewJoinCode404JSONResponse(JoinCodeError(ctx, result.Outcome)), nil
 	}
-	return openapi.PreviewJoinCode200JSONResponse{
+	return toAPIPreview(result), nil
+}
+
+// toAPIPreview is the preview's five fields (§6.5): the class, its teacher,
+// its weekly pattern, null when it has neither slots nor a label, and its
+// derived room. The leak review is the contract's: the facts a teacher prints
+// on a flyer, for a valid, usable code only; no session dates, notes or
+// cancellations, and no member, session or attempt counts (DG-02).
+func toAPIPreview(result domain.PreviewResult) openapi.PreviewJoinCode200JSONResponse {
+	out := openapi.PreviewJoinCode200JSONResponse{
 		ClassId:     httpapi.ParseUUID(result.ClassID),
 		ClassName:   result.ClassName,
 		TeacherName: result.TeacherName,
-	}, nil
+		Room:        result.Room,
+	}
+	if s := result.Schedule; s != nil {
+		schedule := scheduleOf(s.Label, s.Slots)
+		out.Schedule = &schedule
+	}
+	return out
 }
 
 // JoinCodeError maps a refusal to its §9 error code and message.
@@ -168,14 +183,16 @@ func JoinCodeError(ctx context.Context, outcome domain.PreviewOutcome) openapi.E
 	}
 }
 
-// ToAPIClass renders the §7 Class shape.
+// ToAPIClass renders the §7 Class shape a student joins. ownRoom is a teacher
+// response's only, so it is left out.
 func ToAPIClass(c domain.EnrolledClass) openapi.Class {
 	return openapi.Class{
 		Id:              httpapi.ParseUUID(c.ID),
 		Name:            c.Name,
 		Description:     c.Description,
 		ScheduleLabel:   c.ScheduleLabel,
-		Room:            c.Room,
+		Schedule:        scheduleOf(c.ScheduleLabel, c.Slots()),
+		Room:            c.DerivedRoom(),
 		StudentCount:    c.StudentCount,
 		SelfJoinEnabled: c.SelfJoinEnabled,
 		CreatedAt:       c.CreatedAt,

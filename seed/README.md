@@ -49,6 +49,17 @@ What is here:
   for thirty days with fifty attempts and fullscreen off, for the live E2E of the flexible mode.
   Its time limit (one minute) and leaving rule (submit on the second absence) are stored and
   not applied, so a strict reading of it fails the spec. It relies on 01 and 02.
+- `13-dev-schedule.sql` — the timetable (R8, T-R8.16), shaped like the Teacher deck's `CAL_EV`,
+  `ATT_SES` and `ATT_RATE` and the Student deck's `AGENDA`. *Term 3*, the current term, starts on
+  the Monday eight weeks before the week of the first seed and runs eighteen weeks. Lan's four
+  classes from 08 meet weekly to its end: *IELTS 6.5 Evening* Mon · Wed · Fri 18:00, *IELTS
+  Foundation A* Tue · Thu 17:30, *TOEIC 600 Weekend* Sat · Sun 09:00 (120 min) and *Kids Starters
+  B* Sat 14:00, 90 min unless noted, in the class's room. The term's first eight weeks have
+  their registers taken; the current week's are not. In *IELTS 6.5 Evening* the deck's eight
+  students end those weeks on `ATT_RATE` exactly (100, 92, 85, 96, 71, 88, 100, 79 %), Nguyễn
+  Gia Bảo's 85 % by four sessions he is left unmarked on. One per-date change: Foundation A's
+  Thursday of the first seed's week is in Room 3, noted "Room 3 this week". It relies on 06 and
+  08, and adds no account, class or member.
 - `99-assert.sql` — runs last and refuses the seed if the rows above break a
   rule `publish` would have enforced, or if a user, class or owned row lacks
   the column R2's access model reads. The seed writes frozen version rows
@@ -60,6 +71,11 @@ What is here:
   12's assignment is flexible, reaches the student, is open now and still stores its strict
   rules, and that 04's and 10's are strict. A database seeded more than thirty days ago fails
   it: 12's row has closed, and DO NOTHING keeps it so; reset the database and seed again.
+  Since R8 it checks 13's term holds today, its series are `CAL_EV`'s and as the create command
+  writes them, a stored occurrence is on a date of its series and is one a write would keep,
+  every mark is on a session that has started, the eight's rates over the seeded weeks, the
+  per-date change, and Gia Bảo's five sessions this week. Ten weeks after the first seed the
+  term is over and the check fails the same way.
 
 ## Logins
 

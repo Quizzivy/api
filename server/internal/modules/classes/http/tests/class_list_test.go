@@ -175,10 +175,15 @@ func TestAStudentsClassCarriesExactlyTheseFieldsAndNeverACountMemberOrAverage(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
+	want := []string{"description", "id", "joinedAt", "name", "room", "schedule", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}
 	for i, item := range response.(openapi.ListMyClasses200JSONResponse).Items {
 		if got := keysOf(t, item); !slices.Equal(got, want) {
 			t.Errorf("item %d carries %v, want exactly %v: a student's class holds no count, roster, code or average, and a missing value is null, not absent", i, got, want)
+		}
+		// A class with no active series has a schedule of its label alone;
+		// slots is an empty list, never null.
+		if item.Schedule.Slots == nil || len(item.Schedule.Slots) != 0 || item.Schedule.Label != item.ScheduleLabel {
+			t.Errorf("item %d's schedule is %+v, want no slots and the label %v", i, item.Schedule, item.ScheduleLabel)
 		}
 		if item.TeacherId == nil || item.TeacherId.String() != teacherID {
 			t.Errorf("item %d names the teacher %v, want %s, whose thread the card opens", i, item.TeacherId, teacherID)
@@ -221,7 +226,7 @@ func TestTheListRowRepeatsEveryPropertyOfAClass(t *testing.T) {
 	if class, row := names("Class"), names("ClassListItem"); !slices.Equal(class, row) {
 		t.Errorf("Class has %v and ClassListItem %v: the row repeats the class so that no other response carries a readable code, and the two lists must stay the same", class, row)
 	}
-	if my := names("MyClass"); !slices.Equal(my, []string{"description", "id", "joinedAt", "name", "room", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}) {
+	if my := names("MyClass"); !slices.Equal(my, []string{"description", "id", "joinedAt", "name", "room", "schedule", "scheduleLabel", "teacherAvatarUrl", "teacherId", "teacherName"}) {
 		t.Errorf("MyClass declares %v", my)
 	}
 	class, row := spec.Components.Schemas["Class"].Value, spec.Components.Schemas["ClassListItem"].Value
@@ -236,5 +241,35 @@ func TestTheListRowRepeatsEveryPropertyOfAClass(t *testing.T) {
 	}
 	if info := spec.Components.Schemas["JoinCodeInfo"].Value.Properties; info["code"] != nil {
 		t.Error("JoinCodeInfo carries a code: every operation that returns a Class would reveal it")
+	}
+}
+
+// TestATeachersClassCarriesItsLabelAsTheScheduleAndItsOwnRoom pins what R8's
+// contract asks of existing class responses before T-R8.7 derives them from
+// the weekly series: schedule is no slots and the class's own label, and room
+// and ownRoom are both the stored room. A student's joined class carries the
+// schedule but never ownRoom, which is a teacher response's only.
+func TestATeachersClassCarriesItsLabelAsTheScheduleAndItsOwnRoom(t *testing.T) {
+	label, room := "Thứ 2 · 18:00", "A1"
+	app := classeshttp.NewClasses(&application.Application{Queries: application.Queries{
+		Get: cqrs.HandlerFunc[query.Get, domain.Class](func(context.Context, query.Get) (domain.Class, error) {
+			return domain.Class{ID: uuid.NewString(), Name: "Lớp", ScheduleLabel: &label, Room: &room, CreatedAt: time.Now()}, nil
+		}),
+	}})
+	ctx := contextAs(t, access.Principal{UserID: uuid.NewString(), Permissions: access.NewSet(access.TeachingClassesWrite)})
+	response, err := app.GetClass(ctx, openapi.GetClassRequestObject{Id: uuid.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	class := response.(openapi.GetClass200JSONResponse)
+	if class.Schedule.Slots == nil || len(class.Schedule.Slots) != 0 || class.Schedule.Label == nil || *class.Schedule.Label != label {
+		t.Errorf("the class's schedule is %+v, want no slots and the label %q", class.Schedule, label)
+	}
+	if class.OwnRoom == nil || *class.OwnRoom != room || class.Room == nil || *class.Room != room {
+		t.Errorf("the class's room is %v and its own room %v, want both %q", class.Room, class.OwnRoom, room)
+	}
+	joined := keysOf(t, classeshttp.ToAPIClass(domain.EnrolledClass{ID: uuid.NewString(), Name: "Lớp", Room: &room, CreatedAt: time.Now()}))
+	if !slices.Contains(joined, "schedule") || slices.Contains(joined, "ownRoom") {
+		t.Errorf("the class a student joins carries %v, want schedule and no ownRoom", joined)
 	}
 }

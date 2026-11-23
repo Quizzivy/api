@@ -13,8 +13,13 @@ import (
 var resourceKinds = []string{
 	"test", "test-version", "section", "question", "version-question", "version-recording", "question-group", "media",
 	"import", "import-source", "class", "assignment", "attempt", "student", "notification", "override", "question-set",
-	"share", "messaging-peer", "attachment", "none",
+	"share", "messaging-peer", "attachment", "session", "session-series", "none",
 }
+
+// sessionIDSchema is R8's opaque class session id: a one-off's uuid or a
+// weekly occurrence {seriesId}.{yyyymmdd}, text that is never format uuid, so
+// the contract declares it by reference and the walk finds it the same way.
+const sessionIDSchema = "#/components/schemas/SessionId"
 
 type resourceEntry struct {
 	In   string `json:"in"`
@@ -31,7 +36,7 @@ func uuidPointers(ref *openapi3.SchemaRef, at string, seen map[*openapi3.Schema]
 		return
 	}
 	s := ref.Value
-	if s.Format == "uuid" {
+	if s.Format == "uuid" || ref.Ref == sessionIDSchema {
 		out[at] = true
 		return
 	}
@@ -131,8 +136,12 @@ func listsItems(ref *openapi3.SchemaRef) bool {
 	if ref == nil || ref.Value == nil {
 		return false
 	}
-	if items := ref.Value.Properties["items"]; items != nil && items.Value != nil && items.Value.Type.Is("array") {
-		return true
+	// A list returns its rows as items; the calendar returns its sessions
+	// (T-R8.5), beside the assignment events it draws with them.
+	for _, name := range []string{"items", "sessions"} {
+		if rows := ref.Value.Properties[name]; rows != nil && rows.Value != nil && rows.Value.Type.Is("array") {
+			return true
+		}
 	}
 	return slices.ContainsFunc(ref.Value.AllOf, listsItems)
 }
@@ -167,7 +176,7 @@ func TestEveryTeacherListNamesTheKindItLists(t *testing.T) {
 			t.Errorf("GET %s lists unknown kind %q", path, kind)
 		}
 	}
-	if lists != 17 {
-		t.Errorf("%d teacher lists, want 17", lists)
+	if lists != 19 {
+		t.Errorf("%d teacher lists, want 19", lists)
 	}
 }

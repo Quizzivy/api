@@ -105,8 +105,8 @@ func TestTheAssistantWritesTfngFixesTheNewTypesAndGivesAnEssayABandThatGradingTa
 		option := o.(map[string]any)
 		options = append(options, map[string]any{"id": option["id"], "text": option["text"], "isCorrect": option["id"] == tfngPayload["optionId"]})
 	}
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(tfng), map[string]any{"type": "tfng", "prompt": tfng["prompt"], "points": 1, "options": options})
-	teacher.must(http.StatusOK, http.MethodPatch, "/teacher/questions/"+id(short), map[string]any{
+	teacher.editQuestion(http.StatusOK, id(tfng), map[string]any{"type": "tfng", "prompt": tfng["prompt"], "points": 1, "options": options})
+	teacher.editQuestion(http.StatusOK, id(short), map[string]any{
 		"type": "short_answer", "prompt": short["prompt"], "points": 1, "sampleAnswer": "poor tools", "maxWords": limitPayload["maxWords"],
 	})
 	if got := teacher.must(http.StatusOK, http.MethodGet, "/teacher/questions/"+id(short), nil); got["maxWords"] != float64(3) {

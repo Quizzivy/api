@@ -14,6 +14,9 @@ import (
 
 var computedActions = []string{"ai.credit_request.approved", "ai.credit_request.declined"}
 
+// pendingActions are catalogued before their writers exist. Each task takes
+// its actions off as it writes them; R8's attendance.saved is written since
+// T-R8.6.
 var pendingActions = []string{}
 
 func catalogued() map[string]domain.Action {

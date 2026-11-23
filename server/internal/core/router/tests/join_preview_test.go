@@ -63,7 +63,11 @@ func previewFrom(t *testing.T, handler http.Handler, ip, code string) *httptest.
 	return rec
 }
 
-func TestTheSuccessBodyHasExactlyThreeKeys(t *testing.T) {
+// TestTheSuccessBodyHasExactlyFiveKeys pins the preview's leak review (§6.5):
+// R8's contract adds schedule and room, the weekly pattern and the room a
+// teacher prints on a flyer, and nothing else. Both are null until T-R8.7
+// derives them from the class's series, and that task repeats the review.
+func TestTheSuccessBodyHasExactlyFiveKeys(t *testing.T) {
 	fake := &fakeJoin{result: classesdomain.PreviewResult{
 		Outcome:     classesdomain.PreviewOK,
 		ClassID:     "01935000-0000-7000-8000-0000000000c1",
@@ -79,7 +83,7 @@ func TestTheSuccessBodyHasExactlyThreeKeys(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	want := map[string]bool{"classId": true, "className": true, "teacherName": true}
+	want := map[string]bool{"classId": true, "className": true, "teacherName": true, "schedule": true, "room": true}
 	for key := range body {
 		if !want[key] {
 			t.Errorf("response carries %q, which §6.5 does not permit", key)
@@ -90,8 +94,13 @@ func TestTheSuccessBodyHasExactlyThreeKeys(t *testing.T) {
 			t.Errorf("response is missing %q", key)
 		}
 	}
-	if len(body) != 3 {
-		t.Errorf("response has %d keys, want exactly 3: %s", len(body), rec.Body.String())
+	if len(body) != 5 {
+		t.Errorf("response has %d keys, want exactly 5: %s", len(body), rec.Body.String())
+	}
+	for _, key := range []string{"schedule", "room"} {
+		if string(body[key]) != "null" {
+			t.Errorf("%s is %s, want null until T-R8.7 derives it", key, body[key])
+		}
 	}
 }
 

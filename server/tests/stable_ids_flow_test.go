@@ -65,7 +65,7 @@ func TestSavingWhatTheEditorReadKeepsEveryOptionAndBlankId(t *testing.T) {
 		},
 	})
 	options := childIDs(single, "options")
-	saved := teacher.must(http.StatusOK, http.MethodPatch, path(single), writeBodyOf(single))
+	saved := teacher.editQuestion(http.StatusOK, id(single), writeBodyOf(single))
 	if got := childIDs(saved, "options"); !slices.Equal(got, options) {
 		t.Fatalf("saving the question as it was read changed the option ids: %v, want %v", got, options)
 	}
@@ -73,7 +73,7 @@ func TestSavingWhatTheEditorReadKeepsEveryOptionAndBlankId(t *testing.T) {
 	rotated := writeBodyOf(saved)
 	list := rotated["options"].([]any)
 	rotated["options"] = []any{list[2], list[0], list[1]}
-	saved = teacher.must(http.StatusOK, http.MethodPatch, path(single), rotated)
+	saved = teacher.editQuestion(http.StatusOK, id(single), rotated)
 	if got, want := childIDs(saved, "options"), []string{options[2], options[0], options[1]}; !slices.Equal(got, want) {
 		t.Fatalf("option ids after a rotation: %v, want %v", got, want)
 	}
@@ -89,7 +89,7 @@ func TestSavingWhatTheEditorReadKeepsEveryOptionAndBlankId(t *testing.T) {
 		},
 	})
 	blanks := childIDs(cloze, "blanks")
-	saved = teacher.must(http.StatusOK, http.MethodPatch, path(cloze), writeBodyOf(cloze))
+	saved = teacher.editQuestion(http.StatusOK, id(cloze), writeBodyOf(cloze))
 	if got := childIDs(saved, "blanks"); !slices.Equal(got, blanks) {
 		t.Fatalf("saving the question as it was read changed the blank ids: %v, want %v", got, blanks)
 	}
@@ -99,7 +99,7 @@ func TestSavingWhatTheEditorReadKeepsEveryOptionAndBlankId(t *testing.T) {
 	first, second := list[0].(map[string]any), list[1].(map[string]any)
 	first["ordinal"], second["ordinal"] = 2, 1
 	second["acceptedAnswers"] = []string{"về", "ve"}
-	saved = teacher.must(http.StatusOK, http.MethodPatch, path(cloze), swapped)
+	saved = teacher.editQuestion(http.StatusOK, id(cloze), swapped)
 	if got, want := childIDs(saved, "blanks"), []string{blanks[1], blanks[0]}; !slices.Equal(got, want) {
 		t.Fatalf("blank ids after swapping the ordinals: %v, want %v", got, want)
 	}

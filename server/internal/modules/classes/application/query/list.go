@@ -9,7 +9,8 @@ import (
 )
 
 // List reads a page of the classes Input's scope reaches, each with its
-// average score. OpenCodes asks for the readable join code of each: the caller
+// average score and the timetable of its active series, both read for the
+// whole page at once. OpenCodes asks for the readable join code of each: the caller
 // sets it only for a request that asked for codes and a caller who holds
 // teaching.classes.write, the permission getJoinCode needs, and a code then
 // opens exactly when ActiveCode would open it for the same scope and class.
@@ -40,6 +41,9 @@ func (s ListHandler) Handle(ctx context.Context, q List) (ListResult, error) {
 		classes[i] = &items[i].Class
 	}
 	if err := s.AttachAverage(ctx, classes...); err != nil {
+		return ListResult{}, err
+	}
+	if err := s.AttachSchedule(ctx, classes...); err != nil {
 		return ListResult{}, err
 	}
 	if q.OpenCodes {

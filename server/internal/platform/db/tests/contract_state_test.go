@@ -25,10 +25,12 @@ func TestTheObjectsTheContractsDroppedAreGone(t *testing.T) {
 		"the trigger users_sync_legacy_role":  `SELECT 1 FROM pg_trigger WHERE tgname = 'users_sync_legacy_role'`,
 		"the index users_role_active_idx":     `SELECT 1 FROM pg_class WHERE relname = 'users_role_active_idx' AND relnamespace = 'app'::regnamespace`,
 	}
-	for _, trigger := range []string{"tests_fill_owner", "questions_fill_owner", "question_groups_fill_owner", "media_assets_fill_owner", "classes_fill_teacher"} {
+	for _, trigger := range []string{"tests_fill_owner", "questions_fill_owner", "question_groups_fill_owner", "media_assets_fill_owner", "classes_fill_teacher",
+		"class_members_fill_messaging_ties", "classes_fill_messaging_ties"} {
 		gone["the trigger "+trigger] = `SELECT 1 FROM pg_trigger WHERE tgname = '` + trigger + `'`
 	}
-	for _, function := range []string{"fill_owner_from_created_by", "fill_owner_from_uploaded_by", "classes_fill_teacher"} {
+	for _, function := range []string{"fill_owner_from_created_by", "fill_owner_from_uploaded_by", "classes_fill_teacher",
+		"class_members_fill_messaging_ties", "classes_fill_messaging_ties"} {
 		gone["the function "+function] = `SELECT 1 FROM pg_proc WHERE proname = '` + function + `' AND pronamespace = 'app'::regnamespace`
 	}
 	for name, query := range gone {
@@ -46,6 +48,7 @@ func TestTheObjectsTheContractsKeptAreStillThere(t *testing.T) {
 			SELECT 1 FROM pg_constraint WHERE conname = 'users_role_id_not_null' AND conrelid = 'app.users'::regclass AND convalidated`,
 		"the trigger users_last_admin":     `SELECT 1 FROM pg_trigger WHERE tgname = 'users_last_admin' AND tgenabled = 'O'`,
 		"the trigger users_set_updated_at": `SELECT 1 FROM pg_trigger WHERE tgname = 'users_set_updated_at' AND tgenabled = 'O'`,
+		"the table messaging_ties":         `SELECT 1 FROM pg_class WHERE relname = 'messaging_ties' AND relnamespace = 'app'::regnamespace AND relkind = 'r'`,
 	}
 	for _, key := range []string{"tests_owner_id_fkey", "questions_owner_id_fkey", "question_groups_owner_id_fkey", "media_assets_owner_id_fkey", "classes_teacher_id_fkey"} {
 		kept["the validated RESTRICT foreign key "+key] = `

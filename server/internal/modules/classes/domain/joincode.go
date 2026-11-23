@@ -87,13 +87,16 @@ type CodeState struct {
 	UsesCount       int
 }
 
-// CodeRow is everything a preview decision needs, in one round trip.
+// CodeRow is everything a preview decision needs, in one round trip, with
+// the class's own schedule label and room for the preview it answers.
 type CodeRow struct {
 	CodeState
-	ClassID     string
-	ClassName   string
-	Lookup      StoredLookup
-	TeacherName *string
+	ClassID       string
+	ClassName     string
+	Lookup        StoredLookup
+	TeacherName   *string
+	ScheduleLabel *string
+	Room          *string
 }
 
 // StoredCode is a class's active code as stored: its metadata, how it is
@@ -137,12 +140,18 @@ const (
 	PreviewExhausted
 )
 
-// PreviewResult carries exactly the three fields §6.5 permits, and the outcome.
+// PreviewResult carries exactly the five fields §6.5 permits, and the
+// outcome: the class, its teacher, and (R8, D5) the facts a teacher prints on
+// a flyer: Schedule, the weekly pattern, nil when the class has neither slots
+// nor a label, and Room, the derived room. Never a session date, a note, a
+// cancellation or a count (DG-02). A refusal carries the outcome alone.
 type PreviewResult struct {
 	Outcome     PreviewOutcome
 	ClassID     string
 	ClassName   string
 	TeacherName string
+	Schedule    *Schedule
+	Room        *string
 }
 
 // Usable reports PreviewOK or the reason the code is refused. A class with

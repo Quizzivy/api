@@ -49,12 +49,28 @@ func toAPISubmissions(in domain.Submissions) (openapi.DashboardSubmissions, erro
 	return out, nil
 }
 
-func toAPIToday(in []domain.Today) []openapi.DashboardToday {
+// toAPIToday is the day's items, each of the DashboardToday union with its
+// kind set, as the union's discriminator reads it: an assignment's opening or
+// closing as a DashboardTodayAssignment, a session as a DashboardTodaySession.
+func toAPIToday(in []domain.Today) ([]openapi.DashboardToday, error) {
 	out := make([]openapi.DashboardToday, len(in))
 	for i, row := range in {
-		out[i] = openapi.DashboardToday{Kind: openapi.DashboardTodayKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted}
+		var err error
+		if s := row.Session; s != nil {
+			err = out[i].FromDashboardTodaySession(openapi.DashboardTodaySession{
+				Kind: openapi.DashboardTodaySessionKindSession, At: row.At.UTC(), SessionId: s.ID,
+				ClassId: httpapi.ParseUUID(s.ClassID), ClassName: s.ClassName, Room: s.Room,
+			})
+		} else {
+			err = out[i].FromDashboardTodayAssignment(openapi.DashboardTodayAssignment{
+				Kind: openapi.DashboardTodayAssignmentKind(row.Kind), At: row.At, AssignmentId: httpapi.ParseUUID(row.AssignmentID), Title: row.Title, NotSubmitted: row.NotSubmitted,
+			})
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
 func toAPIActivity(in []domain.Activity) []openapi.DashboardActivity {

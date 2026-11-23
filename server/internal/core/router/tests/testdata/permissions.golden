@@ -1,4 +1,5 @@
 DELETE /admin/leads/{id} system.leads
+DELETE /admin/settings/terms/{id} system.settings.write
 DELETE /admin/users/{id} people.users.manage
 DELETE /auth/google/link self
 DELETE /auth/sessions/{familyId} self
@@ -12,6 +13,7 @@ DELETE /teacher/media/{id} content.media.write
 DELETE /teacher/question-groups/{id} content.questions.write | content.tests.write
 DELETE /teacher/question-sets/{id} content.questions.write
 DELETE /teacher/questions/{id} content.questions.write
+DELETE /teacher/sessions/{sessionId} teaching.classes.write
 DELETE /teacher/shared-with-me/{shareId} workspace.teacher
 DELETE /teacher/shares/{shareId} content.share
 DELETE /teacher/tests/{id} content.tests.write
@@ -29,6 +31,7 @@ GET /admin/overview workspace.admin
 GET /admin/roles people.roles.manage
 GET /admin/roles/assignable people.users.manage
 GET /admin/settings system.settings.write
+GET /admin/settings/terms system.settings.write
 GET /admin/summary workspace.admin
 GET /admin/usage system.settings.write
 GET /admin/user-imports/{id} people.users.manage
@@ -44,6 +47,7 @@ GET /app/messages/attachments/{id} learning.take_tests
 GET /app/messages/classes/{classId} learning.take_tests
 GET /app/messages/teachers/{teacherId} learning.take_tests
 GET /app/messages/threads learning.take_tests
+GET /app/week learning.take_tests
 GET /auth/me self
 GET /auth/sessions self
 GET /me/notification-preferences self
@@ -60,6 +64,8 @@ GET /teacher/assignments/{id}/student-overrides teaching.attempts.intervene
 GET /teacher/attempts teaching.grading | teaching.attempts.intervene
 GET /teacher/attempts/{id} teaching.grading | teaching.attempts.intervene
 GET /teacher/attempts/{id}/events teaching.grading | teaching.attempts.intervene
+GET /teacher/attendance/sessions teaching.attendance
+GET /teacher/calendar workspace.teacher
 GET /teacher/classes workspace.teacher
 GET /teacher/classes/{id} workspace.teacher
 GET /teacher/classes/{id}/join-code teaching.classes.write
@@ -85,6 +91,7 @@ GET /teacher/question-sets content.questions.write
 GET /teacher/question-sets/{id} content.questions.write
 GET /teacher/questions workspace.teacher
 GET /teacher/questions/{id} workspace.teacher
+GET /teacher/sessions/{sessionId}/attendance teaching.attendance
 GET /teacher/shared-with-me workspace.teacher
 GET /teacher/shares content.share
 GET /teacher/students people.students.read
@@ -98,6 +105,7 @@ GET /teacher/tests/{id}/versions/{version}/diff workspace.teacher
 PATCH /admin/ai/rules ai.credits.manage
 PATCH /admin/leads/{id} system.leads
 PATCH /admin/roles/{id} people.roles.manage
+PATCH /admin/settings/terms/{id} system.settings.write
 PATCH /app/attempts/{id}/answers learning.take_tests
 PATCH /auth/me self
 PATCH /me/preferences self
@@ -108,6 +116,8 @@ PATCH /teacher/media/{id} content.media.write
 PATCH /teacher/question-groups/{id}/archive content.questions.write
 PATCH /teacher/question-sets/{id} content.questions.write
 PATCH /teacher/questions/{id} content.questions.write | content.tests.write
+PATCH /teacher/session-series/{seriesId} teaching.classes.write
+PATCH /teacher/sessions/{sessionId} teaching.classes.write
 PATCH /teacher/shares/{shareId} content.share
 PATCH /teacher/students/{id} people.students.create
 PATCH /teacher/tests/{id} content.tests.write
@@ -123,6 +133,7 @@ POST /admin/roles people.roles.manage
 POST /admin/settings/logo system.settings.write
 POST /admin/settings/retention-impact system.settings.write
 POST /admin/settings/sign-in-impact system.settings.write
+POST /admin/settings/terms system.settings.write
 POST /admin/user-imports people.users.manage
 POST /admin/user-imports/preview people.users.manage
 POST /admin/user-imports/{id}/sheet people.users.manage
@@ -170,6 +181,7 @@ POST /teacher/attempts/{id}/void teaching.attempts.intervene
 POST /teacher/classes teaching.classes.write
 POST /teacher/classes/{id}/join-code teaching.classes.write
 POST /teacher/classes/{id}/members teaching.classes.write
+POST /teacher/classes/{id}/sessions teaching.classes.write
 POST /teacher/imports content.tests.write
 POST /teacher/imports/{id}/cancel content.tests.write
 POST /teacher/imports/{id}/commit content.tests.write
@@ -193,6 +205,7 @@ POST /teacher/question-sets/{id}/items/remove content.questions.write
 POST /teacher/questions content.questions.write | content.tests.write
 POST /teacher/questions/tags content.questions.write
 POST /teacher/questions/{id}/duplicate content.questions.write | content.tests.write
+POST /teacher/session-series/{seriesId}/end teaching.classes.write
 POST /teacher/shares content.share
 POST /teacher/students people.students.create
 POST /teacher/students/reset-passwords people.students.reset_password
@@ -215,3 +228,4 @@ PUT /me/notification-preferences self
 PUT /teacher/assignments/{id}/student-overrides teaching.attempts.intervene
 PUT /teacher/imports/{id}/review content.tests.write
 PUT /teacher/question-groups/{id} content.questions.write | content.tests.write
+PUT /teacher/sessions/{sessionId}/attendance teaching.attendance

@@ -155,13 +155,14 @@ func TestTheWireAcceptsNullAndOneToAThousandCharactersOfAltText(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			raw := `{"type":"short_answer","prompt":"Hỏi","points":1,"mediaAssetId":"` + uuid.NewString() + `","mediaAlt":` + c.alt + `}`
 			for _, method := range []string{http.MethodPost, http.MethodPatch} {
-				path := "/teacher/questions"
+				path, sent := "/teacher/questions", []byte(raw)
 				if method == http.MethodPatch {
 					path += "/" + uuid.NewString()
+					sent = withExpectedUpdatedAt(t, sent)
 				}
 				reached := false
 				handler := validate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusNoContent) }))
-				req := httptest.NewRequest(method, path, strings.NewReader(raw))
+				req := httptest.NewRequest(method, path, strings.NewReader(string(sent)))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, req)

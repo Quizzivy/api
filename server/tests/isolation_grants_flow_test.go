@@ -102,7 +102,9 @@ func TestEachSharingOperationAnswersAtEachLevelOfAGrant(t *testing.T) {
 			return http.MethodPatch, "/teacher/question-sets/" + id, q(map[string]any{"name": "Bộ đồng nghiệp đã sửa " + nonce(t)})
 		}},
 		{"updateQuestion setId", needsEdit, set, func(id string) (string, string, *payload) {
-			return http.MethodPatch, "/teacher/questions/" + extra + "?setId=" + id, q(plainQuestion("Đồng nghiệp sửa trong bộ"))
+			body := plainQuestion("Đồng nghiệp sửa trong bộ")
+			body["expectedUpdatedAt"] = a.c.questionRevision(extra)
+			return http.MethodPatch, "/teacher/questions/" + extra + "?setId=" + id, q(body)
 		}},
 		{"removeQuestionSetItems", needsEdit, set, func(id string) (string, string, *payload) {
 			return http.MethodPost, "/teacher/question-sets/" + id + "/items/remove", q(map[string]any{"questionIds": []string{extra}})

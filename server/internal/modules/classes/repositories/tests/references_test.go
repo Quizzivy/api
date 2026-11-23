@@ -12,6 +12,7 @@ func TestAClassConstraintTheMapDoesNotNameIsOther(t *testing.T) {
 		"assignment_classes_class_id_fkey": domain.ReferencedByAssignments,
 		"class_members_join_code_id_fkey":  domain.ReferencedByMembers,
 		"conversations_class_id_fkey":      domain.ReferencedByMessages,
+		"attendance_marks_session_id_fkey": domain.ReferencedByAttendance,
 		"class_sessions_class_id_fkey":     domain.ReferencedByOther,
 		"":                                 domain.ReferencedByOther,
 	} {

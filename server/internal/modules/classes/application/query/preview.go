@@ -7,7 +7,9 @@ import (
 )
 
 // Preview backs the /join/:code/confirm step (§6.2), which exists so a student
-// sees WHICH class they are joining before authenticating.
+// sees WHICH class they are joining before authenticating. Only a valid,
+// usable code reads the class's weekly pattern and room (R8, D5): every
+// refusal answers before the series are read.
 type Preview struct {
 	Code string
 }
@@ -45,10 +47,16 @@ func (s PreviewHandler) Handle(ctx context.Context, q Preview) (domain.PreviewRe
 		return domain.PreviewResult{}, domain.ErrNoTeacher
 	}
 
+	timetable, err := s.Timetable(ctx, row.ClassID)
+	if err != nil {
+		return domain.PreviewResult{}, err
+	}
 	return domain.PreviewResult{
 		Outcome:     domain.PreviewOK,
 		ClassID:     row.ClassID,
 		ClassName:   row.ClassName,
 		TeacherName: *row.TeacherName,
+		Schedule:    domain.ScheduleOf(row.ScheduleLabel, timetable),
+		Room:        domain.RoomOf(row.Room, timetable),
 	}, nil
 }

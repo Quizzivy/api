@@ -40,9 +40,11 @@ var categoryOfEntity = map[string]Category{
 	"refresh_token_family": Accounts,
 	"role":                 Accounts,
 
-	"class":           Classes,
-	"class_member":    Classes,
-	"class_join_code": Classes,
+	"class":                Classes,
+	"class_member":         Classes,
+	"class_join_code":      Classes,
+	"class_session":        Classes,
+	"class_session_series": Classes,
 
 	"attempt":    Attempts,
 	"assignment": Attempts,
@@ -72,6 +74,7 @@ var allOnlyEntities = []string{
 	"leads",
 	"maintenance_window",
 	"organization",
+	"term",
 }
 
 // CategoryOf is the category an entry about entity belongs to. An entity in

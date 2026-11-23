@@ -71,6 +71,12 @@ func (a *Application) WithUnreadMessages(port ports.UnreadMessages) *Application
 	return a
 }
 
+// WithSessions sets the timetable's query behind the sessions the day lists beside its assignments. Without it the day lists assignments only.
+func (a *Application) WithSessions(port ports.Sessions) *Application {
+	a.service.Sessions = port
+	return a
+}
+
 // WithAdmin sets what the Admin readings are drawn from: the organization's name, the audit log's newest entries, the deploy's overrides of the usage limits and the zone whose days they count. A nil location counts days in the centre's default zone, and a nil recent leaves the Overview's recent changes empty.
 func (a *Application) WithAdmin(branding ports.Branding, recent ports.RecentChanges, env limits.Env, loc *time.Location) *Application {
 	a.service.Branding, a.service.Recent, a.service.LimitEnv = branding, recent, env

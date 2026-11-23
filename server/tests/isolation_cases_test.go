@@ -201,6 +201,43 @@ func freshSet(_ *iso, own *party) *party {
 	})))
 }
 
+func scheduleDay(days int) string {
+	zone, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		zone = time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return time.Now().In(zone).AddDate(0, 0, days).Format("2006-01-02")
+}
+
+func oneOffSession() map[string]any {
+	return map[string]any{"date": scheduleDay(3), "startTime": "08:30", "durationMinutes": 60, "repeatWeekly": false}
+}
+
+func freshOneOff(_ *iso, own *party) *party {
+	return own.with("session", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", oneOffSession())))
+}
+
+// freshStartedOneOff and freshStartedOccurrence give the caller a session of
+// yesterday, a one-off and the first occurrence of a weekly series, which
+// takes attendance: the world's own sessions are ahead, and a save refuses
+// those before it reads the marks.
+func freshStartedOneOff(_ *iso, own *party) *party {
+	return own.with("session", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", map[string]any{
+		"date": scheduleDay(-1), "startTime": "08:00", "durationMinutes": 60, "repeatWeekly": false,
+	})))
+}
+
+func freshStartedOccurrence(_ *iso, own *party) *party {
+	return own.with("occurrence", id(own.c.must(http.StatusCreated, http.MethodPost, "/teacher/classes/"+own.id("class")+"/sessions", map[string]any{
+		"date": scheduleDay(-1), "startTime": "08:00", "durationMinutes": 60, "repeatWeekly": true,
+	})))
+}
+
+// oneMark is the minimal register a save takes: one student, present.
+func oneMark() map[string]any {
+	return map[string]any{"marks": []any{map[string]any{"studentId": "", "status": "present"}}}
+}
+
 func shareBody(kind string) func(*iso, *party, string) any {
 	return func(*iso, *party, string) any {
 		return map[string]any{"kind": kind, "resourceId": "", "granteeIds": []any{uuid.NewString()}, "access": "use", "notify": false}
@@ -410,7 +447,9 @@ func isolationCases() map[string]isoCase {
 		"tagQuestions": {excuse: map[string]string{"*": "tags only the questions the caller reaches"}, body: fixed(map[string]any{"questionIds": []any{""}, "tags": []any{"đã kiểm tra"}})},
 		"getQuestion":  {},
 		"updateQuestion": {body: func(_ *iso, own *party, slot string) any {
-			return withProseMedia(choiceInput(own), own, slot)
+			body := withProseMedia(choiceInput(own), own, slot)
+			body["expectedUpdatedAt"] = own.c.questionRevision(own.id("question"))
+			return body
 		}},
 		"deleteQuestion":    {fresh: freshQuestion},
 		"duplicateQuestion": {},
@@ -602,6 +641,29 @@ func isolationCases() map[string]isoCase {
 		},
 		"getMySummary":               {},
 		"getNotificationPreferences": {},
+
+		"createClassSession": {body: fixed(oneOffSession())},
+		"updateClassSession": {each: []isoCase{
+			{body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
+			{as: map[string]string{"path sessionId": "occurrence"}, body: fixed(map[string]any{"note": "Phòng 3 tuần này"})},
+		}},
+		"deleteClassSession": {each: []isoCase{
+			{fresh: freshOneOff},
+			{as: map[string]string{"path sessionId": "occurrence"}},
+		}},
+		"updateSessionSeries":    {body: fixed(map[string]any{"fromDate": scheduleDay(7), "durationMinutes": 120})},
+		"endSessionSeries":       {body: fixed(map[string]any{"lastDate": scheduleDay(70)})},
+		"getCalendar":            {query: map[string]string{"from": scheduleDay(0), "to": scheduleDay(14)}},
+		"listAttendanceSessions": {},
+		"getSessionAttendance": {each: []isoCase{
+			{},
+			{as: map[string]string{"path sessionId": "occurrence"}},
+		}},
+		"saveSessionAttendance": {each: []isoCase{
+			{fresh: freshStartedOneOff, body: fixed(oneMark())},
+			{fresh: freshStartedOccurrence, as: map[string]string{"path sessionId": "occurrence"}, body: fixed(oneMark())},
+		}},
+		"getStudentWeek": {student: true, query: map[string]string{"start": scheduleDay(3)}},
 
 		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
 		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},

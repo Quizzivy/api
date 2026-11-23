@@ -1,4 +1,4 @@
-// Package ports is what the organization module needs from outside: an object store for the logos, a checker that decides whether an upload may be one, and the mail dispatcher to wake when the usage limits change.
+// Package ports is what the organization module needs from outside: an object store for the logos, a checker that decides whether an upload may be one, the mail dispatcher to wake when the usage limits change, and the calendar zone an admin's today is counted in.
 package ports
 
 import (
@@ -39,4 +39,10 @@ type LogoChecker interface {
 // as soon as a save raises the cap rather than when the dispatcher next wakes.
 type MailWake interface {
 	Notify()
+}
+
+// Zones resolves the calendar zone an account stored in its profile, empty
+// when it stored none.
+type Zones interface {
+	ZoneOf(ctx context.Context, userID string) (string, error)
 }
