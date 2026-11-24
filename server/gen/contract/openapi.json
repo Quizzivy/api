@@ -23512,7 +23512,7 @@
           "teacher-messages"
         ],
         "summary": "The caller's threads with colleagues",
-        "description": "The Colleagues tab: the caller's threads with other staff members,\nnewest activity first. A colleague thread is readable by its two\nparticipants only; `scope.all` opens none (D17), so an Admin lists\nonly the Admin's own. A thread with a colleague whose account is\nnow disabled stays listed, with `disabled`.\n\n`q` matches the colleague's name, accent-insensitively. With `q`,\nthe answer also lists, after the threads, up to 20 enabled\ncolleagues the caller has no thread with, as `candidate` rows: an\naccount that opens the teacher workspace and is not a student,\nnever the caller.\n\nThe client shows these rows in All too, merged with\n`listStaffThreads`'s by `lastMessageAt`. The rows are under\n`threads`, not `items`, as `listStaffThreads`'s are: a thread is\nrightly in both of its participants' lists. Leak review: a row\ncarries the colleague's id, name, photo, role name and whether the\naccount is disabled; never an email, never the colleague's other\nthreads, counts or sign-in times.\n",
+        "description": "The Colleagues tab: the caller's threads with other staff members,\nnewest activity first. A colleague thread is readable by its two\nparticipants only; `scope.all` opens none (D17), so an Admin lists\nonly the Admin's own. A thread with a colleague whose account is\nnow disabled stays listed, with `disabled`.\n\n`q` matches the colleague's name, accent-insensitively. With `q`,\nthe answer also lists, after the threads, up to 20 enabled\ncolleagues the caller has no thread with, as `candidate` rows: an\naccount that opens the teacher workspace and is not a student,\nnever the caller.\n\nThe client shows these rows in All too, merged with\n`listStaffThreads`'s by `lastMessageAt`. The rows are under\n`threads`, not `items`, as `listStaffThreads`'s are: a thread is\nrightly in both of its participants' lists. Leak review: a row\ncarries the colleague's id, name, photo, role name and whether the\naccount is disabled; never an email, never the colleague's other\nthreads, counts or sign-in times.\nLimited to 60 a minute per signed-in user.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/Query"
@@ -23546,6 +23546,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -23585,7 +23588,7 @@
           "teacher-messages"
         ],
         "summary": "The caller's thread with a colleague",
-        "description": "The caller's thread with another staff member, empty until the\nfirst post. `colleagueId` is a `messaging-colleague`: a staff member\nthe caller has a thread with, or any enabled account that opens the\nteacher workspace and is not a student. A disabled colleague is\nreadable only through a thread that exists. Any other id answers\n404: a student (`getStaffDirectThread` is the thread with a\nstudent), an account that opens only the Admin console, the caller.\n\nThe thread is always the caller's own: teacher C naming teacher A\nreads C's thread with A, never A's thread with B, and an Admin\nnaming a teacher reads the Admin's own (D17). `scope.all` opens no\none else's thread. No attempt cards and no \"Seen by\".\n",
+        "description": "The caller's thread with another staff member, empty until the\nfirst post. `colleagueId` is a `messaging-colleague`: a staff member\nthe caller has a thread with, or any enabled account that opens the\nteacher workspace and is not a student. A disabled colleague is\nreadable only through a thread that exists. Any other id answers\n404: a student (`getStaffDirectThread` is the thread with a\nstudent), an account that opens only the Admin console, the caller.\n\nThe thread is always the caller's own: teacher C naming teacher A\nreads C's thread with A, never A's thread with B, and an Admin\nnaming a teacher reads the Admin's own (D17). `scope.all` opens no\none else's thread. No attempt cards and no \"Seen by\".\nLimited to 60 a minute per signed-in user.\n",
         "parameters": [
           {
             "name": "before",
@@ -23633,6 +23636,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
