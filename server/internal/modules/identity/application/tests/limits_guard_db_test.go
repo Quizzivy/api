@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"quizzivy/internal/modules/identity/domain"
 	"quizzivy/internal/modules/identity/repositories"
@@ -47,10 +49,7 @@ func newGuardWorld(t *testing.T) *guardWorld {
 	if _, err := tx.Exec(context.Background(), `SET LOCAL lock_timeout = '5s'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(context.Background(), `LOCK TABLE app.users, app.role_permissions IN SHARE MODE`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(context.Background(), `SELECT 1 FROM app.organization_settings FOR UPDATE`); err != nil {
+	if err := holdForTheGuard(context.Background(), tx); err != nil {
 		t.Fatal(err)
 	}
 	dbx := db.NewContext(tx)
@@ -60,6 +59,52 @@ func newGuardWorld(t *testing.T) *guardWorld {
 	w.actor = w.account("admin", w.role("admin").id, false)
 	w.account("gv-co-san", w.teacher.id, false)
 	return w
+}
+
+// holdForTheGuard takes the settings row and the two tables all or nothing
+// (api#89): it never waits for one of them while it holds another. Other
+// packages take them in every order, in transactions that share the database
+// with this one: the leads and organization fixtures hold the row and then
+// write an account, the seat and storage limit fixtures write an account and
+// then the row, the colleague-messaging fixture writes a role's grants and then
+// an account holding it, the AI-email fixture an account and then its role's
+// grants. Waiting for one while holding another (as the tables first and then
+// the row did) deadlocks with such a fixture: it waits behind what this world
+// holds, and this world waits for what it holds. So this waits for one lock
+// holding none, asks for the others without waiting, and when one is held, lets
+// go of all of them and starts again by waiting for that one.
+func holdForTheGuard(ctx context.Context, tx pgx.Tx) error {
+	locks := []string{
+		`SELECT 1 FROM app.organization_settings FOR UPDATE`,
+		`LOCK TABLE app.users IN SHARE MODE`,
+		`LOCK TABLE app.role_permissions IN SHARE MODE`,
+	}
+	for range 50 {
+		if _, err := tx.Exec(ctx, `SAVEPOINT guard_locks`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, locks[0]); err != nil {
+			return err
+		}
+		busy := 0
+		for i := 1; i < len(locks) && busy == 0; i++ {
+			_, err := tx.Exec(ctx, locks[i]+` NOWAIT`)
+			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == pgerrcode.LockNotAvailable {
+				busy = i
+			} else if err != nil {
+				return err
+			}
+		}
+		if busy == 0 {
+			_, err := tx.Exec(ctx, `RELEASE SAVEPOINT guard_locks`)
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT guard_locks`); err != nil {
+			return err
+		}
+		locks[0], locks[busy] = locks[busy], locks[0]
+	}
+	return errors.New("the settings row, the accounts and the role permissions were never free together")
 }
 
 func (w *guardWorld) role(key string) role {
@@ -274,5 +319,98 @@ func TestAnImportPreviewLeavesTheRoomTheLimitsAllow(t *testing.T) {
 	}
 	if room.Seats == nil || *room.Seats != 3 || room.Teachers == nil || *room.Teachers != 0 {
 		t.Errorf("room = seats %v teachers %v, want 3 and 0", room.Seats, room.Teachers)
+	}
+}
+
+// TestTheGuardWorldNeverDeadlocksWithAFixtureThatHoldsWhatItWants fails when
+// holdForTheGuard waits for a lock while it holds another one that the fixture
+// in front of it asks for next (api#89). Each fixture takes one lock, waits
+// until the guard world is waiting for it, and then takes a second one, as
+// the leads and organization fixtures (the settings row, then an account), the
+// seat and storage limit fixtures (an account, then the settings row), the
+// colleague-messaging fixture (a role's grants, then an account holding it)
+// and the AI-email fixture (an account, then its role's grants) do. PostgreSQL
+// ends one of the two with 40P01 when the guard world holds what the second
+// asks for.
+func TestTheGuardWorldNeverDeadlocksWithAFixtureThatHoldsWhatItWants(t *testing.T) {
+	account := func(tx pgx.Tx, t *testing.T) error {
+		_, err := tx.Exec(context.Background(), `
+			INSERT INTO app.users (email, full_name, role_id)
+			VALUES ($1, 'Người viết', (SELECT id FROM app.roles WHERE builtin_key = 'student'))`,
+			"viet"+nonce(t)+"@lim.example.test")
+		return err
+	}
+	grant := func(tx pgx.Tx, t *testing.T) error {
+		_, err := tx.Exec(context.Background(), `
+			WITH r AS (INSERT INTO app.roles (name, icon, color) VALUES ($1, 'user', 'gray') RETURNING id)
+			INSERT INTO app.role_permissions (role_id, permission_key) SELECT id, 'teaching.grading' FROM r`,
+			"Vai trò khóa "+nonce(t))
+		return err
+	}
+	settingsRow := func(tx pgx.Tx, _ *testing.T) error {
+		_, err := tx.Exec(context.Background(), `SELECT 1 FROM app.organization_settings FOR UPDATE`)
+		return err
+	}
+	cases := []struct {
+		name          string
+		first, second func(tx pgx.Tx, t *testing.T) error
+	}{
+		{"the settings row, then an account", settingsRow, account},
+		{"a role's grants, then an account", grant, account},
+		{"an account, then a role's grants", account, grant},
+		{"an account, then the settings row", account, settingsRow},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			pool := newPool(t)
+			begin := func() pgx.Tx {
+				t.Helper()
+				tx, err := pool.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+				if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '10s'`); err != nil {
+					t.Fatal(err)
+				}
+				return tx
+			}
+
+			fixture := begin()
+			var pid int
+			if err := fixture.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.first(fixture, t); err != nil {
+				t.Fatal(err)
+			}
+
+			guard := begin()
+			held := make(chan error, 1)
+			go func() { held <- holdForTheGuard(ctx, guard) }()
+			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				var waiting bool
+				if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if waiting {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the guard world never waited for the fixture")
+				}
+			}
+
+			if err := c.second(fixture, t); err != nil {
+				t.Errorf("the fixture's second write while the guard world waits: %v, want it written", err)
+			}
+			if err := fixture.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-held; err != nil {
+				t.Errorf("the guard world once the fixture is done: %v, want its locks", err)
+			}
+		})
 	}
 }
