@@ -98,7 +98,8 @@ func statusCondition(status domain.StudentStatus) string {
 
 // selectStudents reads each student with only the memberships classScope lets
 // through, and whether the caller, whose id is in placeholder $actor, may
-// write to them (visibility.CanMessage, which scope.all does not widen).
+// write to them (visibility.CanMessage: any enabled student, whoever's class
+// scope reaches them, F2).
 func selectStudents(classScope string, actor int) string {
 	return `
 		SELECT u.id::text, u.email, u.full_name, ` + visibility.CanMessage("u", actor) + `,

@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,17 +23,19 @@ func memberCanMessage(t *testing.T, c *client, class, student string) any {
 }
 
 // TestAStaffMemberWritesToAStudentAndAClass is the staff side of messaging
-// through HTTP (T-R7.10a): the first post makes the thread and a retried one
-// answers 200 with it, a student who leaves the class can still be written
-// to, a disabled one cannot while the thread stays readable, and an archived
-// class's channel is read but takes no post. canMessage on the Students page
-// and the roster follows the same rule.
+// through HTTP (T-R7.10a, F2): the first post makes the thread and a retried
+// one answers 200 with it, another staff member naming the student reads
+// their own empty thread, a student who leaves the class can still be
+// written to, a disabled one cannot while the thread stays readable, and an
+// archived class's channel is read but takes no post. canMessage on the
+// Students page and the roster follows the same rule, for the Admin too.
 func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 	w := boot(t)
 	teacher := w.signedIn(w.createStaff("teacher"))
 	other := w.signedIn(w.createStaff("teacher"))
 	admin := w.signedIn(w.createStaff("admin"))
-	class := teacher.class("Lớp nhắn tin " + nonce(t))
+	className := "Lớp nhắn tin " + nonce(t)
+	class := teacher.class(className)
 	created := teacher.must(http.StatusCreated, http.MethodPost, "/teacher/students", map[string]any{
 		"email": "nhan-tin-" + nonce(t) + "@example.com", "fullName": "Học viên nhắn tin", "classIds": []string{class},
 	})
@@ -43,11 +46,11 @@ func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 	if got := memberCanMessage(t, teacher, class, student); got != true {
 		t.Errorf("the roster's canMessage = %v, want true", got)
 	}
-	if got := admin.must(http.StatusOK, http.MethodGet, "/teacher/students/"+student, nil)["canMessage"]; got != false {
-		t.Errorf("the Admin's row of the teacher's student: canMessage = %v, want false: scope.all does not open a direct thread", got)
+	if got := admin.must(http.StatusOK, http.MethodGet, "/teacher/students/"+student, nil)["canMessage"]; got != true {
+		t.Errorf("the Admin's row of the teacher's student: canMessage = %v, want true: any staff member may write to any enabled student", got)
 	}
-	if got := memberCanMessage(t, admin, class, student); got != false {
-		t.Errorf("the Admin's roster of the teacher's class: canMessage = %v, want false", got)
+	if got := memberCanMessage(t, admin, class, student); got != true {
+		t.Errorf("the Admin's roster of the teacher's class: canMessage = %v, want true", got)
 	}
 
 	thread := "/teacher/messages/students/" + student
@@ -77,8 +80,10 @@ func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 	if status, _ := teacher.call(http.MethodGet, thread+"?before="+id(first)+"&after="+id(first), nil); status != http.StatusBadRequest {
 		t.Errorf("a page with before and after: %d, want 400", status)
 	}
-	if status, _ := other.call(http.MethodGet, thread, nil); status != http.StatusNotFound {
-		t.Errorf("another teacher reading the thread: %d, want 404", status)
+	if status, got := other.call(http.MethodGet, thread, nil); status != http.StatusOK || len(got["messages"].([]any)) != 0 || got["latestId"] != nil {
+		t.Errorf("another teacher naming the student: %d %v, want 200 with their own empty thread, never the teacher's", status, got)
+	} else if peer := got["student"].(map[string]any); len(peer["classes"].([]any)) != 0 || strings.Join(stringsOf(peer["otherClassNames"]), ",") != className || peer["canPost"] != true {
+		t.Errorf("another teacher's header of the student: %v, want the teacher's class by name alone, and open to posts", peer)
 	}
 	teacher.must(http.StatusNoContent, http.MethodPost, thread+"/read", map[string]any{"lastReadMessageId": id(first)})
 
@@ -87,6 +92,11 @@ func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 	peer := read["student"].(map[string]any)
 	if peer["former"] != true || peer["canPost"] != true || len(read["messages"].([]any)) != 1 || read["latestId"] != id(first) {
 		t.Errorf("the thread after the student left: %v", read)
+	}
+	// The student is in no class now: otherClassNames is an empty list, never
+	// null or absent.
+	if names, ok := peer["otherClassNames"].([]any); !ok || len(names) != 0 {
+		t.Errorf("the peer's otherClassNames = %#v, want an empty list", peer["otherClassNames"])
 	}
 	teacher.must(http.StatusCreated, http.MethodPost, thread, map[string]any{"clientId": uuid.NewString(), "body": "Em vẫn nhắn cô được nhé."})
 	if got := teacher.must(http.StatusOK, http.MethodGet, "/teacher/students/"+student, nil)["canMessage"]; got != true {
@@ -106,6 +116,11 @@ func TestAStaffMemberWritesToAStudentAndAClass(t *testing.T) {
 	threads := teacher.must(http.StatusOK, http.MethodGet, "/teacher/messages/threads?tab=classes", nil)["threads"].([]any)
 	if len(threads) != 1 || threads[0].(map[string]any)["lastMessageAt"] != nil || threads[0].(map[string]any)["thread"].(map[string]any)["classId"] != class {
 		t.Errorf("the classes tab before any post: %v, want the class's channel, unposted", threads)
+	}
+	for _, row := range teacher.must(http.StatusOK, http.MethodGet, "/teacher/messages/threads?tab=all", nil)["threads"].([]any) {
+		if names, ok := row.(map[string]any)["otherClassNames"].([]any); !ok || len(names) != 0 {
+			t.Errorf("a list row's otherClassNames = %#v, want an empty list: the class row, and the student in no class: %v", row.(map[string]any)["otherClassNames"], row)
+		}
 	}
 	posted := teacher.must(http.StatusCreated, http.MethodPost, channel, map[string]any{"clientId": uuid.NewString(), "body": "Nghỉ học thứ Sáu."})
 	if seen := posted["seenBy"].(map[string]any); seen["of"] != float64(0) || seen["seen"] != float64(0) {

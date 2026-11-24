@@ -272,7 +272,7 @@ var maintenanceGrants = map[string]map[string]string{
 	"class_join_codes":             {"SELECT": "class_id,code_ciphertext,id,key_id,lookup_scheme,revoked_at", "UPDATE": "code_ciphertext,code_hash,key_id"},
 	"classes":                      {"SELECT": "teacher_id"},
 	"conversation_reads":           {"SELECT": "conversation_id,user_id", "DELETE": "*"},
-	"conversations":                {"SELECT": "id,kind,staff_id,student_id", "DELETE": "*"},
+	"conversations":                {"SELECT": "colleague_high_id,colleague_low_id,id,kind,staff_id,student_id", "DELETE": "*"},
 	"email_outbox": {
 		"SELECT": "dedupe_key,id",
 		"INSERT": "dedupe_key,deliver_after,expires_at,id,locale,params,secret_ciphertext,template,to_address,to_user_id",
@@ -499,6 +499,36 @@ func TestTheMessagingTablesHoldWhatT_R7_9Grants(t *testing.T) {
 		}
 		if reads {
 			t.Errorf("%s may read %s.%s; D17 keeps contents with their participants", maintenanceRole, c[0], c[1])
+		}
+	}
+}
+
+// TestTheColleagueColumnsHoldWhatT_F2_2Grants pins 00180: quizzivy_app reads
+// and inserts a colleague thread's pair through its table-wide grants and
+// still updates last_message_at alone, so a pair is never rewritten;
+// quizzivy_maintenance reads the pair, for D16's anonymisation (T-F2.5), and
+// writes neither column.
+func TestTheColleagueColumnsHoldWhatT_F2_2Grants(t *testing.T) {
+	conn := migrated(t)
+	for _, c := range []struct {
+		role, priv string
+		want       bool
+	}{
+		{appRole, "SELECT", true},
+		{appRole, "INSERT", true},
+		{appRole, "UPDATE", false},
+		{maintenanceRole, "SELECT", true},
+		{maintenanceRole, "INSERT", false},
+		{maintenanceRole, "UPDATE", false},
+	} {
+		for _, column := range []string{"colleague_low_id", "colleague_high_id"} {
+			var got bool
+			if err := conn.QueryRow(`SELECT has_column_privilege($1, 'app.conversations', $2, $3)`, c.role, column, c.priv).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("%s %s on app.conversations(%s) = %v, want %v", c.role, c.priv, column, got, c.want)
+			}
 		}
 	}
 }

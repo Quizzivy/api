@@ -151,11 +151,14 @@ type SubmissionsDigestParams struct {
 // not read. It never carries a message's body or a file's name: it names the
 // sender and the class and links to the thread (D17). The outbox holds
 // ConversationID and the thread's route: StudentID for a staff reader's
-// direct thread, TeacherID for a student's, ClassID for an announcement.
-// FullName, SenderName, ClassName and Count are read when it is sent.
+// direct thread, ColleagueID for a staff reader's colleague thread (F2),
+// TeacherID for a student's, ClassID for an announcement. FullName,
+// SenderName, ClassName and Count are read when it is sent; a colleague
+// thread has no class.
 type MessageReceivedParams struct {
 	ConversationID string `json:"conversationId"`
 	StudentID      string `json:"studentId,omitempty"`
+	ColleagueID    string `json:"colleagueId,omitempty"`
 	TeacherID      string `json:"teacherId,omitempty"`
 	ClassID        string `json:"classId,omitempty"`
 	FullName       string `json:"fullName,omitempty"`
@@ -302,6 +305,8 @@ func messageLink(appURL string, p Params, _ string) string {
 	switch {
 	case m.StudentID != "":
 		return appURL + "/teacher/messages/student/" + url.PathEscape(m.StudentID)
+	case m.ColleagueID != "":
+		return appURL + "/teacher/messages/colleagues/" + url.PathEscape(m.ColleagueID)
 	case m.TeacherID != "":
 		return appURL + "/messages/teacher/" + url.PathEscape(m.TeacherID)
 	default:

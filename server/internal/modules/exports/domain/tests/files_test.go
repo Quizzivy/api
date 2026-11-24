@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -134,6 +135,58 @@ func TestTheReadmeIsVietnameseThenEnglishAndDescribesEveryColumn(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestTheReadmeSaysAColleagueThreadIsCountsAndTwoParticipants fails when
+// README.txt leaves colleague threads (F2) out of messages_summary.csv's
+// description in either language, or stops saying that the file holds no
+// message's text, file name or attachment.
+func TestTheReadmeSaysAColleagueThreadIsCountsAndTwoParticipants(t *testing.T) {
+	readme := domain.Readme(domain.Files(false))
+	vi, en, _ := strings.Cut(readme, "\r\n==========\r\n")
+	section := func(half string) string {
+		_, rest, ok := strings.Cut(half, "\r\n"+domain.MessagesFile+"\r\n")
+		if !ok {
+			t.Fatalf("a half of the README does not describe %s", domain.MessagesFile)
+		}
+		if end := strings.Index(rest, ".csv\r\n"); end >= 0 {
+			rest = rest[:end]
+		}
+		return rest
+	}
+	for _, c := range []struct {
+		language, text string
+		want           []string
+	}{
+		{"vi", section(vi), []string{"giữa hai nhân viên", "colleague là tin nhắn giữa hai nhân viên",
+			"không có nội dung tin nhắn, tên tệp hay tệp đính kèm", "  colleague_a_id: ", "  colleague_b_id: "}},
+		{"en", section(en), []string{"between two staff members", "colleague for messages between two staff members",
+			"no message's text, no file's name and no attachment", "  colleague_a_id: ", "  colleague_b_id: "}},
+	} {
+		for _, want := range c.want {
+			if !strings.Contains(c.text, want) {
+				t.Errorf("the %s description of %s lacks %q", c.language, domain.MessagesFile, want)
+			}
+		}
+	}
+}
+
+// TestMessagesSummaryKeepsR7sColumnsInPlace fails when a column is added
+// anywhere but the end of messages_summary.csv: a reader that takes the file
+// by position (a spreadsheet macro, R5's consumers) would read the wrong cell.
+func TestMessagesSummaryKeepsR7sColumnsInPlace(t *testing.T) {
+	r7 := []string{"id", "kind", "class_id", "staff_id", "student_id", "message_count", "first_message_at", "last_message_at"}
+	want := append(slices.Clone(r7), "colleague_a_id", "colleague_b_id")
+	for _, file := range domain.Files(false) {
+		if file.Name != domain.MessagesFile {
+			continue
+		}
+		if got := file.Header(); !slices.Equal(got, want) {
+			t.Fatalf("%s header = %v, want %v: R7's columns first and in place, F2's after them", file.Name, got, want)
+		}
+		return
+	}
+	t.Fatalf("%s is not a file of the export", domain.MessagesFile)
 }
 
 func TestTheReadmeUsesWindowsLineEndings(t *testing.T) {

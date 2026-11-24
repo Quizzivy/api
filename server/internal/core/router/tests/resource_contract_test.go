@@ -13,7 +13,7 @@ import (
 var resourceKinds = []string{
 	"test", "test-version", "section", "question", "version-question", "version-recording", "question-group", "media",
 	"import", "import-source", "class", "assignment", "attempt", "student", "notification", "override", "question-set",
-	"share", "messaging-peer", "attachment", "session", "session-series", "none",
+	"share", "messaging-peer", "messaging-colleague", "attachment", "session", "session-series", "none",
 }
 
 // sessionIDSchema is R8's opaque class session id: a one-off's uuid or a

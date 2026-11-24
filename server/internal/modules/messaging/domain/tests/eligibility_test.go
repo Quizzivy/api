@@ -7,7 +7,8 @@ import (
 	"quizzivy/internal/modules/messaging/domain"
 )
 
-// student is an enabled student account with nothing tying it to the caller.
+// student is an enabled student account with nothing tying it to the caller:
+// another teacher's, or one in no class (F2).
 var student = domain.DirectFacts{Exists: true, Enabled: true, Student: true}
 
 func with(f domain.DirectFacts, change func(*domain.DirectFacts)) domain.DirectFacts {
@@ -15,27 +16,26 @@ func with(f domain.DirectFacts, change func(*domain.DirectFacts)) domain.DirectF
 	return f
 }
 
+// TestTheEligibilityTableForADirectThread is F2's staff rule, "a thread, or a
+// student, never yourself": no fact about classes, ties or who created the
+// account takes part, so the facts a student of the caller's class and one
+// in no class bring are the same.
 func TestTheEligibilityTableForADirectThread(t *testing.T) {
 	rules := domain.Eligibility{}
 	for name, c := range map[string]struct {
 		facts      domain.DirectFacts
 		read, post error
 	}{
-		"a student of the caller's class":           {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
-		"a student the caller created":              {with(student, func(f *domain.DirectFacts) { f.Created = true }), nil, nil},
-		"a removed student, through the tie":        {with(student, func(f *domain.DirectFacts) { f.Tied = true }), nil, nil},
-		"a removed student with a thread":           {with(student, func(f *domain.DirectFacts) { f.Tied, f.Conversation = true, true }), nil, nil},
-		"a thread outliving every tie":              {with(student, func(f *domain.DirectFacts) { f.Conversation = true }), nil, nil},
-		"another teacher's student":                 {student, domain.ErrNotFound, domain.ErrNotFound},
-		"another teacher's disabled student":        {with(student, func(f *domain.DirectFacts) { f.Enabled = false }), domain.ErrNotFound, domain.ErrNotFound},
-		"an id no account has":                      {domain.DirectFacts{}, domain.ErrNotFound, domain.ErrNotFound},
-		"the caller naming themselves":              {with(student, func(f *domain.DirectFacts) { f.Self, f.Created = true, true }), domain.ErrNotFound, domain.ErrNotFound},
-		"a tied student, disabled":                  {with(student, func(f *domain.DirectFacts) { f.Tied, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
-		"a tied account, no longer a student":       {with(student, func(f *domain.DirectFacts) { f.Tied, f.Student = true, false }), nil, domain.ErrNotAllowed},
-		"a thread whose student was disabled":       {with(student, func(f *domain.DirectFacts) { f.Conversation, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
-		"a staff account the caller created":        {with(student, func(f *domain.DirectFacts) { f.Created, f.Student = true, false }), domain.ErrNotFound, domain.ErrNotFound},
-		"a student the caller created, disabled":    {with(student, func(f *domain.DirectFacts) { f.Created, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
-		"a created account promoted after a thread": {with(student, func(f *domain.DirectFacts) { f.Created, f.Conversation, f.Student = true, true, false }), nil, domain.ErrNotAllowed},
+		"any enabled student, taught by anyone or in no class": {student, nil, nil},
+		"an enabled student with a thread":                     {with(student, func(f *domain.DirectFacts) { f.Conversation = true }), nil, nil},
+		"a disabled student with a thread":                     {with(student, func(f *domain.DirectFacts) { f.Conversation, f.Enabled = true, false }), nil, domain.ErrNotAllowed},
+		"a disabled student without a thread":                  {with(student, func(f *domain.DirectFacts) { f.Enabled = false }), domain.ErrNotFound, domain.ErrNotFound},
+		"a staff account without a thread":                     {with(student, func(f *domain.DirectFacts) { f.Student = false }), domain.ErrNotFound, domain.ErrNotFound},
+		"a thread whose student became staff":                  {with(student, func(f *domain.DirectFacts) { f.Conversation, f.Student = true, false }), nil, domain.ErrNotAllowed},
+		"an anonymised account":                                {with(student, func(f *domain.DirectFacts) { f.Anonymised, f.Enabled = true, false }), domain.ErrNotFound, domain.ErrNotFound},
+		"an anonymised account a thread still names":           {with(student, func(f *domain.DirectFacts) { f.Anonymised, f.Conversation = true, true }), domain.ErrNotFound, domain.ErrNotFound},
+		"an id no account has":                                 {domain.DirectFacts{}, domain.ErrNotFound, domain.ErrNotFound},
+		"the caller naming themselves":                         {with(student, func(f *domain.DirectFacts) { f.Self = true }), domain.ErrNotFound, domain.ErrNotFound},
 	} {
 		if err := rules.ReadDirect(c.facts); !errors.Is(err, c.read) {
 			t.Errorf("%s: read = %v, want %v", name, err, c.read)

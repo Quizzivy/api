@@ -60,6 +60,12 @@ What is here:
   Gia Bảo's 85 % by four sessions he is left unmarked on. One per-date change: Foundation A's
   Thursday of the first seed's week is in Room 3, noted "Room 3 this week". It relies on 06 and
   08, and adds no account, class or member.
+- `14-dev-colleagues.sql` — colleague threads (F2, T-F2.9), shaped like the F2 Messaging
+  proposal's Colleagues thread: Lan and Minh's thread (Lan, the lower id, is
+  `colleague_low_id`), Minh's *Thẻ gợi ý Speaking Part 2.pdf* with his first message, Lan's reply
+  and his thank-you, nothing unread on either side. And Hồ Ngọc Diệp, a student in no class,
+  created by no one, tied to no one and in no thread, whom only F2's staff rule lets a teacher
+  write to. It relies on 06, and adds no teacher.
 - `99-assert.sql` — runs last and refuses the seed if the rows above break a
   rule `publish` would have enforced, or if a user, class or owned row lacks
   the column R2's access model reads. The seed writes frozen version rows
@@ -76,6 +82,10 @@ What is here:
   every mark is on a session that has started, the eight's rates over the seeded weeks, the
   per-date change, and Gia Bảo's five sessions this week. Ten weeks after the first seed the
   term is over and the check fails the same way.
+  Since F2 it checks 14's thread as posting writes it, its PDF as the upload records it,
+  nothing unread in it, Diệp in no class and tied to no one, and that the Admin has never
+  taught Bùi Ngọc Mai of Lan's IELTS 6.5 Evening, so the Admin's first post to her reads
+  "Teacher at the centre" on her side.
 
 ## Logins
 
@@ -101,6 +111,7 @@ Every account's password is `quizzivy-dev`.
 | `bich.hoang@quizzivy.com` (disabled), `son.vu@quizzivy.com` (temporary password), `tam.truong@quizzivy.com` (never signed in), `an.lam@quizzivy.com`, `khoa.dinh@quizzivy.com`, `nhi.ta@quizzivy.com`, `phuc.luu@quizzivy.com`, `chi.mai@quizzivy.com` (Google only) | Student | `09` |
 | `hocvien.ielts65.01@quizzivy.com` … `hocvien.kids.59@quizzivy.com` | Student, fillers that bring the four classes to the deck's sizes | `08` |
 | `khang.dao@quizzivy.com` | Student: the only member of Minh's class, with a thread with him | `11` |
+| `diep.ho@quizzivy.com` | Student in no class, tied to no one, in no thread | `14` |
 
 ## `08`: the teacher workspace
 
@@ -149,6 +160,23 @@ these four. The *processing* import's run is queued at the extraction stage and 
 ten years, so no worker claims it and it takes none of the worker's slots; cancel it from the
 page to clear it. A database seeded before 2026-10-12 holds the old row, a run "running" on a
 ten-year lease that takes the worker's only slot; cancel that import or seed again.
+
+## `14`: the colleague PDF
+
+The attachment row is the upload's: its key `messages/01935000-0000-7000-8000-000001400301.pdf`,
+`application/pdf`, and the size and SHA-256 of the one-page PDF whose bytes the seed holds
+(`pg_temp.cue_cards`). The object store does not hold it, as for 08's media, so the thread lists
+the file and its download answers `NoSuchKey`. To download it on a dev stack, copy the seed's
+bytes over its key:
+
+```
+grep -o "decode('[^']*'" seed/14-dev-colleagues.sql | cut -d"'" -f2 | base64 -d |
+  docker compose run --rm --no-deps -T --entrypoint /bin/sh minio-init -c \
+  'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null &&
+   mc pipe "local/$S3_BUCKET/messages/01935000-0000-7000-8000-000001400301.pdf"'
+```
+
+CI's live job seeds no object either, so a live spec that downloads a file uploads its own.
 
 Still planned: a volume seed (~50 students, 10k attempts, 500k integrity
 events) for the query review, which measures p95 latency at realistic volume

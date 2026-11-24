@@ -63,6 +63,7 @@ type EmailIDs struct {
 	AssignmentID   string
 	ConversationID string
 	StudentID      string
+	ColleagueID    string
 	TeacherID      string
 	ClassID        string
 	ContentKind    string
@@ -142,7 +143,7 @@ func PlanEmail(n Notice, now time.Time) (Email, bool) {
 	case MessageReceived, MessageFromTeacher:
 		id, _ := ConversationOf(n.DedupeKey)
 		e.DeliverAfter, e.Thread = now.Add(MessageEmailDelay), id
-		return e.of(EmailMessageReceived, EmailIDs{ConversationID: id, StudentID: t.StudentID, TeacherID: t.TeacherID, ClassID: t.ClassID},
+		return e.of(EmailMessageReceived, EmailIDs{ConversationID: id, StudentID: t.StudentID, ColleagueID: t.ColleagueID, TeacherID: t.TeacherID, ClassID: t.ClassID},
 			id, "message:"+id+":"+n.UserID)
 	}
 	return switchlessEmail(e, n, now)

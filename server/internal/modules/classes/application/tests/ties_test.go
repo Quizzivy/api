@@ -76,6 +76,32 @@ func TestJoiningAClassTiesTheStudentToItsTeacherForGood(t *testing.T) {
 	}
 }
 
+// TestTheModuleAloneTiesAnEnrolledStudent holds what F2's migration (T-F2.2)
+// assumes of R8's 00179: no trigger on the class tables writes a tie any more,
+// so an enrolment through the module is tied by shared/ties alone, inside the
+// enrolment's own transaction.
+func TestTheModuleAloneTiesAnEnrolledStudent(t *testing.T) {
+	w := newClassWorld(t)
+	ctx := context.Background()
+	var fills int
+	if err := w.tx.QueryRow(ctx, `SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+		WHERE t.tgrelid IN ('app.class_members'::regclass, 'app.classes'::regclass) AND NOT t.tgisinternal
+		  AND p.prosrc ILIKE '%messaging_ties%'`).Scan(&fills); err != nil {
+		t.Fatal(err)
+	}
+	if fills != 0 {
+		t.Fatalf("%d triggers on the class tables still write ties; 00179 drops them", fills)
+	}
+	student := w.user(t, "student", "Học viên ghi danh", &w.a)
+	if _, err := w.svc.Commands.AddMember.Handle(ctx, command.AddMember{ClassID: w.classA, UserID: student, Actor: w.who(w.a)}); err != nil {
+		t.Fatal(err)
+	}
+	w.exec(t, `SET CONSTRAINTS ALL IMMEDIATE`)
+	if ok, _ := w.tied(t, w.a, student); !ok {
+		t.Error("a student enrolled through the module is not tied to the class's teacher")
+	}
+}
+
 func TestAClassGivenToAnotherTeacherTiesThemToEveryMember(t *testing.T) {
 	w := newAdminWorld(t)
 	ctx := context.Background()

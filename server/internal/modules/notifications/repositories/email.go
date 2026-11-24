@@ -141,7 +141,9 @@ func paramsOf(e domain.Email) (email.Params, error) {
 	case domain.EmailSubmissionsDigest:
 		return email.SubmissionsDigestParams{AssignmentID: ids.AssignmentID, From: ids.From, AttemptIDs: []string{ids.AttemptID}}, nil
 	case domain.EmailMessageReceived:
-		return email.MessageReceivedParams{ConversationID: ids.ConversationID, StudentID: ids.StudentID, TeacherID: ids.TeacherID, ClassID: ids.ClassID}, nil
+		return email.MessageReceivedParams{
+			ConversationID: ids.ConversationID, StudentID: ids.StudentID, ColleagueID: ids.ColleagueID, TeacherID: ids.TeacherID, ClassID: ids.ClassID,
+		}, nil
 	case domain.EmailAssignmentDueSoon:
 		return email.AssignmentDueSoonParams{AssignmentID: ids.AssignmentID, Lead: string(ids.Lead)}, nil
 	case domain.EmailAssignmentClosing:
@@ -396,7 +398,8 @@ func (m *Mail) Digest(ctx context.Context, userID string, p email.SubmissionsDig
 // their pointer others wrote, who wrote the newest of them and, for a
 // channel, the class's name. It answers false once the reader has caught up,
 // or when they no longer read the thread: a direct thread's two participants
-// read it, and a channel's student members.
+// read it, a colleague thread's two staff members (F2), and a channel's
+// student members. A colleague thread names no class.
 func (m *Mail) Message(ctx context.Context, userID string, p email.MessageReceivedParams, _ time.Time) (email.MessageReceivedParams, bool, error) {
 	var className *string
 	ok, err := one(m.QueryRow(ctx, `
@@ -417,6 +420,7 @@ func (m *Mail) Message(ctx context.Context, userID string, p email.MessageReceiv
 		  JOIN app.users s ON s.id = newest.sender_id
 		 WHERE v.id = $2::uuid AND unread.n > 0
 		   AND CASE WHEN v.kind = 'direct' THEN $1::uuid IN (v.staff_id, v.student_id)
+		            WHEN v.kind = 'colleague' THEN $1::uuid IN (v.colleague_low_id, v.colleague_high_id)
 		            ELSE EXISTS (SELECT 1 FROM app.class_members cm JOIN app.users r ON r.id = cm.user_id
 		                          WHERE cm.class_id = v.class_id AND cm.user_id = $1::uuid AND `+visibility.StudentLike("r")+`) END`,
 		userID, p.ConversationID).Scan(&p.SenderName, &className, &p.Count), "message")

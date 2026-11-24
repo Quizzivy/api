@@ -24,6 +24,8 @@ var userReferences = map[string]domain.Reference{
 	"class_sessions_created_by_fkey":          domain.ReferencedByOwnedContent,
 	"classes_teacher_id_fkey":                 domain.ReferencedByOwnedContent,
 	"content_shares_granted_by_fkey":          domain.ReferencedByOwnedContent,
+	"conversations_colleague_high_id_fkey":    domain.ReferencedByMessages,
+	"conversations_colleague_low_id_fkey":     domain.ReferencedByMessages,
 	"conversations_staff_id_fkey":             domain.ReferencedByMessages,
 	"conversations_student_id_fkey":           domain.ReferencedByMessages,
 	"media_assets_owner_id_fkey":              domain.ReferencedByOwnedContent,

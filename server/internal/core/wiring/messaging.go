@@ -14,11 +14,11 @@ import (
 	"quizzivy/internal/platform/storage"
 )
 
-// messaging keeps class channels and direct threads (D17), signing the photos
-// they show through identity and reading the flagged attempts a staff
-// member's direct thread shows through attempts. Its posts, reads, pointers
-// and uploads write no audit row: the append-only messages table is the
-// record. It serves the staff side and the student side. Messages' files are
+// messaging keeps class channels, direct threads and colleague threads (D17,
+// F2), signing the photos they show through identity and reading the flagged
+// attempts a staff member's direct thread shows through attempts. Its posts,
+// reads, pointers and uploads write no audit row: the append-only messages
+// table is the record. It serves the staff side and the student side. Messages' files are
 // kept in the media bucket, objects, under messages/ (T-R7.11); without a
 // bucket (a nil objects) an upload and a download answer 501 and the
 // housekeeping has no file step. Each new message leaves its readers an

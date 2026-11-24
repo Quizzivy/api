@@ -141,12 +141,20 @@ type StoredAttachment struct {
 }
 
 // AttachmentThread is the thread of the message that holds a file: a direct
-// thread's two participants, or a channel's class.
+// thread's two participants, a colleague thread's pair, or a channel's class.
 type AttachmentThread struct {
-	Kind      Kind
-	StaffID   string
-	StudentID string
-	ClassID   string
+	Kind            Kind
+	StaffID         string
+	StudentID       string
+	ColleagueLowID  string
+	ColleagueHighID string
+	ClassID         string
+}
+
+// InPair reports whether reader is one of a colleague thread's two staff
+// members, the only readers of its files: never true for another kind.
+func (t AttachmentThread) InPair(reader string) bool {
+	return t.Kind == KindColleague && reader != "" && (reader == t.ColleagueLowID || reader == t.ColleagueHighID)
 }
 
 // AttachmentFacts is what decides whether a reader may download a file.
@@ -156,8 +164,9 @@ type AttachmentFacts struct {
 	// Sent is a message holding it.
 	Sent bool
 	// Participant is the reader taking part in the thread of the message
-	// that holds it: a direct thread's staff member or student, or a reader
-	// of a class channel (class scope, or a current member).
+	// that holds it: a direct thread's staff member or student, a colleague
+	// thread's two staff members, or a reader of a class channel (class
+	// scope, or a current member).
 	Participant bool
 }
 

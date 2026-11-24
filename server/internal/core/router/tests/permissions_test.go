@@ -83,8 +83,8 @@ func TestEveryDeclaredValueIsKnown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requirements) != 231 {
-		t.Errorf("%d operations declare a permission, want 231", len(requirements))
+	if len(requirements) != 236 {
+		t.Errorf("%d operations declare a permission, want 236", len(requirements))
 	}
 	for pattern, requirement := range requirements {
 		for _, k := range requirement.Keys() {

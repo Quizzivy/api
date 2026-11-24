@@ -322,6 +322,20 @@ const (
 	cursorID       = "a page's cursor compares in uuidv7 order and names no resource; another thread's message bounds the page as any id does"
 	teacherChecked = "a user id whose eligibility the handler checks, not an owned resource: a teacher of a class the student is in now, or one they have a thread with; the student-pair case below proves another student's thread, a teacher never had and a teacher of a class left answer 404 as a missing id"
 
+	// F2 (T-F2.3): a messaging-peer is any student, so another teacher's
+	// student is one too, and naming them opens the caller's own thread with
+	// them, never the teacher's. directThreadsStayWithTheirParticipants
+	// proves it (D17).
+	anyStudent = "any student may be written to; the thread read is the caller's own"
+
+	// F2 (T-F2.4): a messaging-colleague is any staff member who opens the
+	// teacher workspace, so another teacher's colleague is the caller's too,
+	// and naming them opens the caller's own thread with them, never another
+	// pair's. colleagueThreadsStayWithTheirParticipants proves it (D17).
+	anyColleague = "any colleague may be written to; the thread read is the caller's own"
+	// The picker refuses a class for colleagues (400) whatever it names.
+	noClassForColleagues = "audience=colleagues takes no class filter, so any classId answers 400 VALIDATION_FAILED, the caller's own included"
+
 	notInSet = "removing a question the set does not hold answers as removing one it holds does; the snapshot proves the other teacher's question is untouched"
 
 	anyTeacher = "names no owned resource: any teacher the directory returns is a valid recipient, and a recipient who is not answers 201 with a skip code (NOT_A_TEACHER for a missing account), so the slot is kind none and never substituted"
@@ -665,21 +679,32 @@ func isolationCases() map[string]isoCase {
 		}},
 		"getStudentWeek": {student: true, query: map[string]string{"start": scheduleDay(3)}},
 
-		"listStaffThreads":               {query: map[string]string{"tab": "all"}},
-		"getStaffDirectThread":           {omit: []string{"after"}, excuse: paged},
-		"postStaffDirectMessage":         {fresh: freshAttachment, excuse: posted, body: messagePost},
-		"markStaffDirectThreadRead":      {excuse: pointed, body: messageRead},
-		"getStaffClassThread":            {omit: []string{"after"}, excuse: paged},
-		"postClassAnnouncement":          {fresh: freshAttachment, excuse: posted, body: messagePost},
-		"markStaffClassThreadRead":       {excuse: pointed, body: messageRead},
-		"listStudentThreads":             {student: true},
-		"getStudentDirectThread":         {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
-		"postStudentDirectMessage":       {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
-		"markStudentDirectThreadRead":    {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
-		"getStudentClassThread":          {student: true, omit: []string{"after"}, excuse: paged},
-		"markStudentClassThreadRead":     {student: true, excuse: pointed, body: messageRead},
-		"uploadMessageAttachment":        {format: "png"},
-		"getStaffMessageAttachmentUrl":   {},
+		"listStaffThreads":          {query: map[string]string{"tab": "all"}},
+		"getStaffDirectThread":      {omit: []string{"after"}, excuse: paged, exempt: map[string]string{"path studentId": anyStudent}},
+		"postStaffDirectMessage":    {fresh: freshAttachment, excuse: posted, body: messagePost, exempt: map[string]string{"path studentId": anyStudent}},
+		"markStaffDirectThreadRead": {excuse: pointed, body: messageRead, exempt: map[string]string{"path studentId": anyStudent}},
+		"getStaffClassThread":       {omit: []string{"after"}, excuse: paged},
+		"postClassAnnouncement":     {fresh: freshAttachment, excuse: posted, body: messagePost},
+		"markStaffClassThreadRead":  {excuse: pointed, body: messageRead},
+		"listMessageRecipients": {each: []isoCase{
+			{query: map[string]string{"audience": "students"}},
+			{query: map[string]string{"audience": "colleagues"}, blind: map[string]string{"query classId": noClassForColleagues}},
+		}},
+		"listColleagueThreads":        {},
+		"getColleagueThread":          {omit: []string{"after"}, excuse: paged, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"postColleagueMessage":        {fresh: freshAttachment, excuse: posted, body: messagePost, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"markColleagueThreadRead":     {excuse: pointed, body: messageRead, exempt: map[string]string{"path colleagueId": anyColleague}},
+		"listStudentThreads":          {student: true},
+		"getStudentDirectThread":      {student: true, omit: []string{"after"}, excuse: with(paged, "path teacherId", teacherChecked)},
+		"postStudentDirectMessage":    {student: true, excuse: with(posted, "path teacherId", teacherChecked), body: messagePost},
+		"markStudentDirectThreadRead": {student: true, excuse: with(pointed, "path teacherId", teacherChecked), body: messageRead},
+		"getStudentClassThread":       {student: true, omit: []string{"after"}, excuse: paged},
+		"markStudentClassThreadRead":  {student: true, excuse: pointed, body: messageRead},
+		"uploadMessageAttachment":     {format: "png"},
+		"getStaffMessageAttachmentUrl": {each: []isoCase{
+			{},
+			{as: map[string]string{"path id": "colleague-attachment"}},
+		}},
 		"getStudentMessageAttachmentUrl": {student: true},
 		"updateNotificationPreferences":  {},
 		"updatePreferences":              {},
