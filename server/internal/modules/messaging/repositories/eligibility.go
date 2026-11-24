@@ -1,6 +1,7 @@
 // Package repositories keeps the messaging context's conversations, messages
-// and read pointers (T-R7.9's tables), and reads the classes, accounts and
-// ties that decide who reads and who posts. Nothing here writes an audit row:
+// and read pointers (T-R7.9's tables), and reads the classes and accounts
+// that decide who reads and who posts, and the ties (app.messaging_ties) that
+// tell a former student or teacher. Nothing here writes an audit row:
 // the append-only messages table is the record (D17).
 package repositories
 
@@ -15,6 +16,7 @@ import (
 	"quizzivy/internal/platform/db"
 	"quizzivy/internal/shared/access"
 	"quizzivy/internal/shared/opt"
+	"quizzivy/internal/shared/retention"
 	"quizzivy/internal/shared/visibility"
 )
 
@@ -34,13 +36,12 @@ func NewPostgres(dbx db.Context) *Postgres {
 
 var _ domain.Repository = (*Postgres)(nil)
 
-// The facts each have one definition, shared with visibility.MessagingPeerIDs:
-// a direct conversation, a tie and the account's creator.
+// The facts each have one definition, shared with visibility.MessagingPeerIDs
+// and visibility.CanMessage: a direct conversation, the account being
+// enabled, a student and not anonymised.
 const directFactsSQL = `
-	SELECT u.disabled_at IS NULL, %s,
-	       EXISTS (SELECT 1 FROM app.conversations v WHERE v.kind = 'direct' AND v.staff_id = $1::uuid AND v.student_id = u.id),
-	       EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = $1::uuid AND t.student_id = u.id),
-	       coalesce(u.created_by = $1::uuid, false)
+	SELECT u.disabled_at IS NULL, %s, NOT (%s),
+	       EXISTS (SELECT 1 FROM app.conversations v WHERE v.kind = 'direct' AND v.staff_id = $1::uuid AND v.student_id = u.id)
 	  FROM app.users u
 	 WHERE u.id = $2::uuid`
 
@@ -51,8 +52,8 @@ func (p *Postgres) DirectFacts(ctx context.Context, staffID, studentID string) (
 
 func directFacts(ctx context.Context, q db.Querier, staffID, studentID string) (domain.DirectFacts, error) {
 	f := domain.DirectFacts{Exists: true, Self: staffID == studentID}
-	err := q.QueryRow(ctx, fmt.Sprintf(directFactsSQL, visibility.StudentLike("u")), opt.String(staffID), studentID).
-		Scan(&f.Enabled, &f.Student, &f.Conversation, &f.Tied, &f.Created)
+	err := q.QueryRow(ctx, fmt.Sprintf(directFactsSQL, visibility.StudentLike("u"), retention.NotAnonymousOf("u")), opt.String(staffID), studentID).
+		Scan(&f.Enabled, &f.Student, &f.Anonymised, &f.Conversation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.DirectFacts{Self: f.Self}, nil
 	}

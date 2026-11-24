@@ -172,6 +172,14 @@ func TestAStudentWritesToTheirTeacherAndReadsTheirClass(t *testing.T) {
 		!strings.HasPrefix(events[0]["title"].(string), "Đề có cảnh báo") {
 		t.Errorf("the teacher's context events: %v, want the flagged attempt", staff["contextEvents"])
 	}
+	// A staff member who does not teach the student writes to them (F2): the
+	// context events are the reader's assignment scope, so the flagged
+	// attempt on the teacher's assignment is not in theirs.
+	stranger := w.signedIn(w.createStaff("teacher"))
+	stranger.must(http.StatusCreated, http.MethodPost, staffThread, map[string]any{"clientId": uuid.NewString(), "body": "Chào em, thầy ở trung tâm."})
+	if events := stranger.must(http.StatusOK, http.MethodGet, staffThread, nil)["contextEvents"].([]any); len(events) != 0 {
+		t.Errorf("the context events of a staff member who does not teach the student: %v, want none: their assignment scope reaches no assignment of the teacher's", events)
+	}
 	for _, row := range objects(teacher.must(http.StatusOK, http.MethodGet, "/teacher/messages/threads?tab=direct", nil)["threads"]) {
 		if row["thread"].(map[string]any)["studentId"] == studentID && row["unread"] != float64(1) {
 			t.Errorf("the teacher's unread: %v, want the student's one message: a context event is never unread", row["unread"])

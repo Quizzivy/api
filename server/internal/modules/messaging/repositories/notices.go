@@ -14,12 +14,14 @@ import (
 )
 
 // readers lists the accounts the message m of the conversation v is for: the
-// other participant of a direct thread, or the class's student members for
-// an announcement, enabled, and with no read pointer that has reached m.
+// other participant of a direct or a colleague thread, or the class's
+// student members for an announcement, enabled, and with no read pointer
+// that has reached m.
 var readers = `coalesce(array(
 	  SELECT r.id::text FROM app.users r
 	   WHERE r.disabled_at IS NULL AND r.id <> m.sender_id
 	     AND CASE WHEN v.kind = 'direct' THEN r.id IN (v.staff_id, v.student_id)
+	              WHEN v.kind = 'colleague' THEN r.id IN (v.colleague_low_id, v.colleague_high_id)
 	              ELSE ` + visibility.StudentLike("r") + `
 	                   AND EXISTS (SELECT 1 FROM app.class_members cm WHERE cm.class_id = v.class_id AND cm.user_id = r.id) END
 	     AND NOT EXISTS (SELECT 1 FROM app.conversation_reads p
@@ -31,9 +33,10 @@ var readers = `coalesce(array(
 func (p *Postgres) Delivery(ctx context.Context, messageID string) (domain.Delivery, error) {
 	var d domain.Delivery
 	var kind string
-	var classID, className, staffID, studentID *string
+	var classID, className, staffID, studentID, low, high *string
 	err := p.QueryRow(ctx, `
-		SELECT v.id::text, v.kind, v.class_id::text, c.name, v.staff_id::text, v.student_id::text, `+nameOf("s")+`,
+		SELECT v.id::text, v.kind, v.class_id::text, c.name, v.staff_id::text, v.student_id::text,
+		       v.colleague_low_id::text, v.colleague_high_id::text, `+nameOf("s")+`,
 		       m.body, a.original_filename, `+readers+`
 		  FROM app.messages m
 		  JOIN app.conversations v ON v.id = m.conversation_id
@@ -41,7 +44,7 @@ func (p *Postgres) Delivery(ctx context.Context, messageID string) (domain.Deliv
 		  LEFT JOIN app.message_attachments a ON a.id = m.attachment_id
 		  LEFT JOIN app.classes c ON c.id = v.class_id
 		 WHERE m.id = $1::uuid`, messageID).
-		Scan(&d.ConversationID, &kind, &classID, &className, &staffID, &studentID, &d.SenderName, &d.Body, &d.Filename, &d.Readers)
+		Scan(&d.ConversationID, &kind, &classID, &className, &staffID, &studentID, &low, &high, &d.SenderName, &d.Body, &d.Filename, &d.Readers)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Delivery{}, domain.ErrNotFound
 	}
@@ -49,6 +52,7 @@ func (p *Postgres) Delivery(ctx context.Context, messageID string) (domain.Deliv
 		return domain.Delivery{}, fmt.Errorf("messaging: delivery: %w", err)
 	}
 	d.Kind, d.ClassID, d.ClassName, d.StaffID, d.StudentID = domain.Kind(kind), deref(classID), deref(className), deref(staffID), deref(studentID)
+	d.ColleagueLowID, d.ColleagueHighID = deref(low), deref(high)
 	return d, nil
 }
 
@@ -83,9 +87,10 @@ func (p *Postgres) CaughtUp(ctx context.Context, conversationID string, readerID
 }
 
 // StaffUnread counts the messages past scope.UserID's read pointers, not
-// counting their own, over their direct threads and the channels of the
-// classes scope reaches that are not archived (domain.Repository): the sum of
-// the unread counts of the staff list's rows.
+// counting their own, over their direct threads, their colleague threads and
+// the channels of the classes scope reaches that are not archived
+// (domain.Repository): the sum of the unread counts of the staff list's rows
+// and the Colleagues tab's. scope.all widens the channels only.
 func (p *Postgres) StaffUnread(ctx context.Context, scope access.Scope) (int, error) {
 	var n int
 	err := p.QueryRow(ctx, `
@@ -98,6 +103,10 @@ func (p *Postgres) StaffUnread(ctx context.Context, scope access.Scope) (int, er
 		  SELECT `+unread+`
 		    FROM app.conversations v
 		   WHERE v.kind = 'direct' AND v.staff_id = $1::uuid
+		  UNION ALL
+		  SELECT `+unread+`
+		    FROM app.conversations v
+		   WHERE `+mineColleague(1)+`
 		) t`, opt.String(scope.UserID), scope.All).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("messaging: staff unread: %w", err)

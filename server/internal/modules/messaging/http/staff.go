@@ -1,12 +1,14 @@
 // Package http is the messaging context's transport. The staff side lives
 // under /teacher/messages: the Messages list, a direct thread addressed by its
-// student, and a class's announcement channel addressed by its class. The
-// student side lives under /app/messages (student.go).
+// student, a class's announcement channel addressed by its class, the New
+// message picker, and the colleague threads addressed by the colleague
+// (colleagues.go). The student side lives under /app/messages (student.go).
 package http
 
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -18,6 +20,7 @@ import (
 	"quizzivy/internal/platform/httpapi"
 	"quizzivy/internal/platform/httpx"
 	"quizzivy/internal/shared/access"
+	"quizzivy/internal/shared/actor"
 )
 
 // Staff serves the staff side of messaging.
@@ -136,7 +139,7 @@ func threadOf(t domain.StaffThread) openapi.StaffThread {
 	}
 	out := openapi.StaffThread{
 		Thread: ref, Title: t.Title, AvatarUrl: t.AvatarURL, ClassNames: t.ClassNames, StudentCount: t.StudentCount,
-		Former: t.Former, Candidate: t.Candidate, Disabled: t.Disabled, Unread: t.Unread,
+		OtherClassNames: t.OtherClassNames, Former: t.Former, Candidate: t.Candidate, Disabled: t.Disabled, Unread: t.Unread,
 	}
 	if t.LastMessageAt != nil {
 		out.LastMessageAt = new(t.LastMessageAt.UTC())
@@ -216,7 +219,7 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 	return openapi.GetStaffDirectThread200JSONResponse{
 		Student: openapi.StaffDirectThreadPeer{
 			Id: httpapi.ParseUUID(peer.ID), Name: peer.Name, AvatarUrl: peer.AvatarURL, Classes: classes,
-			Former: peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
+			OtherClassNames: peer.OtherClassNames, Former: peer.Former, Disabled: peer.Disabled, CanPost: peer.CanPost,
 		},
 		Messages:      messagesOf(thread.Page),
 		ContextEvents: contextEventsOf(thread.Events),
@@ -227,34 +230,73 @@ func (h Staff) GetStaffDirectThread(ctx context.Context, request openapi.GetStaf
 
 // PostStaffDirectMessage implements POST /teacher/messages/students/{studentId}.
 func (h Staff) PostStaffDirectMessage(ctx context.Context, request openapi.PostStaffDirectMessageRequestObject) (openapi.PostStaffDirectMessageResponseObject, error) {
-	who, ok := httpapi.ActorFromContext(ctx)
-	if h.app == nil || !ok || request.Body == nil {
-		return nil, httpx.ErrNotImplemented
-	}
-	in := *request.Body
-	posted, err := h.app.Commands.PostDirect.Handle(ctx, command.PostDirect{
-		Actor: who, StudentID: request.StudentId.String(), ClientID: in.ClientId.String(), Body: in.Body, AttachmentID: stringOf(in.AttachmentId),
+	posted, err := h.post(ctx, request.Body, func(who actor.Actor, in openapi.StaffMessagePost) (domain.Posted, error) {
+		return h.app.Commands.PostDirect.Handle(ctx, command.PostDirect{
+			Actor: who, StudentID: request.StudentId.String(), ClientID: in.ClientId.String(), Body: in.Body, AttachmentID: stringOf(in.AttachmentId),
+		})
 	})
+	return answerPost[openapi.PostStaffDirectMessageResponseObject, openapi.PostStaffDirectMessage201JSONResponse, openapi.PostStaffDirectMessage200JSONResponse, openapi.PostStaffDirectMessage404JSONResponse,
+		openapi.PostStaffDirectMessage409JSONResponse, openapi.PostStaffDirectMessage422JSONResponse, openapi.PostStaffDirectMessage400JSONResponse](ctx, posted, err, notAllowed(ctx))
+}
+
+// post sends the post body carries as the caller through send, a
+// two-person thread's command: httpx.ErrNotImplemented with no application,
+// caller or body.
+func (h Staff) post(ctx context.Context, body *openapi.StaffMessagePost, send func(actor.Actor, openapi.StaffMessagePost) (domain.Posted, error)) (domain.Posted, error) {
+	who, ok := httpapi.ActorFromContext(ctx)
+	if h.app == nil || !ok || body == nil {
+		return domain.Posted{}, httpx.ErrNotImplemented
+	}
+	return send(who, *body)
+}
+
+// errorBody is the underlying type of the error envelope, which an
+// operation's 409 and 422 responses are declared as.
+type errorBody interface {
+	~struct {
+		Error openapi.ErrorDetail `json:"error"`
+	}
+}
+
+// answerPost answers a post to a two-person thread, a student's or a
+// colleague's, as the operation's own responses named by the type
+// parameters, each a response of R: Made 201 for a new message, Again 200
+// for a repeated clientId (both declared as a StaffMessage), Missing 404 for
+// a thread or a file the sender cannot name, Conflict 409
+// MESSAGING_NOT_ALLOWED with the sentence notAllowed, Refused 422 for an
+// empty message or a clientId of another thread, Bad 400 for an invalid
+// request. Any other error is returned as it is.
+func answerPost[R, Made, Again any, Missing ~struct{ openapi.NotFoundJSONResponse }, Conflict, Refused errorBody, Bad ~struct{ openapi.BadRequestJSONResponse }](
+	ctx context.Context, posted domain.Posted, err error, notAllowed openapi.ErrorResponse) (R, error) {
+	var answer any
 	switch {
+	case err == nil && posted.Created:
+		answer = messageAs[Made](messageOf(posted.Message))
+	case err == nil:
+		answer = messageAs[Again](messageOf(posted.Message))
 	case errors.Is(err, domain.ErrNotFound):
-		return openapi.PostStaffDirectMessage404JSONResponse{NotFoundJSONResponse: threadNotFound(ctx)}, nil
+		answer = Missing{threadNotFound(ctx)}
 	case errors.Is(err, domain.ErrAttachmentNotFound):
-		return openapi.PostStaffDirectMessage404JSONResponse{NotFoundJSONResponse: attachmentNotFound(ctx)}, nil
+		answer = Missing{attachmentNotFound(ctx)}
 	case errors.Is(err, domain.ErrNotAllowed):
-		return openapi.PostStaffDirectMessage409JSONResponse(notAllowed(ctx)), nil
+		answer = Conflict(notAllowed)
 	case errors.Is(err, domain.ErrEmpty):
-		return openapi.PostStaffDirectMessage422JSONResponse(emptyMessage(ctx)), nil
+		answer = Refused(emptyMessage(ctx))
 	case errors.Is(err, domain.ErrClientIDTaken):
-		return openapi.PostStaffDirectMessage422JSONResponse(clientIDTaken(ctx)), nil
+		answer = Refused(clientIDTaken(ctx))
 	case errors.Is(err, domain.ErrInvalid):
-		return openapi.PostStaffDirectMessage400JSONResponse{BadRequestJSONResponse: badRequest(ctx)}, nil
-	case err != nil:
-		return nil, err
+		answer = Bad{badRequest(ctx)}
+	default:
+		var none R
+		return none, err
 	}
-	if !posted.Created {
-		return openapi.PostStaffDirectMessage200JSONResponse(messageOf(posted.Message)), nil
-	}
-	return openapi.PostStaffDirectMessage201JSONResponse(messageOf(posted.Message)), nil
+	return answer.(R), nil
+}
+
+// messageAs is m as T, a response the contract declares as a StaffMessage
+// (type T StaffMessage), which a type parameter's constraint cannot name.
+func messageAs[T any](m openapi.StaffMessage) T {
+	return reflect.ValueOf(m).Convert(reflect.TypeFor[T]()).Interface().(T)
 }
 
 // MarkStaffDirectThreadRead implements POST /teacher/messages/students/{studentId}/read.
@@ -365,4 +407,79 @@ func (h Staff) MarkStaffClassThreadRead(ctx context.Context, request openapi.Mar
 		return nil, err
 	}
 	return openapi.MarkStaffClassThreadRead204Response{}, nil
+}
+
+func recipientsBadRequest(ctx context.Context) openapi.BadRequestJSONResponse {
+	return openapi.BadRequestJSONResponse(httpapi.Error(ctx, openapi.VALIDATIONFAILED,
+		httpx.Text(ctx, "Yêu cầu không hợp lệ: chỉ dùng một bộ lọc (classId, mine hoặc inNoClass), chỉ khi tìm học viên, và cursor do danh sách này trả về.",
+			"The request is not valid: use one filter at most (classId, mine or inNoClass), for students only, and a cursor this list gave.")))
+}
+
+func recipientsClassNotFound(ctx context.Context) openapi.NotFoundJSONResponse {
+	return openapi.NotFoundJSONResponse(httpapi.NotFound(ctx,
+		httpx.Text(ctx, "Không tìm thấy lớp này.", "This class was not found.")))
+}
+
+func recipientOf(r domain.Recipient) openapi.MessageRecipient {
+	return openapi.MessageRecipient{
+		Id: httpapi.ParseUUID(r.ID), Name: r.Name, AvatarUrl: r.AvatarURL,
+		ClassNames: r.ClassNames, OtherClassNames: r.OtherClassNames,
+		RoleName: r.RoleName, RoleBuiltinKey: builtinOf(r.RoleBuiltinKey),
+		ThreadExists: r.ThreadExists, CanPost: r.CanPost,
+	}
+}
+
+// ListMessageRecipients implements GET /teacher/messages/recipients, the New
+// message picker: students (T-F2.3) or colleagues (T-F2.4). Every staff
+// member gets the same rows; the caller's class scope bounds only classId
+// and mine, which colleagues refuse with the rest of the students' filters.
+func (h Staff) ListMessageRecipients(ctx context.Context, request openapi.ListMessageRecipientsRequestObject) (openapi.ListMessageRecipientsResponseObject, error) {
+	who, ok := httpapi.ActorFromContext(ctx)
+	if h.app == nil || !ok {
+		return nil, httpx.ErrNotImplemented
+	}
+	p := request.Params
+	f := domain.RecipientFilter{
+		Audience: domain.Audience(p.Audience), ActorID: who.ID, All: who.Scope.All,
+		Mine: p.Mine != nil && *p.Mine, InNoClass: p.InNoClass != nil && *p.InNoClass,
+	}
+	if p.ClassId != nil {
+		f.ClassID = p.ClassId.String()
+	}
+	if p.Q != nil {
+		f.Query = string(*p.Q)
+	}
+	if p.Limit != nil {
+		f.Limit = *p.Limit
+	}
+	cursor := ""
+	if p.Cursor != nil {
+		cursor = *p.Cursor
+	}
+	var page domain.Recipients
+	var err error
+	switch f.Audience {
+	case domain.AudienceStudents:
+		page, err = h.app.Queries.StudentRecipients.Handle(ctx, query.StudentRecipients{Filter: f, Cursor: cursor})
+	case domain.AudienceColleagues:
+		page, err = h.app.Queries.ColleagueRecipients.Handle(ctx, query.ColleagueRecipients{Filter: f, Cursor: cursor})
+	default:
+		err = domain.ErrInvalid
+	}
+	switch {
+	case errors.Is(err, domain.ErrInvalid):
+		return openapi.ListMessageRecipients400JSONResponse{BadRequestJSONResponse: recipientsBadRequest(ctx)}, nil
+	case errors.Is(err, domain.ErrNotFound):
+		return openapi.ListMessageRecipients404JSONResponse{NotFoundJSONResponse: recipientsClassNotFound(ctx)}, nil
+	case err != nil:
+		return nil, err
+	}
+	out := openapi.ListMessageRecipients200JSONResponse{Recipients: make([]openapi.MessageRecipient, len(page.Rows))}
+	for i, r := range page.Rows {
+		out.Recipients[i] = recipientOf(r)
+	}
+	if page.Next != "" {
+		out.NextCursor = &page.Next
+	}
+	return out, nil
 }

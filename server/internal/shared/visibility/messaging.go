@@ -1,6 +1,10 @@
 package visibility
 
-import "fmt"
+import (
+	"fmt"
+
+	"quizzivy/internal/shared/retention"
+)
 
 // StudentLike is the boolean SQL expression over the users row named by alias
 // that the account passes R2's strict student predicate: its role grants
@@ -9,27 +13,31 @@ func StudentLike(alias string) string {
 	return alias + `.role_id IN (SELECT r.id FROM app.student_like_roles r)`
 }
 
-// MessagingPeerIDs is the one definition of the accounts a staff member may
-// name as the student of a direct thread (T-R7.10a, O-R7.8), as a subquery of
-// user ids for the staff member's id in placeholder $n: those they hold a
-// direct conversation with, have taught in a class of theirs, now or before
-// (app.messaging_ties), or created (users.created_by) when the account is a
-// student (StudentLike): a staff account the caller created is no peer.
-// scope.all does not widen it: a direct thread is its two participants' only
-// (D17, DG-08). A NULL staff member has none. It is the messaging module's
-// domain.Eligibility.Peer.
+// MessagingPeerIDs is domain.Eligibility.Peer written in SQL, as a subquery
+// of user ids for the staff member's id in placeholder $n: those they hold a
+// direct conversation with, and every account they may write to
+// (CanMessage); never the staff member, never an anonymised account, none
+// for a NULL staff member. No query reads it: since F2 (T-F2.3) the messaging
+// module decides a peer from DirectFacts alone, and this subquery only backs
+// the parity test that holds the SQL rule (CanMessage, which the Students
+// page and the class roster read) to the manager's
+// (TestTheEligibilityTableOnTheDatabase). Use CanMessage for whom a staff
+// member may write to.
 func MessagingPeerIDs(n int) string {
-	return fmt.Sprintf(`(SELECT v.student_id FROM app.conversations v WHERE v.kind = 'direct' AND v.staff_id = $%[1]d::uuid
-	 UNION ALL SELECT t.student_id FROM app.messaging_ties t WHERE t.staff_id = $%[1]d::uuid
-	 UNION ALL SELECT w.id FROM app.users w WHERE w.created_by = $%[1]d::uuid AND %[2]s)`, n, StudentLike("w"))
+	return fmt.Sprintf(`(SELECT w.id FROM app.users w
+	  WHERE $%[1]d::uuid IS NOT NULL AND w.id <> $%[1]d::uuid AND %[2]s
+	    AND (EXISTS (SELECT 1 FROM app.conversations v WHERE v.kind = 'direct' AND v.staff_id = $%[1]d::uuid AND v.student_id = w.id)
+	         OR %[3]s))`, n, retention.NotAnonymousOf("w"), CanMessage("w", n))
 }
 
 // CanMessage is the one definition of whom the staff member in placeholder $n
 // may write to in a direct thread, as a boolean SQL expression over the users
-// row named by alias: a messaging peer (MessagingPeerIDs), enabled, and a
-// student by R2's strict predicate. It is the messaging module's eligibility
-// for a post, which the Students page and the class roster show as canMessage.
+// row named by alias: any enabled account that passes R2's strict student
+// predicate and is not anonymised, in one of the staff member's classes, in
+// another teacher's or in none; never the staff member. It is the messaging
+// module's eligibility for a post, which the Students page and the class
+// roster show as canMessage, whoever's class scope reaches the student.
 func CanMessage(alias string, n int) string {
-	return fmt.Sprintf(`(%[1]s.disabled_at IS NULL AND %[2]s AND %[1]s.id IS DISTINCT FROM $%[3]d::uuid AND %[1]s.id IN %[4]s)`,
-		alias, StudentLike(alias), n, MessagingPeerIDs(n))
+	return fmt.Sprintf(`(%[1]s.disabled_at IS NULL AND %[2]s AND %[3]s AND $%[4]d::uuid IS NOT NULL AND %[1]s.id <> $%[4]d::uuid)`,
+		alias, StudentLike(alias), retention.NotAnonymousOf(alias), n)
 }

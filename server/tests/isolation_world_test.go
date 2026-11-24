@@ -316,8 +316,9 @@ func (w *world) teacherWorld(name string) *party {
 	})
 	user := created["user"].(map[string]any)
 	p.ids["student"] = user["id"].(string)
-	// The teacher created the student and teaches them, so the student is a
-	// messaging peer of the teacher's.
+	// Any enabled student is a messaging peer of every staff member (F2); the
+	// teacher's own student is the one the suite names, and the slot is
+	// exempt from substitution (isolationCases, anyStudent).
 	p.ids["messaging-peer"] = p.ids["student"]
 
 	assignment := c.assign(versionID, p.ids["class"])
@@ -361,6 +362,16 @@ func (w *world) teacherWorld(name string) *party {
 	p.student.ids["attachment"] = p.ids["attachment"]
 	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/students/"+p.student.userID, map[string]any{"clientId": uuid.NewString(), "body": "Chào em " + name, "attachmentId": p.ids["attachment"]})
 	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/classes/"+p.ids["class"], map[string]any{"clientId": uuid.NewString(), "body": "Chào lớp " + name})
+	// Any staff member who opens the workspace is a messaging colleague of
+	// every other (F2); the teacher's colleague from sharing is the one the
+	// suite names, and the slot is exempt from substitution
+	// (isolationCases, anyColleague). Their thread holds a file, so the
+	// download has a colleague thread's file to refuse another teacher.
+	p.ids["messaging-colleague"] = p.mateID
+	p.ids["colleague-attachment"] = uploadAttachment(w.t, c, "tai-lieu-"+name+".pdf")
+	c.must(http.StatusCreated, http.MethodPost, "/teacher/messages/colleagues/"+p.mateID, map[string]any{
+		"clientId": uuid.NewString(), "body": "Gửi đồng nghiệp " + name, "attachmentId": p.ids["colleague-attachment"],
+	})
 	return p
 }
 

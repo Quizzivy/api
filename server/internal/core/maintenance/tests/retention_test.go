@@ -1150,3 +1150,142 @@ func TestAnonymizeUserRemovesTheDirectThreadsInItsTransaction(t *testing.T) {
 		w.threadsAreGone(f)
 	})
 }
+
+type colleagueFixture struct {
+	peer, owner, bystander        string
+	gone, also, keptByOwner, kept string
+	direct                        string
+	file, reply                   string
+}
+
+// colleagues gives a disabled teacher who owns nothing (peer) a colleague
+// thread with the Admin, carrying a file the Admin sent, both read pointers
+// and both bells' items, one with an active teacher (bystander), the peer
+// low in one pair and high in the other, and a direct thread with a
+// student; a disabled
+// teacher who owns a class (owner) a colleague thread with the Admin; and the
+// Admin a colleague thread with an active teacher (bystander). Each pair is
+// written low-first, as T-F2.4's first post writes it.
+func (w *sweepWorld) colleagues(disabledAt time.Time) colleagueFixture {
+	w.t.Helper()
+	var f colleagueFixture
+	f.peer = w.user("Cô Ngọc", "teacher")
+	f.owner = w.user("Thầy Khang", "teacher")
+	f.bystander = w.user("Cô Thảo", "teacher")
+	w.disable(f.peer, disabledAt)
+	w.disable(f.owner, disabledAt)
+	w.id(`INSERT INTO app.classes(name, teacher_id) VALUES ('Lớp của thầy Khang', $1) RETURNING id::text`, f.owner)
+	pair := func(a, b string) string {
+		return w.id(`INSERT INTO app.conversations(kind, colleague_low_id, colleague_high_id, last_message_at)
+			VALUES ('colleague', LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), now()) RETURNING id::text`, a, b)
+	}
+	message := func(thread, sender, body string, file *string) string {
+		return w.id(`INSERT INTO app.messages(conversation_id, sender_id, client_id, body, attachment_id)
+			VALUES ($1, $2, gen_random_uuid(), $3, $4) RETURNING id::text`, thread, sender, body, file)
+	}
+	item := func(user, thread string) {
+		w.exec(`INSERT INTO app.notifications(user_id, kind, params, dedupe_key)
+			VALUES ($1, 'message.received', '{"senderName": "Đồng nghiệp", "count": 1, "excerpt": "Tin nhắn"}', 'msg:' || $2)`, user, thread)
+	}
+	f.gone = pair(w.teacher, f.peer)
+	f.file = w.id(`INSERT INTO app.message_attachments(uploaded_by, storage_key, mime_type, bytes, original_filename, checksum_sha256)
+		VALUES ($1, 'messages/' || gen_random_uuid() || '.pdf', 'application/pdf', 10, 'lich-day.pdf', decode(repeat('ab', 32), 'hex')) RETURNING id::text`, w.teacher)
+	message(f.gone, w.teacher, "Chị gửi lịch dạy tuần sau", &f.file)
+	f.reply = message(f.gone, f.peer, "Em nhận rồi ạ", nil)
+	for _, u := range []string{w.teacher, f.peer} {
+		w.exec(`INSERT INTO app.conversation_reads(conversation_id, user_id, last_read_message_id) VALUES ($1, $2, $3)`, f.gone, u, f.reply)
+		item(u, f.gone)
+	}
+	f.also = pair(f.peer, f.bystander)
+	message(f.also, f.bystander, "Mai em dạy thay chị nhé", nil)
+	item(f.peer, f.also)
+	if w.count(`SELECT count(*) FROM app.conversations WHERE id = ANY($1::uuid[]) AND colleague_low_id = $2`, []string{f.gone, f.also}, f.peer) != 1 {
+		w.t.Fatal("the peer is not low in exactly one of its two colleague threads: the fixture no longer covers both columns")
+	}
+	pupil := w.user("Học viên Quang", "student")
+	f.direct = w.id(`INSERT INTO app.conversations(kind, staff_id, student_id, last_message_at) VALUES ('direct', $1, $2, now()) RETURNING id::text`, f.peer, pupil)
+	message(f.direct, pupil, "Cô ơi", nil)
+	f.keptByOwner = pair(w.teacher, f.owner)
+	message(f.keptByOwner, f.owner, "Anh nghỉ phép tháng này", nil)
+	item(w.teacher, f.keptByOwner)
+	f.kept = pair(w.teacher, f.bystander)
+	message(f.kept, f.bystander, "Chị ơi, phòng 3 trống không?", nil)
+	item(w.teacher, f.kept)
+	return f
+}
+
+func (w *sweepWorld) colleagueThreadsAreGone(f colleagueFixture) {
+	w.t.Helper()
+	gone := []string{f.gone, f.also, f.direct}
+	for _, c := range []struct {
+		what string
+		sql  string
+		arg  any
+	}{
+		{"the peer's threads, colleague and direct", `SELECT count(*) FROM app.conversations WHERE id = ANY($1::uuid[])`, gone},
+		{"their messages", `SELECT count(*) FROM app.messages WHERE conversation_id = ANY($1::uuid[])`, gone},
+		{"their pointers", `SELECT count(*) FROM app.conversation_reads WHERE conversation_id = ANY($1::uuid[])`, gone},
+		{"their bell items", `SELECT count(*) FROM app.notifications WHERE dedupe_key IN (SELECT 'msg:' || g FROM unnest($1::text[]) AS g)`, gone},
+		{"the file the Admin sent the peer", `SELECT count(*) FROM app.message_attachments WHERE id = $1::uuid`, f.file},
+	} {
+		if n := w.count(c.sql, c.arg); n != 0 {
+			w.t.Errorf("%d rows of %s outlive the anonymisation", n, c.what)
+		}
+	}
+	for _, c := range []struct {
+		what, thread string
+	}{
+		{"the owner's thread with the Admin (an owner is never anonymised)", f.keptByOwner},
+		{"the Admin's thread with an active teacher", f.kept},
+	} {
+		if n := w.count(`SELECT count(*) FROM app.messages WHERE conversation_id = $1`, c.thread); n != 1 {
+			w.t.Errorf("%s holds %d messages, want 1", c.what, n)
+		}
+		if n := w.count(`SELECT count(*) FROM app.notifications WHERE dedupe_key = 'msg:' || $1::text`, c.thread); n != 1 {
+			w.t.Errorf("%s has %d bell items, want 1", c.what, n)
+		}
+	}
+	if n := w.count(`SELECT count(*) FROM app.users WHERE id = $1 AND email NOT LIKE 'anonymous-%'`, f.owner); n != 1 {
+		w.t.Error("the disabled teacher who owns a class was anonymised")
+	}
+}
+
+// TestAnonymisationRemovesAColleagueThreadWithTheDirectOnes fails when the
+// accounts step leaves an anonymised teacher's colleague threads (F2), their
+// messages, pointers, files' rows or bell items, removes them apart from its
+// direct threads, or touches the thread of a teacher it skips for owning
+// content or of two colleagues it does not anonymise (D16, D17, T-F2.5). The
+// maintenance role's run shows its grants suffice.
+func TestAnonymisationRemovesAColleagueThreadWithTheDirectOnes(t *testing.T) {
+	eachWorld(t, func(t *testing.T, w *sweepWorld) {
+		w.retention(nil, 13, months(12))
+		f := w.colleagues(w.cutoff(12).Add(-w.margin))
+		report := w.sweep(maintenance.SweepOptions{Apply: true})
+		if report.Accounts.Anonymise != 1 || report.Accounts.SkippedOwners != 1 {
+			t.Fatalf("accounts step = %+v, want the peer anonymised and the owner skipped", report.Accounts)
+		}
+		w.colleagueThreadsAreGone(f)
+	})
+}
+
+// TestAnonymizeUserRemovesTheColleagueThreadsInItsTransaction fails when an
+// explicit request leaves the teacher's colleague threads, or a dry run, or a
+// request refused for an owner, removes any.
+func TestAnonymizeUserRemovesTheColleagueThreadsInItsTransaction(t *testing.T) {
+	eachWorld(t, func(t *testing.T, w *sweepWorld) {
+		f := w.colleagues(time.Now().Add(-time.Hour))
+		if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, f.peer, false); err != nil {
+			t.Fatal(err)
+		}
+		if n := w.count(`SELECT count(*) FROM app.messages WHERE conversation_id = ANY($1::uuid[])`, []string{f.gone, f.also}); n != 3 {
+			t.Errorf("a dry run left %d of the colleague threads' 3 messages", n)
+		}
+		if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, f.owner, true); err == nil {
+			t.Error("anonymize-user accepted a teacher who owns a class")
+		}
+		if _, err := maintenance.AnonymizeUser(w.ctx, w.conn, f.peer, true); err != nil {
+			t.Fatal(err)
+		}
+		w.colleagueThreadsAreGone(f)
+	})
+}

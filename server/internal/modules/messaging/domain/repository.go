@@ -7,10 +7,12 @@ import (
 	"quizzivy/internal/shared/access"
 )
 
-// Repository keeps conversations, messages and read pointers in
+// Repository keeps conversations (class channels, direct threads and
+// colleague threads), messages and read pointers in
 // app.conversations, app.messages and app.conversation_reads, and reads the
-// classes, accounts and ties (app.messaging_ties) that decide who reads and
-// who posts. It writes no audit row (D17).
+// classes and accounts that decide who reads and who posts, and the ties
+// (app.messaging_ties) that tell a former student or teacher. It writes no
+// audit row (D17).
 type Repository interface {
 	// DirectFacts reads what decides staffID's direct thread with studentID.
 	DirectFacts(ctx context.Context, staffID, studentID string) (DirectFacts, error)
@@ -55,8 +57,8 @@ type Repository interface {
 	// ReadState, all judged at one statement's start.
 	CaughtUp(ctx context.Context, conversationID string, readerIDs []string) ([]Caught, error)
 	// StaffUnread counts the messages past scope.UserID's read pointers, not
-	// counting their own, over their direct threads and the channels of the
-	// classes scope reaches that are not archived.
+	// counting their own, over their direct threads, their colleague threads
+	// and the channels of the classes scope reaches that are not archived.
 	StaffUnread(ctx context.Context, scope access.Scope) (int, error)
 	// StudentUnread is StaffUnread for a student: over their direct threads
 	// and the channels of the classes they are in now that are not archived;
@@ -65,6 +67,38 @@ type Repository interface {
 	// FirstMessageAt is when the first message of staffID's thread with
 	// studentID was written, nil while the thread has none.
 	FirstMessageAt(ctx context.Context, staffID, studentID string) (*time.Time, error)
+	// StudentRecipients returns at most f.Limit+1 students for the New
+	// message picker after the row f.After, by folded name and id: every
+	// account the caller may write to, matched on the name and kept by f's
+	// one filter. A class f's class scope does not reach answers ErrNotFound.
+	StudentRecipients(ctx context.Context, f RecipientFilter) ([]Recipient, error)
+	// ColleagueRecipients is StudentRecipients for colleagues: every enabled
+	// account that opens the teacher workspace and is not a student,
+	// anonymised or the caller, matched on the name.
+	ColleagueRecipients(ctx context.Context, f RecipientFilter) ([]Recipient, error)
+
+	// ColleagueFacts reads what decides staffID's colleague thread with
+	// colleagueID.
+	ColleagueFacts(ctx context.Context, staffID, colleagueID string) (ColleagueFacts, error)
+	// Colleague reads colleagueID as the header of staffID's thread with them
+	// shows the colleague. The caller has checked ReadColleague; CanPost is
+	// left false.
+	Colleague(ctx context.Context, colleagueID string) (ColleaguePeer, error)
+	// ColleagueThreads returns the Colleagues tab's rows for f: the caller's
+	// colleague threads, newest activity first, then, with a query, at most
+	// MaxCandidates colleagues to write to.
+	ColleagueThreads(ctx context.Context, f ColleagueFilter) ([]ColleagueThread, error)
+	// ColleaguePage reads one page of staffID's thread with colleagueID,
+	// empty when none exists yet.
+	ColleaguePage(ctx context.Context, staffID, colleagueID string, cursor Cursor) (Page, error)
+	// PostColleague is PostDirect for staffID's thread with colleagueID,
+	// judging the facts it reads in its transaction by Eligibility's
+	// colleague rules; the first post makes the thread with its pair
+	// ordered low-first.
+	PostColleague(ctx context.Context, staffID, colleagueID string, post Post) (Posted, error)
+	// MarkColleagueRead is MarkDirectRead for staffID's thread with
+	// colleagueID.
+	MarkColleagueRead(ctx context.Context, staffID, colleagueID string, mark ReadMark) (ReadState, error)
 
 	// StudentFacts reads what decides studentID's direct thread with
 	// teacherID.

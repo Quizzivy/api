@@ -1,6 +1,8 @@
 // Package application is the messaging context's use cases. On the staff side
 // (T-R7.10a): the Messages list, a direct thread with a student, a class's
-// announcement channel, posting in each, and the read pointer. On the student
+// announcement channel, posting in each, and the read pointer; F2 adds
+// threads between two staff members (T-F2.4), their list, a thread, its post
+// and its pointer, and the New message picker of students and colleagues. On the student
 // side (T-R7.10b): the student's Messages, a direct thread with a teacher,
 // which they post in as text, a class's channel, which they read only, and the
 // read pointer. Staff attach files to their posts (T-R7.11): an upload that
@@ -33,6 +35,7 @@ type Application struct {
 type Commands struct {
 	PostDirect       cqrs.CommandHandler[command.PostDirect, domain.Posted]
 	PostAnnouncement cqrs.CommandHandler[command.PostAnnouncement, domain.Posted]
+	PostColleague    cqrs.CommandHandler[command.PostColleague, domain.Posted]
 	MarkRead         cqrs.CommandHandler[command.MarkRead, cqrs.Nothing]
 
 	PostAsStudent     cqrs.CommandHandler[command.PostAsStudent, domain.StudentPosted]
@@ -49,6 +52,11 @@ type Queries struct {
 	StaffThreads      cqrs.QueryHandler[query.StaffThreads, []domain.StaffThread]
 	StaffDirectThread cqrs.QueryHandler[query.StaffDirectThread, query.DirectThread]
 	StaffClassThread  cqrs.QueryHandler[query.StaffClassThread, query.ClassThread]
+	StudentRecipients cqrs.QueryHandler[query.StudentRecipients, domain.Recipients]
+
+	ColleagueThreads    cqrs.QueryHandler[query.ColleagueThreads, []domain.ColleagueThread]
+	ColleagueThread     cqrs.QueryHandler[query.ColleagueThread, query.ColleagueDirect]
+	ColleagueRecipients cqrs.QueryHandler[query.ColleagueRecipients, domain.Recipients]
 
 	StudentThreads      cqrs.QueryHandler[query.StudentThreads, []domain.StudentThread]
 	StudentDirectThread cqrs.QueryHandler[query.StudentDirectThread, query.StudentDirect]
@@ -68,6 +76,7 @@ func New(repo domain.Repository) *Application {
 		Commands: Commands{
 			PostDirect:       command.PostDirectHandler{Service: service},
 			PostAnnouncement: command.PostAnnouncementHandler{Service: service},
+			PostColleague:    command.PostColleagueHandler{Service: service},
 			MarkRead:         command.MarkReadHandler{Service: service},
 
 			PostAsStudent:     command.PostAsStudentHandler{Service: service},
@@ -79,6 +88,11 @@ func New(repo domain.Repository) *Application {
 			StaffThreads:      query.StaffThreadsHandler{Service: service},
 			StaffDirectThread: query.StaffDirectThreadHandler{Service: service},
 			StaffClassThread:  query.StaffClassThreadHandler{Service: service},
+			StudentRecipients: query.StudentRecipientsHandler{Service: service},
+
+			ColleagueThreads:    query.ColleagueThreadsHandler{Service: service},
+			ColleagueThread:     query.ColleagueThreadHandler{Service: service},
+			ColleagueRecipients: query.ColleagueRecipientsHandler{Service: service},
 
 			StudentThreads:      query.StudentThreadsHandler{Service: service},
 			StudentDirectThread: query.StudentDirectThreadHandler{Service: service},

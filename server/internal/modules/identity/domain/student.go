@@ -13,7 +13,8 @@ type Student struct {
 	Email    string
 	FullName string
 	// CanMessage is whether the reader may write to the student in a direct
-	// thread: the messaging module's eligibility for a post (T-R7.10a).
+	// thread: the messaging module's eligibility for a post (T-R7.10a), true
+	// for any enabled student since F2.
 	CanMessage         bool
 	HasPassword        bool
 	LinkedProviders    []string

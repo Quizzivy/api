@@ -27,20 +27,30 @@ func contains(expr string, param int) string {
 }
 
 // The SQL over a student row u and the staff member in $1: the caller's
-// classes the student is in now, and whether the student was taught by the
-// caller and is in none of them now. The list's search is in $2 and
-// scope.all, which widens the channels only, in $3.
+// classes the student is in now; the student's other current classes, those
+// not archived that the caller does not teach (otherClassNames: names only,
+// never an id, so nothing opens a class outside the caller's scope); and
+// whether the student was taught by the caller and is in none of the
+// caller's classes now. The list's search is in $2 and scope.all, which
+// widens the channels only, in $3.
 const (
 	taughtNow = `SELECT c.id, c.name FROM app.class_members cm JOIN app.classes c ON c.id = cm.class_id AND c.teacher_id = $1::uuid
 	  WHERE cm.user_id = u.id`
-	classNames = `coalesce((SELECT array_agg(k.name ORDER BY app.immutable_unaccent(lower(k.name)), k.id) FROM (` + taughtNow + `) k), '{}')`
-	former     = `(EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = $1::uuid AND t.student_id = u.id)
+	otherNow = `SELECT c.id, c.name FROM app.class_members cm
+	  JOIN app.classes c ON c.id = cm.class_id AND c.archived_at IS NULL AND c.teacher_id IS DISTINCT FROM $1::uuid
+	  WHERE cm.user_id = u.id`
+	classNames      = `coalesce((SELECT array_agg(k.name ORDER BY app.immutable_unaccent(lower(k.name)), k.id) FROM (` + taughtNow + `) k), '{}')`
+	otherClassNames = `coalesce((SELECT array_agg(k.name ORDER BY app.immutable_unaccent(lower(k.name)), k.id) FROM (` + otherNow + `) k), '{}')`
+	former          = `(EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = $1::uuid AND t.student_id = u.id)
 	   AND NOT EXISTS (` + taughtNow + `))`
 )
 
+// studentMatches is the list's search over a student row u: their names, or
+// the name of one of the classes the row shows, the caller's or the
+// student's other current ones.
 func studentMatches(param int) string {
-	return fmt.Sprintf(`(%s OR %s OR EXISTS (SELECT 1 FROM (%s) k WHERE %s))`,
-		contains(`u.full_name`, param), contains(`coalesce(u.display_name, '')`, param), taughtNow, contains(`k.name`, param))
+	return fmt.Sprintf(`(%s OR %s OR EXISTS (SELECT 1 FROM (%s UNION ALL %s) k WHERE %s))`,
+		contains(`u.full_name`, param), contains(`coalesce(u.display_name, '')`, param), taughtNow, otherNow, contains(`k.name`, param))
 }
 
 // unread counts the messages of the conversation v that are past the pointer
@@ -57,7 +67,7 @@ const newest = `LEFT JOIN LATERAL (
 
 func channelRows() string {
 	return `
-	SELECT 'class', c.id::text, NULL::text, c.name, NULL::text, '{}'::text[], ` + activeStudents("c.id") + `,
+	SELECT 'class', c.id::text, NULL::text, c.name, NULL::text, '{}'::text[], '{}'::text[], ` + activeStudents("c.id") + `,
 	       false, false, v.last_message_at, last.body, last.original_filename, coalesce(last.mine, false),
 	       CASE WHEN v.id IS NULL THEN 0 ELSE ` + unread + ` END
 	  FROM app.classes c
@@ -69,7 +79,7 @@ func channelRows() string {
 
 func directRows() string {
 	return `
-	SELECT 'direct', NULL::text, u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + classNames + `, NULL::int,
+	SELECT 'direct', NULL::text, u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + classNames + `, ` + otherClassNames + `, NULL::int,
 	       ` + former + `, u.disabled_at IS NOT NULL, v.last_message_at, last.body, last.original_filename, coalesce(last.mine, false),
 	       ` + unread + `
 	  FROM app.conversations v
@@ -81,7 +91,7 @@ func directRows() string {
 
 func candidateRows() string {
 	return `
-	SELECT 'direct', NULL::text, u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + classNames + `, NULL::int,
+	SELECT 'direct', NULL::text, u.id::text, ` + nameOf("u") + `, u.avatar_key, ` + classNames + `, ` + otherClassNames + `, NULL::int,
 	       ` + former + `, false, NULL::timestamptz, NULL::text, NULL::text, false, 0
 	  FROM app.users u
 	 WHERE ` + visibility.CanMessage("u", 1) + `
@@ -96,8 +106,10 @@ func candidateRows() string {
 // threads, newest activity first, a channel nobody has posted in last by
 // name; then, with a query and a tab that lists direct threads, at most
 // MaxCandidates students the caller may write to and has no thread with, by
-// name. A query matches the class's name, or the student's names and the
-// names of the caller's classes the student is in, accent-insensitively.
+// name: any enabled student, in one of the caller's classes, in another
+// teacher's or in none (F2). A query matches the class's name, or the
+// student's names and the names of the classes the row shows (the caller's
+// and the student's other current ones), accent-insensitively.
 func (p *Postgres) Threads(ctx context.Context, f domain.ThreadFilter) ([]domain.StaffThread, error) {
 	query := strings.TrimSpace(f.Query)
 	args := []any{opt.String(f.ActorID), db.EscapeLike(query)}
@@ -113,7 +125,7 @@ func (p *Postgres) Threads(ctx context.Context, f domain.ThreadFilter) ([]domain
 	var out []domain.StaffThread
 	if len(parts) > 0 {
 		rows, err := db.QueryMany(ctx, p, `SELECT * FROM (`+strings.Join(parts, "\n	UNION ALL")+`
-		) row (kind, class_id, student_id, title, avatar_key, class_names, student_count, former, disabled, last_message_at, body, filename, mine, unread)
+		) row (kind, class_id, student_id, title, avatar_key, class_names, other_class_names, student_count, former, disabled, last_message_at, body, filename, mine, unread)
 		 ORDER BY row.last_message_at DESC NULLS LAST, `+folded("row.title")+`, coalesce(row.class_id, row.student_id)`, threadArgs, scanThread(false))
 		if err != nil {
 			return nil, fmt.Errorf("messaging: threads: %w", err)
@@ -137,7 +149,7 @@ func scanThread(candidate bool) func(pgx.Rows) (domain.StaffThread, error) {
 		var classID, studentID, body, filename *string
 		var at *time.Time
 		var mine bool
-		if err := rows.Scan(&kind, &classID, &studentID, &t.Title, &t.AvatarKey, &t.ClassNames, &t.StudentCount,
+		if err := rows.Scan(&kind, &classID, &studentID, &t.Title, &t.AvatarKey, &t.ClassNames, &t.OtherClassNames, &t.StudentCount,
 			&t.Former, &t.Disabled, &at, &body, &filename, &mine, &t.Unread); err != nil {
 			return domain.StaffThread{}, err
 		}
@@ -148,6 +160,9 @@ func scanThread(candidate bool) func(pgx.Rows) (domain.StaffThread, error) {
 		}
 		if t.ClassNames == nil {
 			t.ClassNames = []string{}
+		}
+		if t.OtherClassNames == nil {
+			t.OtherClassNames = []string{}
 		}
 		return t, nil
 	}
@@ -162,8 +177,9 @@ func deref(s *string) string {
 
 // Peer reads studentID as the header of staffID's thread with them shows the
 // student: the name, the photo key, the caller's classes the student is in
-// now, whether the student was taught by the caller and is in none of them
-// now, and whether the account is disabled.
+// now, the names of the student's other current classes, whether the student
+// was taught by the caller and is in none of their classes now, and whether
+// the account is disabled.
 func (p *Postgres) Peer(ctx context.Context, staffID, studentID string) (domain.Peer, error) {
 	var peer domain.Peer
 	var classes []byte
@@ -171,10 +187,10 @@ func (p *Postgres) Peer(ctx context.Context, staffID, studentID string) (domain.
 		SELECT u.id::text, `+nameOf("u")+`, u.avatar_key,
 		       coalesce((SELECT jsonb_agg(jsonb_build_object('id', k.id, 'name', k.name) ORDER BY app.immutable_unaccent(lower(k.name)), k.id)
 		                   FROM (`+taughtNow+`) k), '[]'::jsonb),
-		       `+former+`, u.disabled_at IS NOT NULL
+		       `+otherClassNames+`, `+former+`, u.disabled_at IS NOT NULL
 		  FROM app.users u
 		 WHERE u.id = $2::uuid`, opt.String(staffID), studentID).
-		Scan(&peer.ID, &peer.Name, &peer.AvatarKey, &classes, &peer.Former, &peer.Disabled)
+		Scan(&peer.ID, &peer.Name, &peer.AvatarKey, &classes, &peer.OtherClassNames, &peer.Former, &peer.Disabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Peer{}, domain.ErrNotFound
 	}
@@ -183,6 +199,9 @@ func (p *Postgres) Peer(ctx context.Context, staffID, studentID string) (domain.
 	}
 	if err := json.Unmarshal(classes, &peer.Classes); err != nil {
 		return domain.Peer{}, fmt.Errorf("messaging: peer classes: %w", err)
+	}
+	if peer.OtherClassNames == nil {
+		peer.OtherClassNames = []string{}
 	}
 	return peer, nil
 }

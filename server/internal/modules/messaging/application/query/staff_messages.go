@@ -10,8 +10,10 @@ import (
 
 // StaffDirectThread is one page of ActorID's direct thread with StudentID,
 // empty until the first post, and the student's flagged attempts on the
-// assignments Scope reaches. A student who is no messaging peer of the caller
-// answers domain.ErrNotFound, an admin's thread included.
+// assignments Scope reaches. The thread is always the caller's own: a staff
+// member who does not teach the student reads their own thread with them,
+// never the teacher's (D17). An account that is no messaging peer of the
+// caller answers domain.ErrNotFound.
 type StaffDirectThread struct {
 	ActorID   string
 	Scope     access.Scope

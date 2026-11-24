@@ -11,9 +11,9 @@ import (
 
 // StaffAttachmentURL mints the download URL of file ID for a staff member:
 // one they uploaded and have not sent, or one a message holds in their direct
-// thread or in a class channel their scope reaches. Anyone else, an admin
-// outside the thread included, gets domain.ErrAttachmentNotFound, as for a
-// missing id.
+// thread, in a colleague thread they are one of the pair of, or in a class
+// channel their scope reaches. Anyone else, an admin outside the thread
+// included, gets domain.ErrAttachmentNotFound, as for a missing id.
 type StaffAttachmentURL struct {
 	ReaderID string
 	Scope    access.Scope
@@ -22,7 +22,8 @@ type StaffAttachmentURL struct {
 
 // StudentAttachmentURL mints the download URL of file ID for a student: one a
 // message holds in their direct thread, or in the channel of a class they are
-// in now. Students upload nothing, so an unsent file is never theirs.
+// in now. Students upload nothing, so an unsent file is never theirs, and a
+// colleague thread's file never is either.
 type StudentAttachmentURL struct {
 	StudentID string
 	ID        string
@@ -34,10 +35,15 @@ type StaffAttachmentURLHandler struct {
 
 func (s StaffAttachmentURLHandler) Handle(ctx context.Context, q StaffAttachmentURL) (domain.AttachmentURL, error) {
 	return attachmentURL(ctx, s.Service, q.ReaderID, q.ID, func(t domain.AttachmentThread) (bool, error) {
-		if t.Kind == domain.KindDirect {
+		switch t.Kind {
+		case domain.KindDirect:
 			return t.StaffID == q.ReaderID, nil
+		case domain.KindColleague:
+			return t.InPair(q.ReaderID), nil
+		case domain.KindClass:
+			return found(s.Repo.Channel(ctx, q.Scope, t.ClassID))
 		}
-		return found(s.Repo.Channel(ctx, q.Scope, t.ClassID))
+		return false, nil
 	})
 }
 
@@ -47,10 +53,13 @@ type StudentAttachmentURLHandler struct {
 
 func (s StudentAttachmentURLHandler) Handle(ctx context.Context, q StudentAttachmentURL) (domain.AttachmentURL, error) {
 	return attachmentURL(ctx, s.Service, q.StudentID, q.ID, func(t domain.AttachmentThread) (bool, error) {
-		if t.Kind == domain.KindDirect {
+		switch t.Kind {
+		case domain.KindDirect:
 			return t.StudentID == q.StudentID, nil
+		case domain.KindClass:
+			return found(s.Repo.StudentChannel(ctx, q.StudentID, t.ClassID))
 		}
-		return found(s.Repo.StudentChannel(ctx, q.StudentID, t.ClassID))
+		return false, nil
 	})
 }
 

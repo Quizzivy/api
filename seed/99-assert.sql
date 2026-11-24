@@ -841,3 +841,118 @@ BEGIN
 
   RAISE NOTICE 'seed: timetable holds';
 END $$;
+
+-- 14's colleague thread and student in no class (F2, T-F2.9), and the F2 live spec's three
+-- people: Lan and Minh's one thread, stored low-first, written only by the pair as posting
+-- writes it, holding Minh's PDF as the upload records it, and nothing unread on either side,
+-- so the spec's first post makes the other's count exactly one; Hồ Ngọc Diệp, a student in
+-- no class, tied to no one and with no thread, whom only F2's rule lets staff write to; and
+-- Bùi Ngọc Mai, in Lan's IELTS 6.5 Evening and never taught by the Admin, whose thread with
+-- the Admin reads "Teacher at the centre". Every id 14 fixes starts
+-- 01935000-0000-7000-8000-00000140.
+DO $$
+DECLARE
+  lan constant uuid := '01935000-0000-7000-8000-000000000601';
+  minh constant uuid := '01935000-0000-7000-8000-000000000602';
+  admin constant uuid := '01935000-0000-7000-8000-0000000000a1';
+  diep constant uuid := '01935000-0000-7000-8000-000001400101';
+  mai constant uuid := '01935000-0000-7000-8000-000000800109';
+  thread constant uuid := '01935000-0000-7000-8000-000001400201';
+  file constant uuid := '01935000-0000-7000-8000-000001400301';
+  bad text;
+  found integer;
+BEGIN
+  -- The pair: two enabled teachers who sign in with a password and open Messages.
+  SELECT count(*) INTO found
+    FROM app.users u JOIN app.roles r ON r.id = u.role_id
+   WHERE u.id IN (lan, minh) AND r.builtin_key = 'teacher' AND u.disabled_at IS NULL
+     AND u.password_hash IS NOT NULL AND NOT u.must_change_password;
+  IF found <> 2 THEN
+    RAISE EXCEPTION 'seed: expected Lan and Minh to be enabled teachers with a password, found %', found;
+  END IF;
+
+  -- Their one thread, low id first, as the first post's ON CONFLICT finds it.
+  SELECT count(*) INTO found
+    FROM app.conversations v
+   WHERE v.kind = 'colleague' AND least(lan, minh) IN (v.colleague_low_id, v.colleague_high_id)
+     AND greatest(lan, minh) IN (v.colleague_low_id, v.colleague_high_id);
+  IF found <> 1 OR NOT EXISTS (
+       SELECT 1 FROM app.conversations v
+        WHERE v.id = thread AND v.kind = 'colleague' AND v.colleague_low_id = lan AND v.colleague_high_id = minh) THEN
+    RAISE EXCEPTION 'seed: expected one colleague thread % of Lan (low) and Minh (high), found %', thread, found;
+  END IF;
+
+  -- Shaped as posting makes it: both write, only they do, last_message_at is the newest
+  -- post, ids order the posts as their times do.
+  IF (SELECT count(DISTINCT m.sender_id) FROM app.messages m WHERE m.conversation_id = thread) <> 2
+     OR EXISTS (SELECT 1 FROM app.messages m WHERE m.conversation_id = thread AND m.sender_id <> ALL (ARRAY[lan, minh]))
+     OR (SELECT v.last_message_at FROM app.conversations v WHERE v.id = thread)
+        IS DISTINCT FROM (SELECT max(m.created_at) FROM app.messages m WHERE m.conversation_id = thread)
+     OR EXISTS (SELECT 1 FROM app.messages a JOIN app.messages b ON b.conversation_id = a.conversation_id
+                 WHERE a.conversation_id = thread AND a.id < b.id AND a.created_at >= b.created_at) THEN
+    RAISE EXCEPTION 'seed: colleague thread % not shaped as posting makes it', thread;
+  END IF;
+
+  -- The PDF: a message of Minh's holds it, he uploaded it before he sent it, and the row is
+  -- the upload's: its key, type, and a size and checksum the stored bytes would match.
+  IF NOT EXISTS (
+       SELECT 1 FROM app.message_attachments a
+         JOIN app.messages m ON m.attachment_id = a.id AND m.conversation_id = thread AND m.sender_id = a.uploaded_by
+        WHERE a.id = file AND a.uploaded_by = minh AND a.mime_type = 'application/pdf'
+          AND a.storage_key = 'messages/' || a.id || '.pdf' AND a.original_filename LIKE '%.pdf'
+          AND a.bytes = 672 AND encode(a.checksum_sha256, 'hex') = '8a7efad3855cb3f59ba0a3aa5b38b5021beced5e1bed59364996bf4ed07bbbc9'
+          AND a.created_at <= m.created_at) THEN
+    RAISE EXCEPTION 'seed: no PDF % of Minh''s in his thread with Lan, as the upload records it', file;
+  END IF;
+
+  -- Nothing unread on either side, and each pointer names a message of the thread.
+  SELECT string_agg(reader.id::text, ', ') INTO bad
+    FROM unnest(ARRAY[lan, minh]) AS reader(id)
+   WHERE NOT EXISTS (SELECT 1 FROM app.conversation_reads r JOIN app.messages p ON p.id = r.last_read_message_id AND p.conversation_id = thread
+                      WHERE r.conversation_id = thread AND r.user_id = reader.id)
+      OR EXISTS (SELECT 1 FROM app.messages m
+                  WHERE m.conversation_id = thread AND m.sender_id <> reader.id
+                    AND m.id > coalesce((SELECT r.last_read_message_id FROM app.conversation_reads r
+                                          WHERE r.conversation_id = thread AND r.user_id = reader.id),
+                                        '00000000-0000-0000-0000-000000000000'::uuid));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'seed: unread in the colleague thread for %', bad;
+  END IF;
+
+  -- Diệp: an enabled student who signs in with a password, in no class (archived or not),
+  -- created by no one, tied to no one, in no thread.
+  IF NOT EXISTS (
+       SELECT 1 FROM app.users u JOIN app.roles r ON r.id = u.role_id
+        WHERE u.id = diep AND u.email = 'diep.ho@quizzivy.com' AND r.builtin_key = 'student'
+          AND u.disabled_at IS NULL AND u.password_hash IS NOT NULL AND NOT u.must_change_password
+          AND u.created_by IS NULL) THEN
+    RAISE EXCEPTION 'seed: diep.ho@quizzivy.com is not an enabled student with a password, created by no one';
+  END IF;
+  IF EXISTS (SELECT 1 FROM app.class_members WHERE user_id = diep)
+     OR EXISTS (SELECT 1 FROM app.messaging_ties WHERE student_id = diep)
+     OR EXISTS (SELECT 1 FROM app.conversations WHERE student_id = diep)
+     OR EXISTS (SELECT 1 FROM app.messages WHERE sender_id = diep) THEN
+    RAISE EXCEPTION 'seed: Diệp is in a class, tied to someone or in a thread';
+  END IF;
+
+  -- Mai: in Lan's IELTS 6.5 Evening and tied to her, never taught by the Admin (no tie, no
+  -- class of the Admin's, no thread), so a post of the Admin's to her is the Admin's first
+  -- and her side reads "Teacher at the centre".
+  IF NOT EXISTS (
+       SELECT 1 FROM app.users u JOIN app.roles r ON r.id = u.role_id
+         JOIN app.class_members m ON m.user_id = u.id
+         JOIN app.classes c ON c.id = m.class_id AND c.teacher_id = lan AND c.archived_at IS NULL
+        WHERE u.id = mai AND u.email = 'ngocmai.bui@quizzivy.com' AND r.builtin_key = 'student'
+          AND u.disabled_at IS NULL AND u.password_hash IS NOT NULL AND NOT u.must_change_password
+          AND EXISTS (SELECT 1 FROM app.messaging_ties t WHERE t.staff_id = lan AND t.student_id = u.id)) THEN
+    RAISE EXCEPTION 'seed: ngocmai.bui@quizzivy.com is not an enabled student of Lan''s class with a password';
+  END IF;
+  IF EXISTS (SELECT 1 FROM app.messaging_ties WHERE staff_id = admin AND student_id = mai)
+     OR EXISTS (SELECT 1 FROM app.class_members m JOIN app.classes c ON c.id = m.class_id
+                 WHERE m.user_id = mai AND c.teacher_id = admin)
+     OR EXISTS (SELECT 1 FROM app.conversations WHERE kind = 'direct' AND staff_id = admin AND student_id = mai) THEN
+    RAISE EXCEPTION 'seed: the Admin has taught Mai or has a thread with her';
+  END IF;
+
+  RAISE NOTICE 'seed: colleague thread holds';
+END $$;
